@@ -505,8 +505,14 @@ Flyout grouping + options bar + Shift-cycle land alongside as the strip matures.
 - **Surface-outdated freeze**: opening an image left the canvas blank until a manual maximize. Cause: the file dialog occluding the window marked the wgpu surface `Outdated`; `RenderFrame` silently `return`ed every frame forever. Fix: on `SurfaceGetCurrentTextureStatus.Outdated`/`Lost`, call `Configure(_width,_height)` and recover next frame.
 - **Still open (large-doc paint)**: each brush *move* still recomposites the whole document (~8ms @ 3.6MP → ~38ms @ 17MP). Real fix = composite caching (cache backdrop below active layer, re-blend only active+dab) or region compositing. Acceptable now at 60fps base; revisit for very large docs.
 
+### Cross-platform (in progress)
+- **Platform backend seam (DONE)**: `Sable.Canvas/Platform/IPlatformBackend` is the single seam for OS-specific canvas code — `CreateSurface(handle)` (native window → wgpu surface), `CreateInput()` (native event source), `RaiseTimerResolution()`. `CanvasPlatform.Current` selects once: `WindowsBackend` (real) vs `UnsupportedBackend` (Linux/macOS stub — surface throws `PlatformNotSupportedException`, caught in `InitGpu` → blank canvas, no crash; `NullInputSource` = no input; shared engine/UI still run). **Everything else (render loop, compositor, viewport, tool logic, coordinate mapping) is platform-agnostic** — adding an OS = one new backend.
+- **Input seam (DONE)**: mouse/keys go through `IInputSource` → shared `ICanvasInputSink` (normalized surface coords + `CanvasMods`). `WindowsInputSource` = the WndProc subclass (decode-only); ALL tool logic moved to `GpuSurfaceControl`'s sink impl (`PointerDown/Move/Up/Wheel`), identical on every OS. No Win32 P/Invoke left in `GpuSurfaceControl` — only in `Platform/Windows*`.
+- **Selection combine modes (DONE)**: Shift=add / Alt=subtract / Shift+Alt=intersect / none=replace, across rect/ellipse/lasso/wand (`Selections.Combine`, `Document.SnapshotSelectionMask`; 66 tests).
+- ⬜ Real Linux (Xlib/Wayland) + macOS (CAMetalLayer) backends: implement `IPlatformBackend.CreateSurface` (build the OS wgpu descriptor from Avalonia's handle) + an `IInputSource` for that OS. The shared canvas/tool code is ready.
+
 ### Known gaps / debt
-- Windows-only (Linux Xlib/Wayland + macOS CAMetalLayer surfaces + input ⬜). M3 AI ⬜. HiDPI assumes 1:1. Doc-swap leaks old GPU layer buffers. Preview forces full recomposite each hover-frame. No ICC/16-bit-export, no history panel/non-linear undo UI, no `Dock.Avalonia`.
+- M3 AI ⬜. HiDPI assumes 1:1. Doc-swap leaks old GPU layer buffers. No ICC/16-bit-export, no history panel/non-linear undo UI, no `Dock.Avalonia`. Selection polish remaining: feather, serialize to `.sable`, mask-edge overlay retry. Large-doc paint still full-recomposites per brush move (composite-cache follow-up).
 
 ### Key files (orientation)
 - Compositor: `src/Sable.Engine/Compositing/GpuCompositor.cs` + `src/Sable.Gpu/Shaders/*.wgsl` (composite/adjust/blur/stamp/present_copy/fullscreen_blit).

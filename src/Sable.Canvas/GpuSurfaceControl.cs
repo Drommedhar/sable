@@ -76,14 +76,9 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _zoom = 1.0; _panX = 0; _panY = 0;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint GetModuleHandleW(string? lpModuleName);
-
-    // Windows default timer granularity is ~15.6ms, so a 16ms DispatcherTimer
-    // quantizes to ~31ms (~33fps). Raise resolution to 1ms while the canvas lives.
-    [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint uPeriod);
-    [DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint uPeriod);
-    private bool _timerPeriodSet;
+    // OS-specific canvas bits (surface creation, timer resolution) live behind the backend;
+    // everything else in this control is shared across platforms (PLAN §2.1/§2.2).
+    private IDisposable? _timerResToken;
 
     /// <summary>The document currently shown. Set to swap what the canvas renders.</summary>
     public Document? Document
@@ -108,17 +103,19 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         var handle = base.CreateNativeControlCore(parent);
         _hwnd = handle.Handle;
 
-        if (OperatingSystem.IsWindows())
-        {
-            InitGpu();
-            HookInput();   // subclass the child HWND for mouse (airspace workaround)
-            _timerPeriodSet = timeBeginPeriod(1) == 0;   // 1ms timer resolution
-            // Render priority (not the default Background) so the present tick isn't
-            // starved behind input/layout — that was pinning the canvas at ~30fps.
-            _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(8),
-                DispatcherPriority.Render, (_, _) => RenderFrame());
-            _timer.Start();
-        }
+        var backend = Platform.CanvasPlatform.Current;
+        _timerResToken = backend.RaiseTimerResolution();
+        InitGpu();   // creates the wgpu surface via the OS backend (no-op surface where unsupported)
+
+        // OS input source feeds the shared ICanvasInputSink (this control); tool logic is OS-agnostic.
+        _input = backend.CreateInput();
+        _input.Attach(_hwnd, this);
+
+        // Render priority (not the default Background) so the present tick isn't starved
+        // behind input/layout — that was pinning the canvas at ~30fps.
+        _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(8),
+            DispatcherPriority.Render, (_, _) => RenderFrame());
+        _timer.Start();
 
         return handle;
     }
@@ -127,8 +124,10 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     {
         _timer?.Stop();
         _timer = null;
-        if (_timerPeriodSet) { timeEndPeriod(1); _timerPeriodSet = false; }
-        UnhookInput();
+        _timerResToken?.Dispose();
+        _timerResToken = null;
+        _input?.Dispose();
+        _input = null;
         _compositor?.Dispose();
         _compositor = null;
         _blitter?.Dispose();
@@ -144,17 +143,18 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _gpu = new WgpuDevice();
         var api = _gpu.Api;
 
-        // --- surface from Win32 HWND ---
-        var hinstance = GetModuleHandleW(null);
-        var fromHwnd = new SurfaceDescriptorFromWindowsHWND
+        // --- surface via the OS backend (Win32 HWND / Xlib / Metal) ---
+        try
         {
-            Chain = new ChainedStruct { SType = SType.SurfaceDescriptorFromWindowsHwnd },
-            Hinstance = (void*)hinstance,
-            Hwnd = (void*)_hwnd
-        };
-        var surfDesc = new SurfaceDescriptor { NextInChain = (ChainedStruct*)&fromHwnd };
-        _surface = api.InstanceCreateSurface(_gpu.Instance, in surfDesc);
-        if (_surface is null) throw new InvalidOperationException("wgpu: surface creation from HWND failed.");
+            _surface = Platform.CanvasPlatform.Current.CreateSurface(_gpu, _hwnd);
+        }
+        catch (PlatformNotSupportedException ex)
+        {
+            // shared engine/UI still run; the GPU canvas just stays blank on this OS.
+            System.Diagnostics.Debug.WriteLine($"[canvas] {ex.Message}");
+            _surface = null;
+            return;
+        }
 
         // --- pick a supported format ---
         var caps = new SurfaceCapabilities();

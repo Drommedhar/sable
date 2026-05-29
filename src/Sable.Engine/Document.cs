@@ -33,6 +33,14 @@ public sealed class Document
     /// <summary>Clear any active selection (rect + mask).</summary>
     public void ClearSelection() { Selection = null; SelectionMask = null; }
 
+    /// <summary>The current selection as a coverage mask (rasterizing a plain rect), or null if none.</summary>
+    public byte[]? SnapshotSelectionMask()
+    {
+        if (SelectionMask is not null) return (byte[])SelectionMask.Clone();
+        if (Selection is { } r && r.W > 0 && r.H > 0) return Selections.Rect(Width, Height, r);
+        return null;
+    }
+
     /// <summary>Set a non-rectangular selection from a coverage mask (computes its bounds).</summary>
     public void SetMaskSelection(byte[] mask)
     {

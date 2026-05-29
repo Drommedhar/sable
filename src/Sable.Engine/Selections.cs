@@ -1,5 +1,8 @@
 namespace Sable.Engine;
 
+/// <summary>How a newly-drawn selection combines with the existing one (PLAN §5A.5).</summary>
+public enum SelMode { Replace, Add, Subtract, Intersect }
+
 /// <summary>
 /// Builders for a per-pixel selection coverage mask (doc-sized, 1 byte/pixel,
 /// 255 = fully selected, 0 = outside). Non-rectangular selections (ellipse, lasso,
@@ -98,6 +101,36 @@ public static class Selections
             st.Push((x, y - 1)); st.Push((x, y + 1));
         }
         return m;
+    }
+
+    /// <summary>Coverage mask filled inside an axis-aligned rectangle (for combining a rect marquee).</summary>
+    public static byte[] Rect(int docW, int docH, SelRect r)
+    {
+        var m = new byte[docW * docH];
+        int x0 = Math.Max(0, r.X), x1 = Math.Min(docW - 1, r.Right - 1);
+        int y0 = Math.Max(0, r.Y), y1 = Math.Min(docH - 1, r.Bottom - 1);
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) m[y * docW + x] = 255;
+        return m;
+    }
+
+    /// <summary>Combine two coverage masks per <paramref name="mode"/> (element-wise; preserves soft edges).</summary>
+    public static byte[] Combine(byte[] a, byte[] b, SelMode mode)
+    {
+        int n = Math.Min(a.Length, b.Length);
+        var r = new byte[a.Length];
+        for (int i = 0; i < n; i++)
+        {
+            byte av = a[i], bv = b[i];
+            r[i] = mode switch
+            {
+                SelMode.Add => av >= bv ? av : bv,        // union (max)
+                SelMode.Subtract => bv > 0 ? (byte)0 : av, // remove b from a
+                SelMode.Intersect => av <= bv ? av : bv,  // intersection (min)
+                _ => bv                                    // Replace
+            };
+        }
+        return r;
     }
 
     /// <summary>Tight bounding rect of the set pixels (for the overlay + dirty bounds), or empty.</summary>

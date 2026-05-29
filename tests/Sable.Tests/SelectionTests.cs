@@ -79,6 +79,55 @@ public class SelectionTests
     }
 
     [Fact]
+    public void Rect_FillsInsideOnly()
+    {
+        var m = Selections.Rect(50, 50, new SelRect(10, 10, 20, 20));
+        Assert.Equal(255, m[15 * 50 + 15]);   // inside
+        Assert.Equal(0, m[5 * 50 + 5]);        // outside
+        Assert.Equal(0, m[35 * 50 + 35]);      // past the rect
+    }
+
+    [Fact]
+    public void Combine_Add_IsUnion()
+    {
+        var a = new byte[] { 255, 0, 0, 100 };
+        var b = new byte[] { 0, 255, 0, 200 };
+        var r = Selections.Combine(a, b, SelMode.Add);
+        Assert.Equal(new byte[] { 255, 255, 0, 200 }, r);   // max per element
+    }
+
+    [Fact]
+    public void Combine_Subtract_RemovesB()
+    {
+        var a = new byte[] { 255, 255, 0, 255 };
+        var b = new byte[] { 0, 255, 0, 0 };
+        var r = Selections.Combine(a, b, SelMode.Subtract);
+        Assert.Equal(new byte[] { 255, 0, 0, 255 }, r);     // cleared where b>0
+    }
+
+    [Fact]
+    public void Combine_Intersect_IsMin()
+    {
+        var a = new byte[] { 255, 255, 0, 100 };
+        var b = new byte[] { 255, 0, 255, 200 };
+        var r = Selections.Combine(a, b, SelMode.Intersect);
+        Assert.Equal(new byte[] { 255, 0, 0, 100 }, r);     // min per element
+    }
+
+    [Fact]
+    public void SnapshotSelectionMask_RasterizesRect_NullWhenEmpty()
+    {
+        var doc = new Document(32, 32);
+        Assert.Null(doc.SnapshotSelectionMask());            // no selection
+
+        doc.Selection = new SelRect(4, 4, 8, 8);
+        var snap = doc.SnapshotSelectionMask();
+        Assert.NotNull(snap);
+        Assert.Equal(255, snap![6 * 32 + 6]);                // inside rect
+        Assert.Equal(0, snap[0]);                            // outside
+    }
+
+    [Fact]
     public void BrushClipMask_RestrictsPaintToMaskedPixels()
     {
         int w = 16, h = 16;

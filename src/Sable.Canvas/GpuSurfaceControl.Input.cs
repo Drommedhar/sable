@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using Sable.Canvas.Platform;
 using Sable.Core.Undo;
 using Sable.Engine;
 using Sable.Engine.Commands;
@@ -8,28 +8,16 @@ using Sable.Tools;
 namespace Sable.Canvas;
 
 /// <summary>
-/// Mouse input for the embedded GPU surface. The native child window receives OS
-/// mouse messages directly (Avalonia can't see them over the surface — airspace),
-/// so we subclass its WndProc, map surface pixels → document pixels via the inverse
-/// viewport transform, and drive the brush. Windows-only; other platforms get
-/// their own input path with the cross-platform surface work.
+/// Canvas input. The OS-specific event source (<see cref="IInputSource"/>) decodes
+/// native mouse/keys into the shared <see cref="ICanvasInputSink"/> callbacks below;
+/// ALL the tool logic here is platform-agnostic, working in surface pixels (mapped to
+/// document space via the inverse viewport transform). A new OS only needs a new
+/// <see cref="IInputSource"/> — none of this file changes.
 /// </summary>
-public sealed unsafe partial class GpuSurfaceControl
+public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 {
-    private const int GWLP_WNDPROC = -4;
-    private const uint WM_LBUTTONDOWN = 0x0201;
-    private const uint WM_LBUTTONUP = 0x0202;
-    private const uint WM_MOUSEMOVE = 0x0200;
-    private const uint WM_MOUSEWHEEL = 0x020A;
-    private const uint WM_MBUTTONDOWN = 0x0207;
-    private const uint WM_MBUTTONUP = 0x0208;
-    private const uint WM_MOUSEACTIVATE = 0x0021;
-    private const nint MA_NOACTIVATE = 3;
+    private IInputSource? _input;
 
-    private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
-
-    private WndProcDelegate? _wndProc;
-    private nint _origWndProc;
     private bool _painting;
     private double _lastDocX, _lastDocY;
     private StrokeSession? _session;
@@ -81,8 +69,124 @@ public sealed unsafe partial class GpuSurfaceControl
     /// <summary>Raised (R,G,B) when the eyedropper (Alt+click) samples a color.</summary>
     public Action<byte, byte, byte>? ColorPicked { get; set; }
 
-    [DllImport("user32.dll")] private static extern short GetKeyState(int vKey);
-    private static bool AltDown => (GetKeyState(0x12) & 0x8000) != 0;   // VK_MENU
+    /// <summary>Raised with the undoable command when a brush gesture completes.</summary>
+    public Action<IUndoableCommand>? CommandProduced { get; set; }
+
+    // --- ICanvasInputSink: OS-agnostic pointer handlers (surface pixels) ----------
+
+    void ICanvasInputSink.PointerDown(CanvasButton button, double sx, double sy, CanvasMods mods)
+    {
+        _lastMouseX = sx; _lastMouseY = sy;
+        if (button == CanvasButton.Middle) { StartPan(sx, sy); return; }   // middle-drag = pan
+        if (button == CanvasButton.Left) OnLeftDown(sx, sy, mods);
+    }
+
+    void ICanvasInputSink.PointerUp(CanvasButton button, double sx, double sy, CanvasMods mods)
+    {
+        _lastMouseX = sx; _lastMouseY = sy;
+        if (button == CanvasButton.Middle)
+        {
+            if (_panningMouse) { _panningMouse = false; _input?.ReleaseCapture(); }
+            return;
+        }
+        if (button == CanvasButton.Left) OnLeftUp();
+    }
+
+    void ICanvasInputSink.Wheel(double sx, double sy, int delta, CanvasMods mods)
+    {
+        _lastMouseX = sx; _lastMouseY = sy;
+        ZoomAt(delta > 0 ? 1.1 : 1.0 / 1.1, sx, sy);
+    }
+
+    void ICanvasInputSink.PointerMove(double sx, double sy, CanvasMods mods)
+    {
+        _lastMouseX = sx; _lastMouseY = sy;
+
+        if (_painting)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            _session?.StrokeTo(_lastDocX, _lastDocY, dx, dy);
+            _lastDocX = dx; _lastDocY = dy;
+        }
+        else if (_moving && ActiveLayer is { } al)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            al.OffsetX = _moveOrigX + (int)Math.Round(dx - _moveStartX);
+            al.OffsetY = _moveOrigY + (int)Math.Round(dy - _moveStartY);
+            _doc?.MarkStructureChanged();   // recomposite (no re-upload; pixels unchanged)
+        }
+        else if (_transforming)
+        {
+            TransformDrag(sx, sy);
+        }
+        else if (_selecting && _doc is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            _doc.Selection = SelRect.FromCorners(_selStartX, _selStartY, dx, dy, _doc.Width, _doc.Height);
+        }
+        else if (_lassoing && _doc is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            _lassoPts.Add((dx, dy));
+            _doc.Selection = LassoBounds();   // live bbox while drawing
+        }
+        else if (_selResizing && _doc is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            double l = _selL0, r = _selR0, t = _selT0, b = _selB0;
+            if (_hL) l = dx;
+            if (_hR) r = dx;
+            if (_hT) t = dy;
+            if (_hB) b = dy;
+            _doc.Selection = SelRect.FromCorners(l, t, r, b, _doc.Width, _doc.Height);
+        }
+        else if (_selMoving && _doc is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            double w = _selR0 - _selL0, h = _selB0 - _selT0;
+            double nl = Math.Clamp(_selL0 + (dx - _selMoveStartX), 0, _doc.Width - w);
+            double nt = Math.Clamp(_selT0 + (dy - _selMoveStartY), 0, _doc.Height - h);
+            _doc.Selection = SelRect.FromCorners(nl, nt, nl + w, nt + h, _doc.Width, _doc.Height);
+        }
+        else if (_panningMouse)
+        {
+            PanBy(sx - _lastPanX, sy - _lastPanY);
+            _lastPanX = (int)sx; _lastPanY = (int)sy;
+        }
+    }
+
+    // selection combine: Shift=add, Alt=subtract, Shift+Alt=intersect, none=replace.
+    private SelMode _selMode = SelMode.Replace;
+    private byte[]? _baseSelMask;   // existing selection snapshot at gesture start (for combine)
+
+    /// <summary>Read the combine mode from modifiers and snapshot the current selection.</summary>
+    private void CaptureSelMode(CanvasMods mods)
+    {
+        bool shift = mods.HasFlag(CanvasMods.Shift), alt = mods.HasFlag(CanvasMods.Alt);
+        _selMode = (shift, alt) switch
+        {
+            (true, true) => SelMode.Intersect,
+            (true, false) => SelMode.Add,
+            (false, true) => SelMode.Subtract,
+            _ => SelMode.Replace
+        };
+        _baseSelMask = _selMode == SelMode.Replace ? null : _doc?.SnapshotSelectionMask();
+    }
+
+    /// <summary>Commit a freshly-drawn coverage mask, combined with the gesture-start selection.</summary>
+    private void ApplyMask(byte[] newMask)
+    {
+        if (_doc is null) return;
+        if (_selMode == SelMode.Replace) { _doc.SetMaskSelection(newMask); return; }
+        if (_baseSelMask is null)
+        {
+            if (_selMode == SelMode.Add) _doc.SetMaskSelection(newMask);
+            else _doc.ClearSelection();   // subtract/intersect from nothing = nothing
+            return;
+        }
+        _doc.SetMaskSelection(Selections.Combine(_baseSelMask, newMask, _selMode));
+        _baseSelMask = null;
+    }
 
     private StrokeSession? CreateSession()
     {
@@ -105,145 +209,12 @@ public sealed unsafe partial class GpuSurfaceControl
             tiles => layer.MarkTilesDirty(tiles));
     }
 
-    /// <summary>Raised with the undoable command when a brush gesture completes.</summary>
-    public Action<IUndoableCommand>? CommandProduced { get; set; }
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
-    private static extern nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong);
-    [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
-    private static extern nint CallWindowProc(nint prev, nint hWnd, uint msg, nint wParam, nint lParam);
-    [DllImport("user32.dll")] private static extern nint SetCapture(nint hWnd);
-    [DllImport("user32.dll")] private static extern bool ReleaseCapture();
-
-    private void HookInput()
+    private void OnLeftDown(double sx, double sy, CanvasMods mods)
     {
-        if (_hwnd == 0) return;
-        _wndProc = WndProc;
-        _origWndProc = SetWindowLongPtr(_hwnd, GWLP_WNDPROC,
-            Marshal.GetFunctionPointerForDelegate(_wndProc));
-    }
-
-    private void UnhookInput()
-    {
-        if (_hwnd != 0 && _origWndProc != 0)
-            SetWindowLongPtr(_hwnd, GWLP_WNDPROC, _origWndProc);
-        _origWndProc = 0;
-        _wndProc = null;
-    }
-
-    private nint WndProc(nint hWnd, uint msg, nint wParam, nint lParam)
-    {
-        // don't steal keyboard focus from the Avalonia window when the canvas is clicked,
-        // so window shortcuts (tool keys, Ctrl+Z/S/O) keep working
-        if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
-
-        if (msg == WM_MOUSEMOVE)
-        {
-            int lp = (int)lParam;
-            _lastMouseX = (short)(lp & 0xFFFF);
-            _lastMouseY = (short)((lp >> 16) & 0xFFFF);
-        }
-
-        switch (msg)
-        {
-            case WM_LBUTTONDOWN:
-                OnLeftDown(hWnd, lParam);
-                break;
-
-            case WM_MOUSEMOVE when _painting:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                _session?.StrokeTo(_lastDocX, _lastDocY, dx, dy);
-                _lastDocX = dx; _lastDocY = dy;
-                break;
-            }
-            case WM_MOUSEMOVE when _moving && ActiveLayer is not null:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                ActiveLayer.OffsetX = _moveOrigX + (int)System.Math.Round(dx - _moveStartX);
-                ActiveLayer.OffsetY = _moveOrigY + (int)System.Math.Round(dy - _moveStartY);
-                _doc?.MarkStructureChanged();   // recomposite (no re-upload; pixels unchanged)
-                break;
-            }
-            case WM_MOUSEMOVE when _transforming:
-                TransformDrag(lParam);
-                break;
-            case WM_MOUSEMOVE when _selecting && _doc is not null:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                _doc.Selection = SelRect.FromCorners(_selStartX, _selStartY, dx, dy, _doc.Width, _doc.Height);
-                break;
-            }
-            case WM_MOUSEMOVE when _lassoing && _doc is not null:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                _lassoPts.Add((dx, dy));
-                _doc.Selection = LassoBounds();   // live bbox while drawing
-                break;
-            }
-            case WM_MOUSEMOVE when _selResizing && _doc is not null:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                double l = _selL0, r = _selR0, t = _selT0, b = _selB0;
-                if (_hL) l = dx;
-                if (_hR) r = dx;
-                if (_hT) t = dy;
-                if (_hB) b = dy;
-                _doc.Selection = SelRect.FromCorners(l, t, r, b, _doc.Width, _doc.Height);
-                break;
-            }
-            case WM_MOUSEMOVE when _selMoving && _doc is not null:
-            {
-                var (dx, dy) = MapToDoc(lParam);
-                double w = _selR0 - _selL0, h = _selB0 - _selT0;
-                double nl = Math.Clamp(_selL0 + (dx - _selMoveStartX), 0, _doc.Width - w);
-                double nt = Math.Clamp(_selT0 + (dy - _selMoveStartY), 0, _doc.Height - h);
-                _doc.Selection = SelRect.FromCorners(nl, nt, nl + w, nt + h, _doc.Width, _doc.Height);
-                break;
-            }
-            case WM_MOUSEMOVE when _panningMouse:
-            {
-                int lp = (int)lParam;
-                short x = (short)(lp & 0xFFFF), y = (short)((lp >> 16) & 0xFFFF);
-                PanBy(x - _lastPanX, y - _lastPanY);
-                _lastPanX = x; _lastPanY = y;
-                break;
-            }
-            case WM_LBUTTONUP:
-                OnLeftUp();
-                break;
-
-            // middle-drag = pan
-            case WM_MBUTTONDOWN:
-            {
-                int lp = (int)lParam;
-                _lastPanX = (short)(lp & 0xFFFF);
-                _lastPanY = (short)((lp >> 16) & 0xFFFF);
-                _panningMouse = true;
-                SetCapture(hWnd);
-                break;
-            }
-            case WM_MBUTTONUP:
-                _panningMouse = false;
-                ReleaseCapture();
-                break;
-
-            // wheel = zoom
-            case WM_MOUSEWHEEL:
-            {
-                short delta = (short)(((int)wParam >> 16) & 0xFFFF);
-                ZoomAt(delta > 0 ? 1.1 : 1.0 / 1.1, _lastMouseX, _lastMouseY);
-                break;
-            }
-        }
-        return CallWindowProc(_origWndProc, hWnd, msg, wParam, lParam);
-    }
-
-    private void OnLeftDown(nint hWnd, nint lParam)
-    {
-        var (dx, dy) = MapToDoc(lParam);
+        var (dx, dy) = MapToDoc(sx, sy);
+        bool alt = mods.HasFlag(CanvasMods.Alt);
         bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Eraser or ToolKind.Fill;
-        if (AltDown && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
+        if (alt && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
 
         switch (ActiveTool)
         {
@@ -254,18 +225,19 @@ public sealed unsafe partial class GpuSurfaceControl
                 DoFill(dx, dy);
                 break;
             case ToolKind.Zoom:
-                ZoomAt(AltDown ? 1.0 / 1.1 : 1.1, _lastMouseX, _lastMouseY);
+                ZoomAt(alt ? 1.0 / 1.1 : 1.1, _lastMouseX, _lastMouseY);
                 break;
             case ToolKind.Hand:
-                StartPan(hWnd, lParam);
+                StartPan(sx, sy);
                 break;
             case ToolKind.Transform:
-                BeginTransform(lParam);
+                BeginTransform(sx, sy);
                 break;
             case ToolKind.EllipseMarquee:
                 if (_doc is not null)
                 {
-                    _selecting = true; SetCapture(hWnd);
+                    CaptureSelMode(mods);
+                    _selecting = true; _input?.Capture();
                     _selStartX = dx; _selStartY = dy;
                     _doc.SelectionMask = null;
                 }
@@ -274,7 +246,8 @@ public sealed unsafe partial class GpuSurfaceControl
             case ToolKind.Lasso:
                 if (_doc is not null)
                 {
-                    _lassoing = true; SetCapture(hWnd);
+                    CaptureSelMode(mods);
+                    _lassoing = true; _input?.Capture();
                     _lassoPts.Clear(); _lassoPts.Add((dx, dy));
                     _doc.SelectionMask = null;
                 }
@@ -283,19 +256,19 @@ public sealed unsafe partial class GpuSurfaceControl
             case ToolKind.MagicWand:
                 if (_doc is not null && ActiveLayer is { } wl)
                 {
-                    var m = Sable.Engine.Selections.Wand(wl.Pixels, wl.Width, wl.Height, (int)dx, (int)dy, 32);
-                    _doc.SetMaskSelection(m);
+                    CaptureSelMode(mods);
+                    var m = Selections.Wand(wl.Pixels, wl.Width, wl.Height, (int)dx, (int)dy, 32);
+                    ApplyMask(m);
                 }
                 break;
 
             case ToolKind.Marquee:
                 if (_doc is not null)
                 {
-                    var (ssx, ssy) = SurfaceOf(lParam);
-                    int hit = _doc.SelectionMask is null ? HitSelHandle(ssx, ssy) : -1;
+                    int hit = _doc.SelectionMask is null ? HitSelHandle(sx, sy) : -1;
                     if (hit is >= 0 and < 8 && _doc.Selection is { } rs)   // grip → resize
                     {
-                        _selResizing = true; SetCapture(hWnd);
+                        _selResizing = true; _input?.Capture();
                         _selL0 = rs.X; _selR0 = rs.Right; _selT0 = rs.Y; _selB0 = rs.Bottom;
                         _hL = hit is 0 or 6 or 7;
                         _hR = hit is 2 or 3 or 4;
@@ -304,13 +277,14 @@ public sealed unsafe partial class GpuSurfaceControl
                     }
                     else if (hit == 8 && _doc.Selection is { } ms)         // interior → move
                     {
-                        _selMoving = true; SetCapture(hWnd);
+                        _selMoving = true; _input?.Capture();
                         _selL0 = ms.X; _selR0 = ms.Right; _selT0 = ms.Y; _selB0 = ms.Bottom;
                         _selMoveStartX = dx; _selMoveStartY = dy;
                     }
                     else                                                   // empty → new selection
                     {
-                        _selecting = true; SetCapture(hWnd);
+                        CaptureSelMode(mods);
+                        _selecting = true; _input?.Capture();
                         _selStartX = dx; _selStartY = dy;
                         _doc.SelectionMask = null;
                     }
@@ -320,7 +294,7 @@ public sealed unsafe partial class GpuSurfaceControl
             case ToolKind.Move:
                 if (ActiveLayer is { } ml)
                 {
-                    _moving = true; SetCapture(hWnd);
+                    _moving = true; _input?.Capture();
                     _moveStartX = dx; _moveStartY = dy;
                     _moveOrigX = ml.OffsetX; _moveOrigY = ml.OffsetY;
                 }
@@ -329,7 +303,7 @@ public sealed unsafe partial class GpuSurfaceControl
                 _session = CreateSession();
                 if (_session is not null)
                 {
-                    SetCapture(hWnd);
+                    _input?.Capture();
                     _painting = true;
                     _lastDocX = dx; _lastDocY = dy;
                     _session.StrokeTo(dx, dy, dx, dy);
@@ -343,7 +317,7 @@ public sealed unsafe partial class GpuSurfaceControl
         if (_painting)
         {
             _painting = false;
-            ReleaseCapture();
+            _input?.ReleaseCapture();
             var cmd = _session?.Finalize();
             _session = null;
             if (cmd is not null) CommandProduced?.Invoke(cmd);
@@ -351,42 +325,54 @@ public sealed unsafe partial class GpuSurfaceControl
         else if (_moving && ActiveLayer is { } layer)
         {
             _moving = false;
-            ReleaseCapture();
+            _input?.ReleaseCapture();
             if (_doc is not null && (layer.OffsetX != _moveOrigX || layer.OffsetY != _moveOrigY))
                 CommandProduced?.Invoke(new MoveOffsetCommand(_doc, layer, _moveOrigX, _moveOrigY, layer.OffsetX, layer.OffsetY));
         }
         else if (_transforming && ActiveLayer is { } tl)
         {
             _transforming = false;
-            ReleaseCapture();
+            _input?.ReleaseCapture();
             if (_doc is not null)
                 CommandProduced?.Invoke(new TransformLayerCommand(_doc, tl, _xfStart, LayerXform.From(tl)));
         }
         else if (_lassoing)
         {
             _lassoing = false;
-            ReleaseCapture();
+            _input?.ReleaseCapture();
             if (_doc is not null)
             {
                 if (_lassoPts.Count >= 3)
-                    _doc.SetMaskSelection(Sable.Engine.Selections.Polygon(_doc.Width, _doc.Height, _lassoPts));
-                else _doc.ClearSelection();
+                    ApplyMask(Selections.Polygon(_doc.Width, _doc.Height, _lassoPts));
+                else if (_selMode == SelMode.Replace) _doc.ClearSelection();
             }
             _lassoPts.Clear();
         }
         else if (_selecting || _selResizing || _selMoving)
         {
+            bool wasNewDraw = _selecting;   // a fresh drag (not grip resize/move)
             bool wasEllipse = _selecting && ActiveTool == ToolKind.EllipseMarquee;
             _selecting = _selResizing = _selMoving = false;
-            ReleaseCapture();
-            if (_doc?.Selection is { W: < 3 } or { H: < 3 }) { _doc!.ClearSelection(); }
+            _input?.ReleaseCapture();
+            if (_doc?.Selection is { W: < 3 } or { H: < 3 } && _selMode == SelMode.Replace)
+            {
+                _doc!.ClearSelection();
+            }
             else if (wasEllipse && _doc?.Selection is { } e)
-                _doc.SetMaskSelection(Sable.Engine.Selections.Ellipse(_doc.Width, _doc.Height, e));
+            {
+                ApplyMask(Selections.Ellipse(_doc.Width, _doc.Height, e));
+            }
+            else if (wasNewDraw && _selMode != SelMode.Replace && _doc?.Selection is { } r)
+            {
+                // rect marquee with a modifier → rasterize + combine (loses grips, like a mask sel)
+                ApplyMask(Selections.Rect(_doc.Width, _doc.Height, r));
+            }
+            // else: plain rect Replace keeps Selection rect + null mask (grips stay editable)
         }
         else if (_panningMouse)
         {
             _panningMouse = false;
-            ReleaseCapture();
+            _input?.ReleaseCapture();
         }
     }
 
@@ -428,10 +414,9 @@ public sealed unsafe partial class GpuSurfaceControl
         return r;
     }
 
-    private void BeginTransform(nint lParam)
+    private void BeginTransform(double sx, double sy)
     {
         if (ActiveLayer is not { } l) return;
-        var (sx, sy) = SurfaceOf(lParam);
         var cs = CornersSurface(l);
         double cx = (cs[0] + cs[2] + cs[4] + cs[6]) * 0.25;
         double cy = (cs[1] + cs[3] + cs[5] + cs[7]) * 0.25;
@@ -447,21 +432,20 @@ public sealed unsafe partial class GpuSurfaceControl
 
         if (_xfMode == 0) return;
         _transforming = true;
-        SetCapture(_hwnd);
+        _input?.Capture();
         _xfStart = LayerXform.From(l);
         _xfCenterX = cx; _xfCenterY = cy;
         _xfStartAngle = Math.Atan2(sy - cy, sx - cx);
         _xfStartDist = Math.Max(1e-3, Dist(sx, sy, cx, cy));
         _xfStartSx = l.ScaleX; _xfStartSy = l.ScaleY;
-        var (ddx, ddy) = MapToDoc(lParam);
+        var (ddx, ddy) = MapToDoc(sx, sy);
         _xfMoveDocX = ddx; _xfMoveDocY = ddy;
         _xfOrigOffX = l.OffsetX; _xfOrigOffY = l.OffsetY;
     }
 
-    private void TransformDrag(nint lParam)
+    private void TransformDrag(double sx, double sy)
     {
         if (ActiveLayer is not { } l) return;
-        var (sx, sy) = SurfaceOf(lParam);
         switch (_xfMode)
         {
             case 2: // rotate about center
@@ -479,7 +463,7 @@ public sealed unsafe partial class GpuSurfaceControl
             }
             default: // move
             {
-                var (dx, dy) = MapToDoc(lParam);
+                var (dx, dy) = MapToDoc(sx, sy);
                 l.OffsetX = _xfOrigOffX + (int)Math.Round(dx - _xfMoveDocX);
                 l.OffsetY = _xfOrigOffY + (int)Math.Round(dy - _xfMoveDocY);
                 break;
@@ -520,11 +504,6 @@ public sealed unsafe partial class GpuSurfaceControl
         return SelRect.FromCorners(minX, minY, maxX, maxY, _doc?.Width ?? 0, _doc?.Height ?? 0);
     }
 
-    private static (double x, double y) SurfaceOf(nint lParam)
-    {
-        int lp = (int)lParam;
-        return ((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
-    }
     private static double Dist(double ax, double ay, double bx, double by)
         => Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
     private static double NearestCornerDist(float[] cs, double x, double y)
@@ -544,13 +523,12 @@ public sealed unsafe partial class GpuSurfaceControl
         return inside;
     }
 
-    private void StartPan(nint hWnd, nint lParam)
+    private void StartPan(double sx, double sy)
     {
-        int lp = (int)lParam;
-        _lastPanX = (short)(lp & 0xFFFF);
-        _lastPanY = (short)((lp >> 16) & 0xFFFF);
+        _lastPanX = (int)sx;
+        _lastPanY = (int)sy;
         _panningMouse = true;
-        SetCapture(hWnd);
+        _input?.Capture();
     }
 
     private void DoFill(double dx, double dy)
@@ -588,11 +566,9 @@ public sealed unsafe partial class GpuSurfaceControl
         ColorPicked?.Invoke(r, g, b);
     }
 
-    private (double x, double y) MapToDoc(nint lParam)
+    /// <summary>Map a surface-pixel point to document pixels via the inverse viewport transform.</summary>
+    private (double x, double y) MapToDoc(double sx, double sy)
     {
-        int lp = (int)lParam;
-        short sx = (short)(lp & 0xFFFF);
-        short sy = (short)((lp >> 16) & 0xFFFF);
         var vp = ComputeViewport();
         double scale = vp.Scale > 0 ? vp.Scale : 1;
         return ((sx - vp.Ox) / scale, (sy - vp.Oy) / scale);
