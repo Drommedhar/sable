@@ -48,6 +48,9 @@ public partial class MainWindow : Window
         FontCombo.ItemsSource = Sable.Imaging.TextRaster.Families();
         Canvas.TextEditStarted += t => Doc?.SelectModel(t);   // select the edited text layer
 
+        // custom colour wheel → brush / selected shape-text / gradient stop
+        BrushColorView.ColorChanged += OnBrushColorChanged;
+
         WireTools();
     }
 
@@ -261,9 +264,11 @@ public partial class MainWindow : Window
         Doc?.SelectedLayer?.RefreshThumbnail();
     }
 
-    private void OnBrushColorChanged(object? sender, Avalonia.Controls.ColorChangedEventArgs e)
+    /// <summary>Show a colour in the picker WITHOUT applying it to the brush/target.</summary>
+    private void SetWheel(Avalonia.Media.Color c) => BrushColorView.SetColor(c);
+
+    private void OnBrushColorChanged(Avalonia.Media.Color c)
     {
-        var c = e.NewColor;
         if (_gradientTab)
         {
             GradBar.SetSelectedColor(c.R, c.G, c.B, c.A);   // colour wheel edits the selected stop
@@ -297,7 +302,7 @@ public partial class MainWindow : Window
         TabColor.Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(grad ? "#FF666666" : "#FFAAAAAA"));
         TabGrad.Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(grad ? "#FFAAAAAA" : "#FF666666"));
         if (grad) SyncWheelToStop();
-        else BrushColorView.Color = Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+        else SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
     }
 
     private void OnGradAddStop(object? sender, RoutedEventArgs e) => GradBar.AddStop();
@@ -306,7 +311,7 @@ public partial class MainWindow : Window
     private void SyncWheelToStop()
     {
         var s = GradBar.SelectedStop;
-        BrushColorView.Color = Avalonia.Media.Color.FromArgb(s.A, s.R, s.G, s.B);
+        SetWheel(Avalonia.Media.Color.FromArgb(s.A, s.R, s.G, s.B));
     }
 
     // --- grouped tool strip (PLAN §14.5): flyout per group + hotkey cycle ----------
@@ -580,7 +585,7 @@ public partial class MainWindow : Window
         // a drawn shape becomes its own new layer (so Move/V grabs just the shape)
         Canvas.LayerProduced = layer => vm.AddAndSelect(layer);
         // eyedropper (Alt+click) updates the color picker
-        Canvas.ColorPicked = (r, g, b) => BrushColorView.Color = Avalonia.Media.Color.FromRgb(r, g, b);
+        Canvas.ColorPicked = (r, g, b) => SetWheel(Avalonia.Media.Color.FromRgb(r, g, b));
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)
@@ -609,9 +614,9 @@ public partial class MainWindow : Window
         // point the colour wheel at the right target (unless the gradient tab owns it)
         if (!_gradientTab)
         {
-            if (_shapeTarget is { } s) BrushColorView.Color = Avalonia.Media.Color.FromRgb(s.R, s.G, s.B);
-            else if (_textTarget is { } t) BrushColorView.Color = Avalonia.Media.Color.FromRgb(t.R, t.G, t.B);
-            else BrushColorView.Color = Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+            if (_shapeTarget is { } s) SetWheel(Avalonia.Media.Color.FromRgb(s.R, s.G, s.B));
+            else if (_textTarget is { } t) SetWheel(Avalonia.Media.Color.FromRgb(t.R, t.G, t.B));
+            else SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
         }
     }
 
