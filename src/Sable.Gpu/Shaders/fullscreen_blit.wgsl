@@ -18,7 +18,10 @@ struct Viewport {
     gizmoOn: f32, rotDist: f32,
     brushOn: f32, brushX: f32, brushY: f32, brushR: f32,   // brush cursor preview (surface px)
     brushColR: f32, brushColG: f32, brushColB: f32, brushErase: f32, brushHard: f32,
-    maskOn: f32, _h1: f32, _h2: f32, _h3: f32, _h4: f32,
+    maskOn: f32,
+    gradOn: f32, gx0: f32, gy0: f32, gx1: f32, gy1: f32,   // gradient drag line (surface px)
+    cropOn: f32,                                            // dim outside the overlay rect (crop preview)
+    _p7: f32, _p8: f32, _p9: f32, _p10: f32, _p11: f32, _p12: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -58,10 +61,24 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let u = docX / vp.docW;
     let v = docY / vp.docH;
 
-    var outc = checker(frag.xy);
+    // flat grey pasteboard outside the document; checker only inside (shows transparency)
+    var outc = vec3<f32>(0.16, 0.16, 0.17);
     if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let bg = checker(frag.xy);
         let col = textureSample(tex, samp, vec2<f32>(u, v));
-        outc = col.rgb * col.a + outc * (1.0 - col.a);
+        outc = col.rgb * col.a + bg * (1.0 - col.a);
+    }
+
+    // crop preview: dim the document outside the rect + a thin border
+    if (vp.cropOn > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let inside = docX >= vp.ovX && docX <= vp.ovX + vp.ovW && docY >= vp.ovY && docY <= vp.ovY + vp.ovH;
+        if (!inside) { outc = outc * 0.35; }
+        let t = vp.invScale * 0.75;
+        let onL = abs(docX - vp.ovX) <= t; let onR = abs(docX - (vp.ovX + vp.ovW)) <= t;
+        let onT = abs(docY - vp.ovY) <= t; let onB = abs(docY - (vp.ovY + vp.ovH)) <= t;
+        let inX = docX >= vp.ovX - t && docX <= vp.ovX + vp.ovW + t;
+        let inY = docY >= vp.ovY - t && docY <= vp.ovY + vp.ovH + t;
+        if (((onL || onR) && inY) || ((onT || onB) && inX)) { outc = vec3<f32>(1.0); }
     }
 
     // marching-ants overlay rectangle (selection bounding box)
@@ -131,6 +148,14 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             outc = vec3<f32>(1.0);              // corner handles
         }
         if (length(p - rp) < 6.0) { outc = vec3<f32>(1.0); }   // rotate handle
+    }
+
+    // gradient tool drag line (start dot → end), surface px
+    if (vp.gradOn > 0.5) {
+        let a = vec2<f32>(vp.gx0, vp.gy0);
+        let b = vec2<f32>(vp.gx1, vp.gy1);
+        if (segDist(frag.xy, a, b) < 1.5) { outc = vec3<f32>(1.0) - outc; }
+        if (length(frag.xy - a) < 4.0 || length(frag.xy - b) < 4.0) { outc = vec3<f32>(1.0); }
     }
 
     // brush cursor ring (the dab fill is previewed in the composite via the stamp pass)

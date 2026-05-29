@@ -81,7 +81,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         _dummyMask = api.DeviceCreateTexture(gpu.Device, in dmDesc);
         _dummyMaskView = api.TextureCreateView(_dummyMask, null);
 
-        var vpDesc = new BufferDescriptor { Size = 160, Usage = BufferUsage.Uniform | BufferUsage.CopyDst };
+        var vpDesc = new BufferDescriptor { Size = 192, Usage = BufferUsage.Uniform | BufferUsage.CopyDst };
         _vpBuf = api.DeviceCreateBuffer(gpu.Device, in vpDesc);
 
         var bglLocal = _bgl;
@@ -119,8 +119,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     {
         var api = _gpu.Api;
 
-        // 40 floats / 160 bytes: viewport[0..7], rect[8..12], gizmo[16..25], brush[26..34]
-        var u = stackalloc float[40];
+        // 48 floats / 192 bytes: viewport[0..7], rect[8..13], gizmo[16..25], brush[26..34],
+        // maskOn[35], gradient[36..40]
+        var u = stackalloc float[48];
         u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = 0;
         u[4] = vp.DocW; u[5] = vp.DocH; u[6] = 0; u[7] = 0;
         u[8] = ov.RectX; u[9] = ov.RectY; u[10] = ov.RectW; u[11] = ov.RectH; u[12] = ov.RectOn ? 1f : 0f;
@@ -134,13 +135,16 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[33] = ov.BrushErase ? 1f : 0f; u[34] = ov.BrushHardness;
         bool maskOn = ov.MaskOn && ov.MaskView is not null;
         u[35] = maskOn ? 1f : 0f;
-        api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, 160);
+        u[36] = ov.GradientOn ? 1f : 0f;
+        u[37] = ov.GradX0; u[38] = ov.GradY0; u[39] = ov.GradX1; u[40] = ov.GradY1;
+        u[41] = ov.CropOn ? 1f : 0f;
+        api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, 192);
 
         var maskView = maskOn ? ov.MaskView : _dummyMaskView;
         var bgEntries = stackalloc BindGroupEntry[4];
         bgEntries[0] = new BindGroupEntry { Binding = 0, TextureView = source };
         bgEntries[1] = new BindGroupEntry { Binding = 1, Sampler = _sampler };
-        bgEntries[2] = new BindGroupEntry { Binding = 2, Buffer = _vpBuf, Size = 160 };
+        bgEntries[2] = new BindGroupEntry { Binding = 2, Buffer = _vpBuf, Size = 192 };
         bgEntries[3] = new BindGroupEntry { Binding = 3, TextureView = maskView };
         var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 4, Entries = bgEntries };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);

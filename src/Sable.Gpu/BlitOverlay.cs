@@ -30,4 +30,11 @@ public struct BlitOverlay
     // (ellipse/lasso/wand). MaskView is a doc-sized R8 texture sampled in doc UV.
     public bool MaskOn;
     public unsafe TextureView* MaskView;
+
+    // gradient tool drag line — start/end in SURFACE pixels
+    public bool GradientOn;
+    public float GradX0, GradY0, GradX1, GradY1;
+
+    // crop preview — dims the document outside the crop rect (reuses RectX/Y/W/H, doc px)
+    public bool CropOn;
 }

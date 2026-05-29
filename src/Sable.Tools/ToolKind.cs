@@ -15,6 +15,8 @@ public enum ToolKind
     Brush,
     Eraser,
     Fill,         // bucket / flood
+    Gradient,     // linear gradient fill (foreground → transparent)
+    Crop,         // resize the document to a drawn rectangle
     Eyedropper,
     Hand,         // pan
     Zoom,

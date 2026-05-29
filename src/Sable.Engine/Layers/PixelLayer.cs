@@ -7,11 +7,11 @@ namespace Sable.Engine.Layers;
 /// </summary>
 public sealed class PixelLayer : Layer
 {
-    public int Width { get; }
-    public int Height { get; }
+    public int Width { get; private set; }
+    public int Height { get; private set; }
 
     /// <summary>RGBA8 pixels, length = Width * Height * 4.</summary>
-    public byte[] Pixels { get; }
+    public byte[] Pixels { get; private set; }
 
     public PixelLayer(int width, int height, string name = "Layer")
     {
@@ -19,6 +19,16 @@ public sealed class PixelLayer : Layer
         Height = height;
         Pixels = new byte[width * height * 4];
         Name = name;
+    }
+
+    /// <summary>Replace the pixel buffer and dimensions (e.g. on crop/resize). Undo restores the old buffer.</summary>
+    public void SetBuffer(int width, int height, byte[] pixels)
+    {
+        Width = width;
+        Height = height;
+        Pixels = pixels;
+        Dirty = true;
+        DirtyTiles.Clear();
     }
 
     // 256² tile access (PLAN §4) delegates to RasterTiles (shared with masks).

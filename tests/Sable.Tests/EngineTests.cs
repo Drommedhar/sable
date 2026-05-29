@@ -21,6 +21,72 @@ public class DocumentTests
     }
 
     [Fact]
+    public void Resize_ScalesDocument_UndoRestores()
+    {
+        var doc = new Document(4, 4);
+        var px = new PixelLayer(4, 4, "L");
+        for (int k = 0; k < px.Pixels.Length; k += 4) { px.Pixels[k] = 255; px.Pixels[k + 3] = 255; }  // solid red
+        doc.Layers.Add(px);
+
+        var cmd = new ResizeCommand(doc, 8, 8, 144, bilinear: true);
+        cmd.Do();
+        Assert.Equal(8, doc.Width);
+        Assert.Equal(8, px.Width);
+        Assert.Equal(8 * 8 * 4, px.Pixels.Length);
+        Assert.Equal(144, doc.Dpi);
+        Assert.Equal(255, px.Pixels[(4 * 8 + 4) * 4]);     // still red after upscale
+        Assert.Equal(255, px.Pixels[(4 * 8 + 4) * 4 + 3]);
+
+        cmd.Undo();
+        Assert.Equal(4, doc.Width);
+        Assert.Equal(96, doc.Dpi);
+        Assert.Equal(4 * 4 * 4, px.Pixels.Length);
+    }
+
+    [Fact]
+    public void Crop_NegativeOrigin_GrowsCanvasWithTransparentPad()
+    {
+        // canvas resize (grow) is CropCommand with a negative origin — pads transparent, no scaling
+        var doc = new Document(4, 4);
+        var px = new PixelLayer(4, 4, "L");
+        int i0 = (0 * 4 + 0) * 4;
+        px.Pixels[i0] = 255; px.Pixels[i0 + 3] = 255;   // red at (0,0)
+        doc.Layers.Add(px);
+
+        new CropCommand(doc, -2, -2, 8, 8).Do();         // centre 4×4 inside 8×8
+        Assert.Equal(8, doc.Width);
+        Assert.Equal(8, px.Width);
+        Assert.Equal(255, px.Pixels[(2 * 8 + 2) * 4]);   // old (0,0) → new (2,2), still red, NOT scaled
+        Assert.Equal(0, px.Pixels[(0 * 8 + 0) * 4 + 3]); // padded corner is transparent
+    }
+
+    [Fact]
+    public void Crop_ResizesAndMovesContent_UndoRestores()
+    {
+        var doc = new Document(8, 8);
+        var px = new PixelLayer(8, 8, "L");
+        // mark pixel (5,5) red so we can track where it lands after crop
+        int i = (5 * 8 + 5) * 4;
+        px.Pixels[i] = 255; px.Pixels[i + 3] = 255;
+        doc.Layers.Add(px);
+
+        var cmd = new CropCommand(doc, 4, 4, 4, 4);   // crop to bottom-right quadrant
+        cmd.Do();
+        Assert.Equal(4, doc.Width);
+        Assert.Equal(4, doc.Height);
+        Assert.Equal(4, px.Width);
+        // old (5,5) → new (1,1)
+        int ni = (1 * 4 + 1) * 4;
+        Assert.Equal(255, px.Pixels[ni]);
+        Assert.Equal(255, px.Pixels[ni + 3]);
+
+        cmd.Undo();
+        Assert.Equal(8, doc.Width);
+        Assert.Equal(8, px.Width);
+        Assert.Equal(255, px.Pixels[(5 * 8 + 5) * 4]);   // original restored
+    }
+
+    [Fact]
     public void NeedsComposite_TrueOnParamChange_ClearedAfter()
     {
         var doc = Document.CreateDemo(32, 32);

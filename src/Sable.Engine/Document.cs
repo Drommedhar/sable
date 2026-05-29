@@ -10,8 +10,19 @@ namespace Sable.Engine;
 /// </summary>
 public sealed class Document
 {
-    public int Width { get; }
-    public int Height { get; }
+    public int Width { get; private set; }
+    public int Height { get; private set; }
+
+    /// <summary>Print resolution metadata (dots per inch). Does not affect pixel data.</summary>
+    public double Dpi { get; set; } = 96;
+
+    /// <summary>Change the canvas dimensions (crop/resize). Layer buffers are rebuilt by the caller/command.</summary>
+    public void SetSize(int width, int height)
+    {
+        Width = width;
+        Height = height;
+        MarkStructureChanged();
+    }
 
     /// <summary>Bottom→top. Index 0 composites first.</summary>
     public List<Layer> Layers { get; } = new();

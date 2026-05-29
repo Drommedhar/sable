@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.ResizeDocumentWindow"
+        Width="380" Height="270" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF2A2A2A"
+        Title="Resize Document">
+    <StackPanel Margin="16" Spacing="12">
+
+        <Grid ColumnDefinitions="64,*,30,*" VerticalAlignment="Center">
+            <TextBlock Grid.Column="0" Text="Size:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Column="1" x:Name="WBox" Minimum="1" Maximum="32768" Increment="1"
+                           FormatString="0" ValueChanged="OnWidthChanged" />
+            <ToggleButton Grid.Column="2" x:Name="LinkBtn" IsChecked="True" Margin="3,0"
+                          Padding="3" ToolTip.Tip="Lock aspect ratio">
+                <Path Classes="icon" Width="14" Height="14"
+                      Data="M9 17H7A5 5 0 0 1 7 7h2 M15 7h2a5 5 0 0 1 0 10h-2 M8 12h8" />
+            </ToggleButton>
+            <NumericUpDown Grid.Column="3" x:Name="HBox" Minimum="1" Maximum="32768" Increment="1"
+                           FormatString="0" ValueChanged="OnHeightChanged" />
+        </Grid>
+
+        <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
+            <TextBlock Grid.Column="0" Text="Units:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" SelectedIndex="0">
+                <ComboBoxItem>Pixels</ComboBoxItem>
+            </ComboBox>
+        </Grid>
+
+        <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
+            <TextBlock Grid.Column="0" Text="DPI:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Column="1" x:Name="DpiBox" Minimum="1" Maximum="2400" Increment="1" FormatString="0" />
+        </Grid>
+
+        <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
+            <TextBlock Grid.Column="0" Text="Resample:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" x:Name="ResampleCombo" SelectedIndex="0">
+                <ComboBoxItem>Bilinear</ComboBoxItem>
+                <ComboBoxItem>Nearest</ComboBoxItem>
+            </ComboBox>
+        </Grid>
+
+        <CheckBox x:Name="ResampleCheck" Content="Resample" IsChecked="True"
+                  Foreground="#FFCCCCCC" IsCheckedChanged="OnResampleToggled" />
+
+        <TextBlock x:Name="DescText" Foreground="#FF9A9A9A" FontSize="11" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Resize" Click="OnResize" Width="80" />
+            <Button Content="Cancel" Click="OnCancel" Width="80" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -39,6 +39,10 @@ public partial class MainWindow : Window
         // selection keys tunnel-first so a focused panel (e.g. the layers list) can't eat Delete
         AddHandler(KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
 
+        // gradient editor shares the canvas's gradient def; selecting a stop routes the colour wheel to it
+        GradBar.Def = Canvas.Gradient;
+        GradBar.StopSelected += _ => { if (_gradientTab) SyncWheelToStop(); };
+
         WireTools();
     }
 
@@ -52,7 +56,8 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
-            case Key.Escape: Canvas.Deselect(); e.Handled = true; break;
+            case Key.Enter: Canvas.CommitCrop(); e.Handled = true; break;     // commit a pending crop
+            case Key.Escape: Canvas.CancelCrop(); Canvas.Deselect(); e.Handled = true; break;
         }
     }
 
@@ -166,14 +171,40 @@ public partial class MainWindow : Window
         if (FeatherLabel is not null) FeatherLabel.Text = $"{e.NewValue:0} px";
     }
 
+    private bool _gradientTab;
+
     private void OnBrushColorChanged(object? sender, Avalonia.Controls.ColorChangedEventArgs e)
     {
         var c = e.NewColor;
+        if (_gradientTab)
+        {
+            GradBar.SetSelectedColor(c.R, c.G, c.B, c.A);   // colour wheel edits the selected stop
+            return;
+        }
         Canvas.Brush.R = c.R;
         Canvas.Brush.G = c.G;
         Canvas.Brush.B = c.B;
         if (BrushColorSwatch is not null)
             BrushColorSwatch.Background = new Avalonia.Media.SolidColorBrush(c);
+    }
+
+    private void OnSelectColorTab(object? sender, TappedEventArgs e)
+    {
+        _gradientTab = (sender as Control)?.Tag as string == "grad";
+        GradientPanel.IsVisible = _gradientTab;
+        TabColor.Foreground = new Avalonia.Media.SolidColorBrush(_gradientTab ? Avalonia.Media.Color.Parse("#FF666666") : Avalonia.Media.Color.Parse("#FFAAAAAA"));
+        TabGrad.Foreground = new Avalonia.Media.SolidColorBrush(_gradientTab ? Avalonia.Media.Color.Parse("#FFAAAAAA") : Avalonia.Media.Color.Parse("#FF666666"));
+        if (_gradientTab) SyncWheelToStop();
+        else BrushColorView.Color = Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+    }
+
+    private void OnGradAddStop(object? sender, RoutedEventArgs e) => GradBar.AddStop();
+    private void OnGradDelStop(object? sender, RoutedEventArgs e) => GradBar.RemoveSelected();
+
+    private void SyncWheelToStop()
+    {
+        var s = GradBar.SelectedStop;
+        BrushColorView.Color = Avalonia.Media.Color.FromArgb(s.A, s.R, s.G, s.B);
     }
 
     // --- grouped tool strip (PLAN §14.5): flyout per group + hotkey cycle ----------
@@ -214,6 +245,8 @@ public partial class MainWindow : Window
         const string brush  = "M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08 M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z";
         const string eraser = "M7 21l-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21 M22 21H7 M5 11l9 9";
         const string fill   = "M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z M5 2l5 5 M2 13h15 M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4z";
+        const string grad   = "M4 4h16v16H4z M21 3 3 21";
+        const string crop   = "M6 2v14a2 2 0 0 0 2 2h14 M18 22V8a2 2 0 0 0-2-2H2";
         const string pipette= "M2 22l1-1h3l9-9 M3 21v-3l9-9 M15 6l3.4-3.4a2.1 2.1 0 1 1 3 3L21 9 M15 5l4 4";
         const string hand   = "M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2 M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2 M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8 M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15";
         const string zoom   = "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3 M11 8v6 M8 11h6";
@@ -228,7 +261,9 @@ public partial class MainWindow : Window
             ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand) }),
             ("B", new[] { new ToolDef(brush, "Brush", Sable.Tools.ToolKind.Brush),
                           new ToolDef(eraser, "Eraser", Sable.Tools.ToolKind.Eraser) }),
-            ("G", new[] { new ToolDef(fill, "Fill", Sable.Tools.ToolKind.Fill) }),
+            ("G", new[] { new ToolDef(fill, "Fill", Sable.Tools.ToolKind.Fill),
+                          new ToolDef(grad, "Gradient", Sable.Tools.ToolKind.Gradient) }),
+            ("C", new[] { new ToolDef(crop, "Crop", Sable.Tools.ToolKind.Crop) }),
             ("I", new[] { new ToolDef(pipette, "Eyedropper", Sable.Tools.ToolKind.Eyedropper) }),
             ("H", new[] { new ToolDef(hand, "Hand", Sable.Tools.ToolKind.Hand) }),
             ("Z", new[] { new ToolDef(zoom, "Zoom", Sable.Tools.ToolKind.Zoom) }),
@@ -359,6 +394,7 @@ public partial class MainWindow : Window
             case Key.W: CycleGroup("W"); break;
             case Key.B: CycleGroup("B"); break;
             case Key.G: CycleGroup("G"); break;
+            case Key.C: CycleGroup("C"); break;
             case Key.I: CycleGroup("I"); break;
             case Key.H: CycleGroup("H"); break;
             case Key.Z: CycleGroup("Z"); break;
@@ -426,6 +462,31 @@ public partial class MainWindow : Window
         win.Position = new PixelPoint(
             center.X - (int)(win.Width * scale / 2),
             center.Y - (int)(win.Height * scale / 2));
+    }
+
+    private async void OnResizeDocument(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is not { } doc || Doc is not { } vm) return;
+        var dlg = new ResizeDocumentWindow(doc.Width, doc.Height, doc.Dpi);
+        var ok = await dlg.ShowDialog<bool>(this);
+        if (!ok) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ResizeCommand(doc, dlg.NewW, dlg.NewH, dlg.Dpi, dlg.Bilinear));
+        Canvas.ResetView();
+    }
+
+    private async void OnResizeCanvas(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is not { } doc || Doc is not { } vm) return;
+        var dlg = new ResizeCanvasWindow(doc.Width, doc.Height);
+        var ok = await dlg.ShowDialog<bool>(this);
+        if (!ok) return;
+
+        // anchor → crop origin (negative = grow, padding transparent). CropCommand handles both.
+        int dx = dlg.NewW - doc.Width, dy = dlg.NewH - doc.Height;
+        int leftPad = dlg.AnchorX == 0 ? 0 : dlg.AnchorX == 1 ? dx / 2 : dx;
+        int topPad = dlg.AnchorY == 0 ? 0 : dlg.AnchorY == 1 ? dy / 2 : dy;
+        vm.Undo.Execute(new Sable.Engine.Commands.CropCommand(doc, -leftPad, -topPad, dlg.NewW, dlg.NewH));
+        Canvas.ResetView();
     }
 
     private void OnToggleAdjustments(object? sender, RoutedEventArgs e)

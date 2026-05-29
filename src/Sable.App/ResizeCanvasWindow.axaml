@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.ResizeCanvasWindow"
+        Width="360" Height="280" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF2A2A2A"
+        Title="Resize Canvas">
+    <StackPanel Margin="16" Spacing="12">
+
+        <Grid ColumnDefinitions="64,*,30,*" VerticalAlignment="Center">
+            <TextBlock Grid.Column="0" Text="Size:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Column="1" x:Name="WBox" Minimum="1" Maximum="32768" Increment="1"
+                           FormatString="0" ValueChanged="OnSizeChanged" />
+            <TextBlock Grid.Column="2" Text="×" Foreground="#FF9A9A9A" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Column="3" x:Name="HBox" Minimum="1" Maximum="32768" Increment="1"
+                           FormatString="0" ValueChanged="OnSizeChanged" />
+        </Grid>
+
+        <Grid ColumnDefinitions="64,*" VerticalAlignment="Top">
+            <TextBlock Grid.Column="0" Text="Anchor:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <UniformGrid Grid.Column="1" x:Name="AnchorGrid" Rows="3" Columns="3"
+                         Width="84" Height="84" HorizontalAlignment="Left" />
+        </Grid>
+
+        <TextBlock x:Name="DescText" Foreground="#FF9A9A9A" FontSize="11" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Resize" Click="OnResize" Width="80" />
+            <Button Content="Cancel" Click="OnCancel" Width="80" />
+        </StackPanel>
+    </StackPanel>
+</Window>

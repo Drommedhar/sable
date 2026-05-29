@@ -26,6 +26,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private bool _moving;
     private double _moveStartX, _moveStartY;
     private int _moveOrigX, _moveOrigY;
+    private bool _gradienting;
+    private double _gradStartDocX, _gradStartDocY;       // gradient start (doc px)
+    private double _gradStartSx, _gradStartSy, _gradEndSx, _gradEndSy;   // line ends (surface px, overlay)
+    private bool _cropping;
+    private double _cropStartDocX, _cropStartDocY;
+    private SelRect? _cropRect;                          // pending crop rect (doc px); Enter commits
     private bool _selecting;        // rubber-band drag for rect + ellipse marquee
     private double _selStartX, _selStartY;
     private bool _lassoing;
@@ -65,6 +71,10 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     public bool PaintMask { get; set; }
 
     public BrushTool Brush { get; } = new();
+
+    /// <summary>The gradient the Gradient tool paints (edited in the Gradients panel).</summary>
+    public GradientDef Gradient { get; } =
+        new(new GradientStop(0f, 0, 0, 0, 255), new GradientStop(1f, 255, 255, 255, 255));
 
     /// <summary>Raised (R,G,B) when the eyedropper (Alt+click) samples a color.</summary>
     public Action<byte, byte, byte>? ColorPicked { get; set; }
@@ -154,6 +164,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             double nl = Math.Clamp(_selL0 + (dx - _selMoveStartX), 0, _doc.Width - w);
             double nt = Math.Clamp(_selT0 + (dy - _selMoveStartY), 0, _doc.Height - h);
             _doc.Selection = SelRect.FromCorners(nl, nt, nl + w, nt + h, _doc.Width, _doc.Height);
+        }
+        else if (_gradienting)
+        {
+            _gradEndSx = sx; _gradEndSy = sy;   // track for the live line overlay
+        }
+        else if (_cropping && _doc is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            _cropRect = SelRect.FromCorners(_cropStartDocX, _cropStartDocY, dx, dy, _doc.Width, _doc.Height);
         }
         else if (_panningMouse)
         {
@@ -267,6 +286,23 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             case ToolKind.Fill:
                 DoFill(dx, dy);
                 break;
+            case ToolKind.Gradient:
+                if (ActiveLayer is not null)
+                {
+                    _gradienting = true; _input?.Capture();
+                    _gradStartDocX = dx; _gradStartDocY = dy;
+                    _gradStartSx = sx; _gradStartSy = sy;
+                    _gradEndSx = sx; _gradEndSy = sy;
+                }
+                break;
+            case ToolKind.Crop:
+                if (_doc is not null)
+                {
+                    _cropping = true; _input?.Capture();
+                    _cropStartDocX = dx; _cropStartDocY = dy;
+                    _cropRect = null;
+                }
+                break;
             case ToolKind.Zoom:
                 ZoomAt(alt ? 1.0 / 1.1 : 1.1, _lastMouseX, _lastMouseY);
                 break;
@@ -379,6 +415,24 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             if (_doc is not null)
                 CommandProduced?.Invoke(new TransformLayerCommand(_doc, tl, _xfStart, LayerXform.From(tl)));
         }
+        else if (_gradienting && ActiveLayer is { } gl)
+        {
+            _gradienting = false;
+            _input?.ReleaseCapture();
+            var (ex, ey) = MapToDoc(_gradEndSx, _gradEndSy);
+            var target = gl.Pixels;
+            int w = gl.Width, h = gl.Height;
+            var before = SnapshotAllTiles(target, w, h);
+            var clip = _doc?.Selection is { } s ? ((int, int, int, int)?)(s.X, s.Y, s.W, s.H) : null;
+            int changed = GradientTool.Apply(target, w, h, _gradStartDocX, _gradStartDocY, ex, ey,
+                Gradient, clip, _doc?.SelectionMask, _doc?.Width ?? 0);
+            if (changed > 0)
+            {
+                var after = SnapshotAllTiles(target, w, h);
+                gl.MarkTilesDirty(after.Keys);
+                CommandProduced?.Invoke(new PaintRasterCommand(target, w, h, before, after, t => gl.MarkTilesDirty(t)));
+            }
+        }
         else if (_lassoing)
         {
             _lassoing = false;
@@ -417,12 +471,30 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             }
             // else: plain rect Replace keeps Selection rect + null mask (grips stay editable)
         }
+        else if (_cropping)
+        {
+            _cropping = false;
+            _input?.ReleaseCapture();
+            if (_cropRect is { W: < 3 } or { H: < 3 }) _cropRect = null;   // too small → discard
+        }
         else if (_panningMouse)
         {
             _panningMouse = false;
             _input?.ReleaseCapture();
         }
     }
+
+    /// <summary>Commit the pending crop rectangle (Enter), resizing the document. Undoable.</summary>
+    public void CommitCrop()
+    {
+        if (_doc is null || _cropRect is not { } r || r.W < 1 || r.H < 1) return;
+        CommandProduced?.Invoke(new CropCommand(_doc, r.X, r.Y, r.W, r.H));
+        _cropRect = null;
+        ResetView();
+    }
+
+    /// <summary>Discard a pending crop rectangle (Esc).</summary>
+    public void CancelCrop() => _cropRect = null;
 
     /// <summary>Clear any active selection.</summary>
     public void Deselect() { _doc?.ClearSelection(); _lastSelShape = null; }

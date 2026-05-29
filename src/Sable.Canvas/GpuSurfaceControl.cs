@@ -316,6 +316,11 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.SelHandles = ActiveTool == Sable.Tools.ToolKind.Marquee;
             }
         }
+        if (ActiveTool == Sable.Tools.ToolKind.Crop && _cropRect is { } cr)
+        {
+            ov.CropOn = true;
+            ov.RectX = cr.X; ov.RectY = cr.Y; ov.RectW = cr.W; ov.RectH = cr.H;
+        }
         if (ActiveLayer is { } l)
         {
             if (ActiveTool == Sable.Tools.ToolKind.Move && !ov.RectOn)
@@ -341,6 +346,12 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.BrushColB = Brush.B / 255f;
                 ov.BrushErase = ActiveTool == Sable.Tools.ToolKind.Eraser;
                 ov.BrushHardness = Brush.Hardness;
+            }
+            else if (ActiveTool == Sable.Tools.ToolKind.Gradient && _gradienting)
+            {
+                ov.GradientOn = true;
+                ov.GradX0 = (float)_gradStartSx; ov.GradY0 = (float)_gradStartSy;
+                ov.GradX1 = (float)_gradEndSx; ov.GradY1 = (float)_gradEndSy;
             }
         }
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);

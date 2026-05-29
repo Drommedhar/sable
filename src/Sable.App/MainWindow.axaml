@@ -5,6 +5,7 @@
         xmlns:canvas="clr-namespace:Sable.Canvas;assembly=Sable.Canvas"
         xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
         xmlns:eng="clr-namespace:Sable.Engine.Layers;assembly=Sable.Engine"
+        xmlns:local="clr-namespace:Sable.App"
         mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="760"
         x:Class="Sable.App.MainWindow"
         x:DataType="vm:DocumentViewModel"
@@ -45,6 +46,9 @@
                 <MenuItem Header="Redo" Command="{Binding RedoEditCommand}" InputGesture="Ctrl+Y" />
             </MenuItem>
             <MenuItem Header="_Image">
+                <MenuItem Header="Resize Document..." Click="OnResizeDocument" />
+                <MenuItem Header="Resize Canvas..." Click="OnResizeCanvas" />
+                <Separator />
                 <MenuItem Header="Add Adjustment">
                     <MenuItem Header="Brightness/Contrast"
                               Command="{Binding NewAdjustmentCommand}"
@@ -149,15 +153,33 @@
                     <DockPanel Grid.Row="0">
                         <Border DockPanel.Dock="Top" Background="#FF232323">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Classes="panelHeader" Text="Color" />
-                                <TextBlock Classes="panelHeader" Text="Gradients" Foreground="#FF666666" />
+                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="Color"
+                                           Tapped="OnSelectColorTab" Tag="color" />
+                                <TextBlock x:Name="TabGrad" Classes="panelHeader" Text="Gradients"
+                                           Foreground="#FF666666" Tapped="OnSelectColorTab" Tag="grad" />
                                 <TextBlock Classes="panelHeader" Text="Swatches" Foreground="#FF666666" />
                             </StackPanel>
                         </Border>
+                        <!-- gradient editor (Gradients tab): draggable stop bar + add/remove -->
+                        <StackPanel x:Name="GradientPanel" DockPanel.Dock="Bottom" IsVisible="False"
+                                    Margin="6,2,6,6" Spacing="4">
+                            <local:GradientBar x:Name="GradBar" Height="42" />
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <Button Classes="iconbtn" Click="OnGradAddStop" ToolTip.Tip="Add stop">
+                                    <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
+                                </Button>
+                                <Button Classes="iconbtn" Click="OnGradDelStop" ToolTip.Tip="Delete selected stop">
+                                    <Path Classes="icon" Width="14" Height="14" Data="M5 12h14" />
+                                </Button>
+                                <TextBlock Text="click bar = add · drag = move · wheel sets stop colour"
+                                           Foreground="#FF6A6A6A" FontSize="10" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" Width="200" />
+                            </StackPanel>
+                        </StackPanel>
                         <ColorView x:Name="BrushColorView" Margin="4"
                                    Color="White"
                                    ColorChanged="OnBrushColorChanged"
-                                   IsAlphaEnabled="False"
+                                   IsAlphaEnabled="True"
                                    IsColorPaletteVisible="True" />
                     </DockPanel>
 

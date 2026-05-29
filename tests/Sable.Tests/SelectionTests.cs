@@ -115,6 +115,52 @@ public class SelectionTests
     }
 
     [Fact]
+    public void Gradient_FadesAlongLine()
+    {
+        int w = 20, h = 1;
+        var px = new byte[w * h * 4];   // transparent
+        int changed = GradientTool.Apply(px, w, h, 0, 0, w, 0, 200, 100, 50);
+        Assert.True(changed > 0);
+        int aStart = px[(0) * 4 + 3];
+        int aEnd = px[(w - 1) * 4 + 3];
+        Assert.True(aStart > aEnd);        // opaque at start, fading to end
+        Assert.Equal(200, px[0]);          // foreground color at start
+        Assert.InRange(aStart, 200, 255);  // near-full alpha at start
+    }
+
+    [Fact]
+    public void GradientDef_Sample_InterpolatesBetweenStops()
+    {
+        var d = new GradientDef(new GradientStop(0f, 0, 0, 0, 255), new GradientStop(1f, 255, 255, 255, 255));
+        Assert.Equal((byte)0, d.Sample(0f).r);
+        Assert.Equal((byte)255, d.Sample(1f).r);
+        var mid = d.Sample(0.5f);
+        Assert.InRange(mid.r, 126, 129);          // ~halfway grey
+        // clamps outside range
+        Assert.Equal((byte)0, d.Sample(-1f).r);
+        Assert.Equal((byte)255, d.Sample(2f).r);
+    }
+
+    [Fact]
+    public void Gradient_ZeroLength_NoOp()
+    {
+        var px = new byte[10 * 10 * 4];
+        Assert.Equal(0, GradientTool.Apply(px, 10, 10, 5, 5, 5, 5, 255, 0, 0));
+    }
+
+    [Fact]
+    public void Gradient_HonorsMaskCoverage()
+    {
+        int w = 10, h = 1;
+        var px = new byte[w * h * 4];
+        var mask = new byte[w * h];        // only x=0 selected
+        mask[0] = 255;
+        GradientTool.Apply(px, w, h, 0, 0, w, 0, 255, 255, 255, null, mask, w);
+        Assert.True(px[0 * 4 + 3] > 0);    // masked pixel painted
+        Assert.Equal(0, px[5 * 4 + 3]);    // outside mask untouched
+    }
+
+    [Fact]
     public void Feather_SoftensEdges_KeepsCore()
     {
         int w = 40, h = 40;
