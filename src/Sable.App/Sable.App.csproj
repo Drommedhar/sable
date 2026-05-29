@@ -5,7 +5,14 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>..\..\img\sable.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- brand assets (logo + icon) compiled into the app at avares://Sable.App/Assets/* -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\img\logo_only.png" Link="Assets/logo_only.png" />
+    <AvaloniaResource Include="..\..\img\sable.ico" Link="Assets/sable.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.0.4" />

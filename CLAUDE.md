@@ -74,8 +74,12 @@ Sable = cross-platform (Windows/Linux/macOS) **raster** image editor, Photoshop/
 - **Avalonia 12 compiled bindings need `x:DataType`** on the binding scope (Window root + each `DataTemplate`), else `AVLN2100`. 
 - **`dotnet build` can report success while XAML is broken** (incremental up-to-date skip leaves stale/no precompiled XAML → runtime `XamlLoadException`). After XAML edits, do a clean build (`rm -rf obj bin`) or trust the runtime launch, not the incremental "0 errors".
 - **Do NOT `dotnet build -o <dir>`** for the Avalonia app — custom output path breaks XAML precompile. Run from `bin/Debug/net10.0/`.
+- **Overriding Fluent theme resource keys: match the TYPE, not your guess.** Some keys are not the type they sound like — e.g. `SliderPreContentMargin`/`SliderPostContentMargin` are **`GridLength`**, not `Thickness`. A wrong-type override builds fine but throws `InvalidCastException` at runtime during template apply (startup crash, managed `0xE0434352`). Safe keys used: `SliderHorizontalHeight`/`SliderTrackThemeHeight` (`x:Double`), `SliderTrackFill`/`SliderTrackValueFill`/`SliderThumbBackground` (+PointerOver/Pressed) (`SolidColorBrush`).
 - **Verify GUI startup via exit code, NOT a pipe.** `Sable.App.exe 2>&1 | head` returns the pipe's exit (0) even when the app crashes — false "alive". Use PowerShell `Start-Process -PassThru` then check `$p.HasExited`/`$p.ExitCode`. A native fail-fast **0xC0000409** (STATUS_STACK_BUFFER_OVERRUN) faulting in `wgpu_native.dll` is usually a **managed bug**: an out-of-bounds `stackalloc[...]` write (e.g. writing `entries[3]` into `stackalloc X[3]`) corrupts the /GS cookie and unwinds through native code. Check stackalloc sizes match the indices written.
-- **Also pending**: Linux/macOS surface paths, SAM2 ONNX, Diffusers sidecar.
+- **wgpu surface goes `Outdated` when occluded/resized** (e.g. a modal file dialog over the window). If `RenderFrame` just `return`s on non-`Success` `SurfaceGetCurrentTextureStatus`, the canvas freezes on stale content until a manual resize forces `Configure`. Fix: on `Outdated`/`Lost`, call `Configure(_width,_height)` and recover next frame. (This was the "image only shows after maximize" bug.)
+- **Canvas render `DispatcherTimer` must run at `DispatcherPriority.Render`, not the default Background** — at Background it's starved behind input/layout and the GPU canvas sits at ~30fps with 100ms+ freezes. `timeBeginPeriod(1)` alone does NOT fix it (Avalonia's DispatcherTimer ignores the multimedia timer). Use `new DispatcherTimer(interval, DispatcherPriority.Render, handler)`.
+- **Brush/eraser preview = a per-frame dab; only recomposite when it CHANGES.** Recompositing every hover frame full-doc lags large docs. Gate on `NeedsComposite || !Nullable.Equals(dab,_lastPreview)`. (`PreviewDab` is a `readonly record struct` → value equality.)
+- **Also pending**: Linux/macOS surface paths, SAM2 ONNX, Diffusers sidecar. Large-doc paint still full-recomposites per brush move (composite-caching is the follow-up).
 - F5 in VS Code: `.vscode/launch.json` — default runs `Sable.App`, second config runs `Sable.Gpu.Spike`.
 
 ## Build/run
@@ -89,3 +93,42 @@ Sable = cross-platform (Windows/Linux/macOS) **raster** image editor, Photoshop/
 ## Conventions
 - Caveman comms in chat; normal prose in code/docs/commits.
 - New effect = graph node checklist: serializable params + WGSL compute pass + undo entry. Destructive-only effect = bug.
+
+Rules in this file apply to every Claude Code session in this repo. They override generic defaults and persist across conversations.
+
+## When unsure, ASK — always
+
+If a request is ambiguous, has more than one plausible interpretation, or you are about to make a non-trivial design/scope decision: **stop and ask the user before implementing.** Do not guess. Do not pick "the most likely" reading and run with it.
+
+**Why:** guessing wrong on a multi-file feature wastes a full build cycle and the user's time, and it has happened repeatedly. A 10-second clarifying question is always cheaper than a wrong implementation.
+
+**How to apply:**
+
+*   Ask BEFORE writing code, not after. One tight, specific question (or a short numbered list of options) — not "should I proceed?".
+*   This applies even under time pressure or when the user seems impatient. A wrong big change is worse than a question.
+*   Small, reversible, obvious things (a typo fix, an unambiguous one-liner) don't need a question. Anything touching multiple files, the data model, or UX behaviour does if there's any doubt.
+*   If the user already answered a question, don't re-ask it — read carefully.
+
+## No emojis
+
+Do NOT add emoji glyphs anywhere — XAML, locale JSON, C# code (labels / Debug.WriteLine prefixes / log tags), JavaScript, prose responses, menu items, ribbon entries, button content, finding-type markers, or any other surface.
+
+This covers all pictographs in the Unicode emoji blocks:
+
+*   `U+1F300`–`U+1FAFF`
+*   `U+2600`–`U+27BF`
+*   common offenders: `✒ ✂ 💡 🎨 🎭 🔗 📊 📝 🗑 ➤ ⚠ ➕`
+
+**Acceptable visual markers:**
+
+*   SVG path-geometry strings (Lucide-style, e.g. `M21 15a2 2 0 0 1-2 2H7l-4 4V5...`) used in `IconPath` on ribbon items, activity-bar entries, sidebar contributors, ContentViewDescriptor etc. These are the project's icon system.
+*   Non-emoji unicode punctuation when needed and no SVG exists: `× ✕ → ←` for close / arrow buttons.
+*   Plain text labels — always preferred.
+
+**Why:** user has stated explicitly that emojis make the app feel like dumb consumer software. This was reinforced by removing every emoji previously introduced (inline actions, context menus, story-analysis filters, chat buttons, finding type icons). Treat this as a hard product-aesthetic constraint, not a stylistic suggestion.
+
+**How to apply:**
+
+*   When adding a new menu item, button, ribbon entry, descriptor, or locale string: use a text label and either an empty `Icon` field or an SVG `IconPath`. Never reach for an emoji as a quick visual marker.
+*   When touching a file that already contains emojis (in UI, locales, or labels): strip them as part of the change.
+*   Do not put emojis in Debug.WriteLine or console.log prefixes either (e.g. avoid `[💡 InlineActions]` — use `[InlineActions]`).

@@ -48,14 +48,26 @@ public sealed partial class DocumentViewModel : ObservableObject
         RedoEditCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>Groups collapsed in the panel (transient, in-session). Model refs stay stable across resync.</summary>
+    private readonly HashSet<Layer> _collapsed = new();
+
     // top→bottom: a group row appears above its (indented) children
     private void AddTree(List<Layer> list, int depth)
     {
         for (int i = list.Count - 1; i >= 0; i--)
         {
-            Layers.Add(new LayerViewModel(list[i], depth));
-            if (list[i] is GroupLayer g) AddTree(g.Children, depth + 1);
+            bool expanded = list[i] is not GroupLayer g0 || !_collapsed.Contains(g0);
+            Layers.Add(new LayerViewModel(list[i], depth, expanded));
+            if (list[i] is GroupLayer g && expanded) AddTree(g.Children, depth + 1);
         }
+    }
+
+    /// <summary>Toggle a group row's collapsed state and rebuild the flattened list.</summary>
+    public void ToggleExpand(LayerViewModel vm)
+    {
+        if (vm.Model is not GroupLayer g) return;
+        if (!_collapsed.Remove(g)) _collapsed.Add(g);
+        Resync();
     }
 
     /// <summary>The list the selected layer lives in (its parent), or the document root.</summary>

@@ -36,7 +36,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     private nint _hwnd;
     private uint _width = 1, _height = 1;
     private bool _configured;
-    private bool _hadPreview;
+    private Sable.Engine.Compositing.PreviewDab? _lastPreview;
 
     // viewport: _zoom = 1 means fit-to-window; pan in surface pixels
     private double _zoom = 1.0;
@@ -79,6 +79,12 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint GetModuleHandleW(string? lpModuleName);
 
+    // Windows default timer granularity is ~15.6ms, so a 16ms DispatcherTimer
+    // quantizes to ~31ms (~33fps). Raise resolution to 1ms while the canvas lives.
+    [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint uPeriod);
+    [DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint uPeriod);
+    private bool _timerPeriodSet;
+
     /// <summary>The document currently shown. Set to swap what the canvas renders.</summary>
     public Document? Document
     {
@@ -106,8 +112,11 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         {
             InitGpu();
             HookInput();   // subclass the child HWND for mouse (airspace workaround)
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-            _timer.Tick += (_, _) => RenderFrame();
+            _timerPeriodSet = timeBeginPeriod(1) == 0;   // 1ms timer resolution
+            // Render priority (not the default Background) so the present tick isn't
+            // starved behind input/layout — that was pinning the canvas at ~30fps.
+            _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(8),
+                DispatcherPriority.Render, (_, _) => RenderFrame());
             _timer.Start();
         }
 
@@ -118,6 +127,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     {
         _timer?.Stop();
         _timer = null;
+        if (_timerPeriodSet) { timeEndPeriod(1); _timerPeriodSet = false; }
         UnhookInput();
         _compositor?.Dispose();
         _compositor = null;
@@ -211,16 +221,30 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         // live brush preview: composite a dab into the active layer's place in the stack
         UpdatePreviewDab();
 
-        // recomposite when the document changed OR a preview dab is/was active
-        if (_compositeView is null || _doc.NeedsComposite || _compositor.Preview is not null || _hadPreview)
+        // recomposite only when the document changed OR the preview dab MOVED/changed.
+        // A stationary hover (dab unchanged) reuses the last composite — avoids a
+        // full-doc recomposite every frame just because the brush tool is active.
+        var dab = _compositor.Preview;
+        bool dabChanged = !Nullable.Equals(dab, _lastPreview);
+        if (_compositeView is null || _doc.NeedsComposite || dabChanged)
             _compositeView = _compositor.Composite(_doc);
-        _hadPreview = _compositor.Preview is not null;
+        _lastPreview = dab;
 
         var api = _gpu.Api;
         SurfaceTexture st = default;
         api.SurfaceGetCurrentTexture(_surface, ref st);
-        if (st.Status != SurfaceGetCurrentTextureStatus.Success || st.Texture is null)
+        if (st.Status != SurfaceGetCurrentTextureStatus.Success)
+        {
+            // Surface went stale (e.g. the window was occluded by the file dialog or
+            // resized). Reconfigure so we recover next frame instead of freezing on
+            // old content until a manual resize forces a Configure.
+            if (st.Status is SurfaceGetCurrentTextureStatus.Outdated
+                          or SurfaceGetCurrentTextureStatus.Lost)
+                Configure(_width, _height);
+            if (st.Texture is not null) api.TextureRelease(st.Texture);
             return;
+        }
+        if (st.Texture is null) return;
 
         var view = api.TextureCreateView(st.Texture, null);
 

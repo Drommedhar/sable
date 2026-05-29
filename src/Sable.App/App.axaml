@@ -3,6 +3,23 @@
              x:Class="Sable.App.App"
              RequestedThemeVariant="Dark">
 
+    <!-- Pro-tool control tuning: thin, dark, low-contrast sliders (PLAN §13.3).
+         These override Fluent's chunky defaults via its documented resource keys. -->
+    <Application.Resources>
+        <x:Double x:Key="SliderHorizontalHeight">20</x:Double>
+        <x:Double x:Key="SliderTrackThemeHeight">3</x:Double>
+
+        <SolidColorBrush x:Key="SliderTrackFill" Color="#FF3C3C3C" />
+        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#FF454545" />
+        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#FF454545" />
+        <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF5687C0" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF6699D6" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF6699D6" />
+        <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFE0E0E0" />
+        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFBFBFBF" />
+    </Application.Resources>
+
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
@@ -34,6 +51,95 @@
         </Style>
         <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+
+        <!-- Lucide-style monochrome line icons (project icon system, PLAN §13.3 / no-emoji rule) -->
+        <Style Selector="Path.icon">
+            <Setter Property="Stroke" Value="#FFCFCFCF" />
+            <Setter Property="StrokeThickness" Value="1.6" />
+            <Setter Property="Fill" Value="Transparent" />
+            <Setter Property="StrokeLineCap" Value="Round" />
+            <Setter Property="StrokeJoin" Value="Round" />
+            <Setter Property="Stretch" Value="Uniform" />
+        </Style>
+
+        <!-- compact icon button for the layers-panel footer -->
+        <Style Selector="Button.iconbtn">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.iconbtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+
+        <!-- borderless visibility (eye) toggle on the right of each layer row -->
+        <Style Selector="ToggleButton.eye">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="3" />
+        </Style>
+        <Style Selector="ToggleButton.eye:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ToggleButton.eye:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+
+        <!-- dense, Affinity-style layer rows: tight padding + blue selection bar -->
+        <Style Selector="ListBox.layers > ListBoxItem">
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="ListBox.layers > ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF2E2E2E" />
+        </Style>
+        <Style Selector="ListBox.layers > ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF2D5A88" />
+        </Style>
+        <Style Selector="ListBox.layers > ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF356699" />
+        </Style>
+
+        <!-- thin slider: small handle, compact footprint -->
+        <Style Selector="Slider">
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Slider /template/ Thumb">
+            <Setter Property="Width" Value="13" />
+            <Setter Property="Height" Value="13" />
+        </Style>
+
+        <!-- compact dark combo box -->
+        <Style Selector="ComboBox">
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="Foreground" Value="#FFDDDDDD" />
+        </Style>
+        <Style Selector="ComboBox /template/ Border#Background">
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+        </Style>
+
+        <!-- compact checkbox -->
+        <Style Selector="CheckBox">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="11" />
         </Style>
     </Application.Styles>
 </Application>
