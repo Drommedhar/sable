@@ -1,0 +1,247 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:canvas="clr-namespace:Sable.Canvas;assembly=Sable.Canvas"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        xmlns:eng="clr-namespace:Sable.Engine.Layers;assembly=Sable.Engine"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="760"
+        x:Class="Sable.App.MainWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="1280" Height="760"
+        Background="#FF1E1E1E"
+        Title="Sable">
+
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoEditCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoEditCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoEditCommand}" />
+    </Window.KeyBindings>
+
+    <!-- PS/Affinity-style chrome skeleton (PLAN §13). Real dockable panels (Dock.Avalonia)
+         and the embedded wgpu canvas surface land in later milestones. -->
+    <Panel>
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- (4) Menu bar -->
+        <Menu Grid.Row="0">
+            <MenuItem Header="_File">
+                <MenuItem Header="Open..." Click="OnOpenSable" InputGesture="Ctrl+O" />
+                <MenuItem Header="Open Image..." Click="OnOpenImage" />
+                <Separator />
+                <MenuItem Header="Save" Click="OnSaveSable" InputGesture="Ctrl+S" />
+                <MenuItem Header="Save As..." Click="OnSaveAsSable" />
+                <Separator />
+                <MenuItem Header="Export PNG..." Click="OnExportPng" />
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="Undo" Command="{Binding UndoEditCommand}" InputGesture="Ctrl+Z" />
+                <MenuItem Header="Redo" Command="{Binding RedoEditCommand}" InputGesture="Ctrl+Y" />
+            </MenuItem>
+            <MenuItem Header="_Image">
+                <MenuItem Header="Add Adjustment">
+                    <MenuItem Header="Brightness/Contrast"
+                              Command="{Binding NewAdjustmentCommand}"
+                              CommandParameter="{x:Static eng:AdjustmentKind.BrightnessContrast}" />
+                    <MenuItem Header="Levels"
+                              Command="{Binding NewAdjustmentCommand}"
+                              CommandParameter="{x:Static eng:AdjustmentKind.Levels}" />
+                    <MenuItem Header="HSL"
+                              Command="{Binding NewAdjustmentCommand}"
+                              CommandParameter="{x:Static eng:AdjustmentKind.Hsl}" />
+                </MenuItem>
+            </MenuItem>
+            <MenuItem Header="_Layer" />
+            <MenuItem Header="_Select" />
+            <MenuItem Header="_Filter">
+                <MenuItem Header="Gaussian Blur"
+                          Command="{Binding NewFilterCommand}"
+                          CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
+            </MenuItem>
+            <MenuItem Header="_View" />
+            <MenuItem Header="_Window">
+                <MenuItem Header="Adjustments" Click="OnToggleAdjustments" />
+            </MenuItem>
+            <MenuItem Header="_Help" />
+        </Menu>
+
+        <!-- (3) Context / options bar -->
+        <Border Grid.Row="1" Background="#FF252525" BorderBrush="#FF3A3A3A" BorderThickness="0,0,0,1" Height="34">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="8">
+                <TextBlock x:Name="ToolStatus" Text="Brush" Foreground="#FFCCCCCC" VerticalAlignment="Center" Width="76" />
+                <Rectangle Width="1" Height="18" Fill="#FF3A3A3A" />
+                <TextBlock Text="Size" Foreground="#FF9A9A9A" VerticalAlignment="Center" FontSize="11" />
+                <Slider x:Name="BrushSizeSlider" Width="160" Minimum="1" Maximum="200" Value="16"
+                        ValueChanged="OnBrushSizeChanged" VerticalAlignment="Center" />
+                <TextBlock x:Name="BrushSizeLabel" Text="16 px" Foreground="#FF9A9A9A"
+                           VerticalAlignment="Center" FontSize="11" Width="44" />
+                <Rectangle Width="1" Height="18" Fill="#FF3A3A3A" />
+                <TextBlock Text="Color" Foreground="#FF9A9A9A" VerticalAlignment="Center" FontSize="11" />
+                <Border x:Name="BrushColorSwatch" Width="22" Height="18" Background="White"
+                        BorderBrush="#FF666666" BorderThickness="1" VerticalAlignment="Center" />
+                <TextBlock Text="(K = edit mask)" Foreground="#FF6A6A6A" VerticalAlignment="Center" FontSize="11" />
+            </StackPanel>
+        </Border>
+
+        <!-- Main work area: (2) tools | (1) canvas | (5/6) panels -->
+        <Grid Grid.Row="2" ColumnDefinitions="46,*,300">
+
+            <!-- (2) Tool palette -->
+            <Border Grid.Column="0" Background="#FF2A2A2A" BorderBrush="#FF3A3A3A" BorderThickness="0,0,1,0">
+                <!-- tool strip is generated in code (grouped slots + flyouts), see BuildToolStrip() -->
+                <StackPanel x:Name="ToolStrip" Margin="0,6" HorizontalAlignment="Center" />
+            </Border>
+
+            <!-- (1) Canvas area: document tabs + GPU surface mount point -->
+            <Grid Grid.Column="1" RowDefinitions="30,*,24" Background="#FF1B1B1B">
+                <!-- document tabs -->
+                <Border Grid.Row="0" Background="#FF252525" BorderBrush="#FF3A3A3A" BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                        <Border Background="#FF1B1B1B" Padding="10,4" Margin="2,0" CornerRadius="3,3,0,0">
+                            <TextBlock Text="untitled.sable" Foreground="#FFDDDDDD" FontSize="12" />
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- canvas viewport: live embedded wgpu swapchain + input overlay -->
+                <Border Grid.Row="1" Margin="24" Background="#FF141414"
+                        BorderBrush="#FF000000" BorderThickness="1">
+                    <Panel>
+                        <canvas:GpuSurfaceControl x:Name="Canvas" />
+                        <Border x:Name="InputLayer" Background="Transparent"
+                                PointerWheelChanged="OnCanvasWheel"
+                                PointerPressed="OnCanvasPointerPressed"
+                                PointerMoved="OnCanvasPointerMoved"
+                                PointerReleased="OnCanvasPointerReleased"
+                                DoubleTapped="OnCanvasDoubleTapped" />
+                    </Panel>
+                </Border>
+
+                <!-- status strip -->
+                <Border Grid.Row="2" Background="#FF252525" BorderBrush="#FF3A3A3A" BorderThickness="0,1,0,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="14">
+                        <TextBlock Text="100%" Foreground="#FF9A9A9A" FontSize="11" />
+                        <TextBlock Text="512 x 512 px (300 ppi)" Foreground="#FF9A9A9A" FontSize="11" />
+                        <TextBlock Text="RGBA/16f linear" Foreground="#FF9A9A9A" FontSize="11" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- (5/6) Right panel stack: Color/Swatches + Layers -->
+            <Border Grid.Column="2" Background="#FF2A2A2A" BorderBrush="#FF3A3A3A" BorderThickness="1,0,0,0">
+                <Grid RowDefinitions="*,Auto,1.4*">
+
+                    <!-- (6) Color / Gradients / Swatches -->
+                    <DockPanel Grid.Row="0">
+                        <Border DockPanel.Dock="Top" Background="#FF232323">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Classes="panelHeader" Text="Color" />
+                                <TextBlock Classes="panelHeader" Text="Gradients" Foreground="#FF666666" />
+                                <TextBlock Classes="panelHeader" Text="Swatches" Foreground="#FF666666" />
+                            </StackPanel>
+                        </Border>
+                        <ColorView x:Name="BrushColorView" Margin="4"
+                                   Color="White"
+                                   ColorChanged="OnBrushColorChanged"
+                                   IsAlphaEnabled="False"
+                                   IsColorPaletteVisible="True" />
+                    </DockPanel>
+
+                    <GridSplitter Grid.Row="1" Height="4" Background="#FF1E1E1E"
+                                  HorizontalAlignment="Stretch" />
+
+                    <!-- (5) Layers / Channels / Paths -->
+                    <DockPanel Grid.Row="2">
+                        <Border DockPanel.Dock="Top" Background="#FF232323">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Classes="panelHeader" Text="Layers" />
+                                <TextBlock Classes="panelHeader" Text="Channels" Foreground="#FF666666" />
+                                <TextBlock Classes="panelHeader" Text="Paths" Foreground="#FF666666" />
+                            </StackPanel>
+                        </Border>
+                        <!-- blend mode + opacity row (bound to selected layer) -->
+                        <Border DockPanel.Dock="Top" Padding="8,4" Background="#FF262626">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ComboBox Width="130" FontSize="11"
+                                              ItemsSource="{Binding BlendModes}"
+                                              SelectedItem="{Binding SelectedLayer.BlendMode, Mode=TwoWay}" />
+                                    <TextBlock Text="{Binding SelectedLayer.OpacityLabel}"
+                                               Foreground="#FFAAAAAA" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Slider Minimum="0" Maximum="100"
+                                        Value="{Binding SelectedLayer.OpacityPercent, Mode=TwoWay}" />
+                                <CheckBox Content="Clip to layer below" FontSize="11" Foreground="#FFBBBBBB"
+                                          IsChecked="{Binding SelectedLayer.ClipToBelow, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- adjustment params now live in the modeless AdjustmentWindow (Window menu) -->
+                        <!-- footer buttons (bound to undoable layer commands) -->
+                        <Border DockPanel.Dock="Bottom" Background="#FF232323" Padding="6,4">
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <Button Classes="tool" Width="28" Height="26" Content="＋"
+                                        Command="{Binding NewLayerCommand}" ToolTip.Tip="New layer" />
+                                <Button Classes="tool" Width="28" Height="26" Content="◑"
+                                        Command="{Binding NewAdjustmentCommand}"
+                                        CommandParameter="{x:Static eng:AdjustmentKind.BrightnessContrast}"
+                                        ToolTip.Tip="New adjustment (Brightness/Contrast)" />
+                                <Button Classes="tool" Width="28" Height="26" Content="🗑"
+                                        Command="{Binding DeleteLayerCommand}" ToolTip.Tip="Delete layer" />
+                                <Button Classes="tool" Width="28" Height="26" Content="▲"
+                                        Command="{Binding MoveLayerUpCommand}" ToolTip.Tip="Move up" />
+                                <Button Classes="tool" Width="28" Height="26" Content="▼"
+                                        Command="{Binding MoveLayerDownCommand}" ToolTip.Tip="Move down" />
+                                <Button Classes="tool" Width="28" Height="26" Content="🗀"
+                                        Command="{Binding GroupCommand}" ToolTip.Tip="Group selected" />
+                                <Button Classes="tool" Width="28" Height="26" Content="⊟"
+                                        Command="{Binding UngroupCommand}" ToolTip.Tip="Ungroup" />
+                                <Button Classes="tool" Width="28" Height="26" Content="↶"
+                                        Command="{Binding UndoEditCommand}" ToolTip.Tip="Undo" />
+                                <Button Classes="tool" Width="28" Height="26" Content="↷"
+                                        Command="{Binding RedoEditCommand}" ToolTip.Tip="Redo" />
+                            </StackPanel>
+                        </Border>
+                        <!-- layer rows (bound, top->bottom); multi-select + drag-drop -->
+                        <ListBox x:Name="LayerList" ItemsSource="{Binding Layers}"
+                                 SelectionMode="Multiple"
+                                 SelectedItem="{Binding SelectedLayer, Mode=TwoWay}"
+                                 SelectionChanged="OnLayerSelectionChanged"
+                                 Background="Transparent" Margin="0,2" Padding="0">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:LayerViewModel">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Height="30"
+                                                Margin="{Binding Indent}">
+                                        <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Text="🗀" FontSize="12" VerticalAlignment="Center"
+                                                   Foreground="#FFCCAA66" IsVisible="{Binding IsGroup}" />
+                                        <Border Width="28" Height="22" Background="#FF555555"
+                                                VerticalAlignment="Center" IsVisible="{Binding !IsGroup}" />
+                                        <TextBlock Text="{Binding Name}" Foreground="#FFDDDDDD"
+                                                   FontSize="12" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- bottom app status bar -->
+        <Border Grid.Row="3" Background="#FF007ACC" Height="22">
+            <TextBlock Text="Sable — M0 spike build" Foreground="White" FontSize="11"
+                       VerticalAlignment="Center" Margin="8,0" />
+        </Border>
+    </Grid>
+
+    <!-- drag ghost overlay (follows cursor while dragging a layer) -->
+    <Canvas x:Name="DragLayer" IsHitTestVisible="False">
+        <Border x:Name="DragGhost" IsVisible="False" Background="#E6303030"
+                BorderBrush="#FF2D7FF9" BorderThickness="1" CornerRadius="3" Padding="8,4">
+            <TextBlock x:Name="DragGhostText" Foreground="White" FontSize="12" />
+        </Border>
+    </Canvas>
+    </Panel>
+</Window>

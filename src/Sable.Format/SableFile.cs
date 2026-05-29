@@ -1,0 +1,209 @@
+using System.IO.Compression;
+using System.Text.Json;
+using Sable.Core;
+using Sable.Engine;
+using Sable.Engine.Layers;
+
+namespace Sable.Format;
+
+/// <summary>
+/// Native <c>.sable</c> document container (PLAN §4): a zip holding
+/// <c>document.json</c> (size + layer graph/params) and <c>layers/{i}.raw</c>
+/// (per pixel-layer RGBA8 bytes, deflate-compressed by the zip). Re-editable layer
+/// data survives save/load. History/thumbnails/ICC come later.
+/// </summary>
+public static class SableFile
+{
+    private const string ManifestEntry = "document.json";
+
+    private sealed class DocDto
+    {
+        public int Version { get; set; } = 1;
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public List<LayerDto> Layers { get; set; } = new();
+    }
+
+    private sealed class LayerDto
+    {
+        public string Name { get; set; } = "Layer";
+        public string Type { get; set; } = "pixel";
+        public int BlendMode { get; set; }
+        public float Opacity { get; set; } = 1f;
+        public bool Visible { get; set; } = true;
+        public bool Clip { get; set; }
+        public int OffsetX { get; set; }
+        public int OffsetY { get; set; }
+        public float ScaleX { get; set; } = 1f;
+        public float ScaleY { get; set; } = 1f;
+        public float Rotation { get; set; }
+        public string? Pixels { get; set; }   // zip entry name, if a pixel layer
+        public int AdjustmentKind { get; set; }
+        public float Brightness { get; set; }
+        public float Contrast { get; set; } = 1f;
+        public float InBlack { get; set; }
+        public float InWhite { get; set; } = 1f;
+        public float Gamma { get; set; } = 1f;
+        public float HueShift { get; set; }
+        public float Saturation { get; set; } = 1f;
+        public float Lightness { get; set; }
+        public int FilterKind { get; set; }
+        public float Radius { get; set; } = 8f;
+        public string? Mask { get; set; }   // zip entry name, if the layer has a mask
+        public List<LayerDto> Children { get; set; } = new();   // for groups
+    }
+
+    public static void Save(Document doc, string path)
+    {
+        using var fs = File.Create(path);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+
+        int next = 0;
+        var dto = new DocDto { Width = doc.Width, Height = doc.Height };
+        foreach (var layer in doc.Layers)
+            dto.Layers.Add(SaveLayer(zip, layer, ref next));
+
+        var manifest = zip.CreateEntry(ManifestEntry, CompressionLevel.Optimal);
+        using var ms = manifest.Open();
+        JsonSerializer.Serialize(ms, dto, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static LayerDto SaveLayer(ZipArchive zip, Layer layer, ref int next)
+    {
+        int id = next++;
+        var ld = new LayerDto
+        {
+            Name = layer.Name,
+            BlendMode = (int)layer.BlendMode,
+            Opacity = layer.Opacity,
+            Visible = layer.Visible,
+            Clip = layer.ClipToBelow,
+            OffsetX = layer.OffsetX,
+            OffsetY = layer.OffsetY,
+            ScaleX = layer.ScaleX,
+            ScaleY = layer.ScaleY,
+            Rotation = layer.Rotation
+        };
+        switch (layer)
+        {
+            case PixelLayer px:
+                ld.Type = "pixel";
+                ld.Pixels = $"layers/{id}.raw";
+                WriteEntry(zip, ld.Pixels, px.Pixels);
+                break;
+            case AdjustmentLayer adj:
+                ld.Type = "adjustment";
+                ld.AdjustmentKind = (int)adj.Kind;
+                ld.Brightness = adj.Brightness; ld.Contrast = adj.Contrast;
+                ld.InBlack = adj.InBlack; ld.InWhite = adj.InWhite; ld.Gamma = adj.Gamma;
+                ld.HueShift = adj.HueShift; ld.Saturation = adj.Saturation; ld.Lightness = adj.Lightness;
+                break;
+            case FilterLayer flt:
+                ld.Type = "filter";
+                ld.FilterKind = (int)flt.Kind;
+                ld.Radius = flt.Radius;
+                break;
+            case GroupLayer g:
+                ld.Type = "group";
+                foreach (var c in g.Children) ld.Children.Add(SaveLayer(zip, c, ref next));
+                break;
+        }
+        if (layer.Mask is { } mask)
+        {
+            ld.Mask = $"masks/{id}.raw";
+            WriteEntry(zip, ld.Mask, mask);
+        }
+        return ld;
+    }
+
+    public static Document Load(string path)
+    {
+        using var fs = File.OpenRead(path);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
+
+        var manifest = zip.GetEntry(ManifestEntry)
+            ?? throw new InvalidDataException("Not a .sable file: missing document.json");
+        DocDto dto;
+        using (var ms = manifest.Open())
+            dto = JsonSerializer.Deserialize<DocDto>(ms)
+                  ?? throw new InvalidDataException("Corrupt .sable manifest");
+
+        var doc = new Document(dto.Width, dto.Height);
+        foreach (var ld in dto.Layers)
+            if (BuildLayer(ld, zip, dto.Width, dto.Height) is { } l) doc.Layers.Add(l);
+        return doc;
+    }
+
+    private static Layer? BuildLayer(LayerDto ld, ZipArchive zip, int w, int h)
+    {
+        Layer? created = ld.Type switch
+        {
+            "pixel" => LoadPixel(ld, zip, w, h),
+            "adjustment" => new AdjustmentLayer((AdjustmentKind)ld.AdjustmentKind)
+            {
+                Brightness = ld.Brightness, Contrast = ld.Contrast,
+                InBlack = ld.InBlack, InWhite = ld.InWhite, Gamma = ld.Gamma,
+                HueShift = ld.HueShift, Saturation = ld.Saturation, Lightness = ld.Lightness
+            },
+            "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius },
+            "group" => LoadGroup(ld, zip, w, h),
+            _ => null
+        };
+        if (created is null) return null;
+
+        created.Name = ld.Name;
+        created.BlendMode = (BlendMode)ld.BlendMode;
+        created.Opacity = ld.Opacity;
+        created.Visible = ld.Visible;
+        created.ClipToBelow = ld.Clip;
+        created.OffsetX = ld.OffsetX;
+        created.OffsetY = ld.OffsetY;
+        created.ScaleX = ld.ScaleX;
+        created.ScaleY = ld.ScaleY;
+        created.Rotation = ld.Rotation;
+        if (ld.Mask is not null && zip.GetEntry(ld.Mask) is { } maskEntry)
+        {
+            created.AddWhiteMask(w, h);
+            using var es = maskEntry.Open();
+            ReadFully(es, created.Mask!);
+        }
+        return created;
+    }
+
+    private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h)
+    {
+        var px = new PixelLayer(w, h, ld.Name);
+        if (ld.Pixels is not null && zip.GetEntry(ld.Pixels) is { } pe)
+        {
+            using var es = pe.Open();
+            ReadFully(es, px.Pixels);
+        }
+        return px;
+    }
+
+    private static GroupLayer LoadGroup(LayerDto ld, ZipArchive zip, int w, int h)
+    {
+        var g = new GroupLayer(ld.Name);
+        foreach (var c in ld.Children)
+            if (BuildLayer(c, zip, w, h) is { } l) g.Children.Add(l);
+        return g;
+    }
+
+    private static void WriteEntry(ZipArchive zip, string name, byte[] data)
+    {
+        var e = zip.CreateEntry(name, CompressionLevel.Optimal);
+        using var s = e.Open();
+        s.Write(data, 0, data.Length);
+    }
+
+    private static void ReadFully(Stream s, byte[] buffer)
+    {
+        int offset = 0;
+        while (offset < buffer.Length)
+        {
+            int read = s.Read(buffer, offset, buffer.Length - offset);
+            if (read == 0) break;
+            offset += read;
+        }
+    }
+}

@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <ProjectReference Include="..\Sable.Gpu\Sable.Gpu.csproj" />
+    <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Tools\Sable.Tools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.4" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

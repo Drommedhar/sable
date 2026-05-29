@@ -1,0 +1,39 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Sable.App.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
+
+        <!-- Sable dark chrome: dense, pro-tool styling (PLAN §13.3). -->
+        <Style Selector="Menu">
+            <Setter Property="Background" Value="#FF2D2D2D" />
+            <Setter Property="Height" Value="28" />
+        </Style>
+        <Style Selector="MenuItem">
+            <Setter Property="Foreground" Value="#FFCCCCCC" />
+        </Style>
+        <Style Selector="TextBlock.panelHeader">
+            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="8,5" />
+        </Style>
+        <Style Selector="Button.tool">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#FFCFCFCF" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+    </Application.Styles>
+</Application>

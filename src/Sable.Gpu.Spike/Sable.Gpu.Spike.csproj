@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Gpu\Sable.Gpu.csproj" />
+    <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <ProjectReference Include="..\Sable.Tools\Sable.Tools.csproj" />
+    <ProjectReference Include="..\Sable.Format\Sable.Format.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.*" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

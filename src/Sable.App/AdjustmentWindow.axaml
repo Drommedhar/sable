@@ -1,0 +1,56 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        x:Class="Sable.App.AdjustmentWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="280" Height="320"
+        Background="#FF2A2A2A"
+        CanResize="True"
+        ShowInTaskbar="False"
+        Title="Adjustment">
+
+    <Border Padding="10">
+        <StackPanel Spacing="6">
+            <TextBlock Text="{Binding SelectedLayer.Name}" Classes="panelHeader" Padding="0"
+                       IsVisible="{Binding SelectedLayer.IsEffect}" />
+
+            <TextBlock Text="Select an adjustment or filter layer to edit its parameters."
+                       Foreground="#FF777777" FontSize="11" TextWrapping="Wrap"
+                       IsVisible="{Binding !SelectedLayer.IsEffect}" />
+
+            <!-- Brightness/Contrast -->
+            <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.IsBrightnessContrast}">
+                <TextBlock Text="Brightness" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="-100" Maximum="100" Value="{Binding SelectedLayer.Brightness, Mode=TwoWay}" />
+                <TextBlock Text="Contrast" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="0" Maximum="200" Value="{Binding SelectedLayer.Contrast, Mode=TwoWay}" />
+            </StackPanel>
+
+            <!-- Levels -->
+            <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.IsLevels}">
+                <TextBlock Text="Input Black" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="0" Maximum="100" Value="{Binding SelectedLayer.InBlackPct, Mode=TwoWay}" />
+                <TextBlock Text="Input White" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="0" Maximum="100" Value="{Binding SelectedLayer.InWhitePct, Mode=TwoWay}" />
+                <TextBlock Text="Gamma" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="10" Maximum="300" Value="{Binding SelectedLayer.GammaPct, Mode=TwoWay}" />
+            </StackPanel>
+
+            <!-- HSL -->
+            <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.IsHsl}">
+                <TextBlock Text="Hue" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="-180" Maximum="180" Value="{Binding SelectedLayer.HueDeg, Mode=TwoWay}" />
+                <TextBlock Text="Saturation" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="0" Maximum="200" Value="{Binding SelectedLayer.SatPct, Mode=TwoWay}" />
+                <TextBlock Text="Lightness" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="-100" Maximum="100" Value="{Binding SelectedLayer.LightPct, Mode=TwoWay}" />
+            </StackPanel>
+
+            <!-- Gaussian Blur -->
+            <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.IsFilter}">
+                <TextBlock Text="Radius" Foreground="#FF999999" FontSize="10" />
+                <Slider Minimum="0" Maximum="100" Value="{Binding SelectedLayer.BlurRadius, Mode=TwoWay}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
