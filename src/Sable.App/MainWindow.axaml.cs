@@ -36,6 +36,9 @@ public partial class MainWindow : Window
         LayerList.AddHandler(PointerMovedEvent, OnLayerPointerMoved, RoutingStrategies.Tunnel);
         LayerList.AddHandler(PointerReleasedEvent, OnLayerPointerReleased, RoutingStrategies.Tunnel);
 
+        // selection keys tunnel-first so a focused panel (e.g. the layers list) can't eat Delete
+        AddHandler(KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
+
         WireTools();
     }
 
@@ -43,6 +46,15 @@ public partial class MainWindow : Window
 
     private static LayerViewModel? LayerOf(object? source)
         => (source as Control)?.DataContext as LayerViewModel;
+
+    private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
+            case Key.Escape: Canvas.Deselect(); e.Handled = true; break;
+        }
+    }
 
     private void OnLayerSelectionChanged(object? sender, SelectionChangedEventArgs e)
         => Doc?.SetSelection(LayerList.SelectedItems?.Cast<LayerViewModel>() ?? Enumerable.Empty<LayerViewModel>());
@@ -146,6 +158,12 @@ public partial class MainWindow : Window
     {
         Canvas.Brush.Radius = (float)(e.NewValue / 2.0);   // slider = diameter
         if (BrushSizeLabel is not null) BrushSizeLabel.Text = $"{e.NewValue:0} px";
+    }
+
+    private void OnFeatherChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        Canvas.SetSelectionFeather((float)e.NewValue);   // also re-feathers the current selection live
+        if (FeatherLabel is not null) FeatherLabel.Text = $"{e.NewValue:0} px";
     }
 
     private void OnBrushColorChanged(object? sender, Avalonia.Controls.ColorChangedEventArgs e)

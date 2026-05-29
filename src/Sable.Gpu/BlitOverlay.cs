@@ -1,3 +1,5 @@
+using Silk.NET.WebGPU;
+
 namespace Sable.Gpu;
 
 /// <summary>
@@ -23,4 +25,9 @@ public struct BlitOverlay
     public float BrushColR, BrushColG, BrushColB;   // 0..1
     public bool BrushErase;
     public float BrushHardness;
+
+    // non-rectangular selection edge: marching ants traced along an R8 coverage mask
+    // (ellipse/lasso/wand). MaskView is a doc-sized R8 texture sampled in doc UV.
+    public bool MaskOn;
+    public unsafe TextureView* MaskView;
 }

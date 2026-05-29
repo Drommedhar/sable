@@ -18,12 +18,13 @@ struct Viewport {
     gizmoOn: f32, rotDist: f32,
     brushOn: f32, brushX: f32, brushY: f32, brushR: f32,   // brush cursor preview (surface px)
     brushColR: f32, brushColG: f32, brushColB: f32, brushErase: f32, brushHard: f32,
-    _h0: f32, _h1: f32, _h2: f32, _h3: f32, _h4: f32,
+    maskOn: f32, _h1: f32, _h2: f32, _h3: f32, _h4: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> vp: Viewport;
+@group(0) @binding(3) var maskTex: texture_2d<f32>;   // selection coverage (R8), doc UV
 
 @vertex
 fn vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
@@ -65,7 +66,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
     // marching-ants overlay rectangle (selection bounding box)
     if (vp.ovOn > 0.5) {
-        let t = vp.invScale * 1.5;
+        let t = vp.invScale * 0.6;   // ~1px line in surface space
         let onL = abs(docX - vp.ovX) <= t;
         let onR = abs(docX - (vp.ovX + vp.ovW)) <= t;
         let onT = abs(docY - vp.ovY) <= t;
@@ -73,13 +74,13 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let inX = docX >= vp.ovX - t && docX <= vp.ovX + vp.ovW + t;
         let inY = docY >= vp.ovY - t && docY <= vp.ovY + vp.ovH + t;
         if (((onL || onR) && inY) || ((onT || onB) && inX)) {
-            let on = ((i32(floor((frag.x + frag.y) / 6.0))) & 1) == 0;
+            let on = ((i32(floor((frag.x + frag.y) / 4.0))) & 1) == 0;
             outc = select(vec3<f32>(0.0), vec3<f32>(1.0), on);
         }
 
         // GIMP-style resize grips: filled squares at 8 handle positions
         if (vp.selHandles > 0.5) {
-            let hs = vp.invScale * 4.0;
+            let hs = vp.invScale * 3.0;
             let x0 = vp.ovX; let x1 = vp.ovX + vp.ovW * 0.5; let x2 = vp.ovX + vp.ovW;
             let y0 = vp.ovY; let y1 = vp.ovY + vp.ovH * 0.5; let y2 = vp.ovY + vp.ovH;
             let nx0 = abs(docX - x0) <= hs; let nx1 = abs(docX - x1) <= hs; let nx2 = abs(docX - x2) <= hs;
@@ -89,6 +90,23 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                 (nx0 && ny1) ||                 (nx2 && ny1) ||
                 (nx0 && ny2) || (nx1 && ny2) || (nx2 && ny2);
             if (onGrip) { outc = vec3<f32>(1.0, 1.0, 1.0); }
+        }
+    }
+
+    // non-rectangular selection: marching ants traced along the coverage-mask boundary
+    if (vp.maskOn > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let step = max(vp.invScale, 1.0);          // ~1 surface px expressed in doc px
+        let du = step / vp.docW;
+        let dv = step / vp.docH;
+        let c  = textureSample(maskTex, samp, vec2<f32>(u, v)).r > 0.5;
+        let cl = textureSample(maskTex, samp, vec2<f32>(u - du, v)).r > 0.5;
+        let cr = textureSample(maskTex, samp, vec2<f32>(u + du, v)).r > 0.5;
+        let ct = textureSample(maskTex, samp, vec2<f32>(u, v - dv)).r > 0.5;
+        let cb = textureSample(maskTex, samp, vec2<f32>(u, v + dv)).r > 0.5;
+        // one-sided: only the inner boundary pixels (selected, adjacent to outside) → ~1px line
+        if (c && (!cl || !cr || !ct || !cb)) {
+            let on = ((i32(floor((frag.x + frag.y) / 6.0))) & 1) == 0;
+            outc = select(vec3<f32>(0.0), vec3<f32>(1.0), on);
         }
     }
 

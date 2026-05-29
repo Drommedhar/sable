@@ -16,6 +16,8 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private BindGroupLayout* _bgl;
     private RenderPipeline* _pipeline;
     private Silk.NET.WebGPU.Buffer* _vpBuf;
+    private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
+    private TextureView* _dummyMaskView;
 
     public SurfaceBlitter(WgpuDevice gpu, TextureFormat targetFormat)
     {
@@ -36,7 +38,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         };
         _sampler = api.DeviceCreateSampler(gpu.Device, in samplerDesc);
 
-        var bglEntries = stackalloc BindGroupLayoutEntry[3];
+        var bglEntries = stackalloc BindGroupLayoutEntry[4];
         bglEntries[0] = new BindGroupLayoutEntry
         {
             Binding = 0, Visibility = ShaderStage.Fragment,
@@ -56,8 +58,28 @@ public sealed unsafe class SurfaceBlitter : IDisposable
             Binding = 2, Visibility = ShaderStage.Fragment,
             Buffer = new BufferBindingLayout { Type = BufferBindingType.Uniform }
         };
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 3, Entries = bglEntries };
+        bglEntries[3] = new BindGroupLayoutEntry   // selection coverage mask (R8) for edge ants
+        {
+            Binding = 3, Visibility = ShaderStage.Fragment,
+            Texture = new TextureBindingLayout
+            {
+                SampleType = TextureSampleType.Float,
+                ViewDimension = TextureViewDimension.Dimension2D
+            }
+        };
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 4, Entries = bglEntries };
         _bgl = api.DeviceCreateBindGroupLayout(gpu.Device, in bglDesc);
+
+        // 1×1 R8 placeholder bound when no mask selection is active (binding must be satisfied)
+        var dmDesc = new TextureDescriptor
+        {
+            Usage = TextureUsage.TextureBinding,
+            Dimension = TextureDimension.Dimension2D,
+            Size = new Extent3D { Width = 1, Height = 1, DepthOrArrayLayers = 1 },
+            Format = TextureFormat.R8Unorm, MipLevelCount = 1, SampleCount = 1
+        };
+        _dummyMask = api.DeviceCreateTexture(gpu.Device, in dmDesc);
+        _dummyMaskView = api.TextureCreateView(_dummyMask, null);
 
         var vpDesc = new BufferDescriptor { Size = 160, Usage = BufferUsage.Uniform | BufferUsage.CopyDst };
         _vpBuf = api.DeviceCreateBuffer(gpu.Device, in vpDesc);
@@ -110,13 +132,17 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[26] = ov.BrushOn ? 1f : 0f; u[27] = ov.BrushX; u[28] = ov.BrushY; u[29] = ov.BrushR;
         u[30] = ov.BrushColR; u[31] = ov.BrushColG; u[32] = ov.BrushColB;
         u[33] = ov.BrushErase ? 1f : 0f; u[34] = ov.BrushHardness;
+        bool maskOn = ov.MaskOn && ov.MaskView is not null;
+        u[35] = maskOn ? 1f : 0f;
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, 160);
 
-        var bgEntries = stackalloc BindGroupEntry[3];
+        var maskView = maskOn ? ov.MaskView : _dummyMaskView;
+        var bgEntries = stackalloc BindGroupEntry[4];
         bgEntries[0] = new BindGroupEntry { Binding = 0, TextureView = source };
         bgEntries[1] = new BindGroupEntry { Binding = 1, Sampler = _sampler };
         bgEntries[2] = new BindGroupEntry { Binding = 2, Buffer = _vpBuf, Size = 160 };
-        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 3, Entries = bgEntries };
+        bgEntries[3] = new BindGroupEntry { Binding = 3, TextureView = maskView };
+        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 4, Entries = bgEntries };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var color = new RenderPassColorAttachment
@@ -153,5 +179,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         if (_bgl is not null) api.BindGroupLayoutRelease(_bgl);
         if (_sampler is not null) api.SamplerRelease(_sampler);
         if (_vpBuf is not null) api.BufferRelease(_vpBuf);
+        if (_dummyMaskView is not null) api.TextureViewRelease(_dummyMaskView);
+        if (_dummyMask is not null) api.TextureRelease(_dummyMask);
     }
 }

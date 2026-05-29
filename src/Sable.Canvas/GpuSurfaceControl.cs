@@ -38,6 +38,11 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     private bool _configured;
     private Sable.Engine.Compositing.PreviewDab? _lastPreview;
 
+    // selection-mask overlay texture (R8, doc-sized) for edge marching-ants
+    private Texture* _selMaskTex;
+    private TextureView* _selMaskView;
+    private int _selMaskTexW, _selMaskTexH, _selMaskVer = -1;
+
     // viewport: _zoom = 1 means fit-to-window; pan in surface pixels
     private double _zoom = 1.0;
     private double _panX, _panY;
@@ -128,6 +133,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _timerResToken = null;
         _input?.Dispose();
         _input = null;
+        if (_selMaskView is not null) { _gpu?.Api.TextureViewRelease(_selMaskView); _selMaskView = null; }
+        if (_selMaskTex is not null) { _gpu?.Api.TextureRelease(_selMaskTex); _selMaskTex = null; }
         _compositor?.Dispose();
         _compositor = null;
         _blitter?.Dispose();
@@ -206,6 +213,49 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _compositor.Preview = dab;
     }
 
+    /// <summary>(Re)upload the document's selection coverage mask to an R8 texture for the edge overlay.</summary>
+    private void UpdateSelMaskTexture()
+    {
+        if (_gpu is null || _doc?.SelectionMask is not { } mask) return;
+        var api = _gpu.Api;
+        int w = _doc.Width, h = _doc.Height;
+
+        if (_selMaskTex is null || _selMaskTexW != w || _selMaskTexH != h)
+        {
+            if (_selMaskView is not null) { api.TextureViewRelease(_selMaskView); _selMaskView = null; }
+            if (_selMaskTex is not null) { api.TextureRelease(_selMaskTex); _selMaskTex = null; }
+            var td = new TextureDescriptor
+            {
+                Usage = TextureUsage.TextureBinding | TextureUsage.CopyDst,
+                Dimension = TextureDimension.Dimension2D,
+                Size = new Extent3D { Width = (uint)w, Height = (uint)h, DepthOrArrayLayers = 1 },
+                Format = TextureFormat.R8Unorm, MipLevelCount = 1, SampleCount = 1
+            };
+            _selMaskTex = api.DeviceCreateTexture(_gpu.Device, in td);
+            _selMaskView = api.TextureCreateView(_selMaskTex, null);
+            _selMaskTexW = w; _selMaskTexH = h;
+            _selMaskVer = -1;   // force upload of the new texture
+        }
+
+        if (_selMaskVer == _doc.SelectionVersion) return;   // already current
+
+        // QueueWriteTexture requires bytesPerRow to be a 256-byte multiple → pad rows.
+        int aligned = (w + 255) & ~255;
+        byte[] src = mask;
+        if (aligned != w)
+        {
+            var padded = new byte[aligned * h];
+            for (int y = 0; y < h; y++) Array.Copy(mask, y * w, padded, y * aligned, w);
+            src = padded;
+        }
+        var dst = new ImageCopyTexture { Texture = _selMaskTex, MipLevel = 0, Aspect = TextureAspect.All };
+        var layout = new TextureDataLayout { Offset = 0, BytesPerRow = (uint)aligned, RowsPerImage = (uint)h };
+        var ext = new Extent3D { Width = (uint)w, Height = (uint)h, DepthOrArrayLayers = 1 };
+        fixed (byte* p = src)
+            api.QueueWriteTexture(_gpu.Queue, in dst, p, (nuint)src.Length, in layout, in ext);
+        _selMaskVer = _doc.SelectionVersion;
+    }
+
     private void RenderFrame()
     {
         if (_gpu is null || _surface is null || _compositor is null || _blitter is null || _doc is null) return;
@@ -249,12 +299,22 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         var view = api.TextureCreateView(st.Texture, null);
 
         var ov = default(BlitOverlay);
-        if (_doc?.Selection is { } sel)   // active selection marching ants (any tool)
+        if (_doc?.Selection is { } sel)   // active selection (any tool)
         {
-            ov.RectOn = true;
-            ov.RectX = sel.X; ov.RectY = sel.Y; ov.RectW = sel.W; ov.RectH = sel.H;
-            // grips only for an editable rectangular marquee (not mask selections)
-            ov.SelHandles = ActiveTool == Sable.Tools.ToolKind.Marquee && _doc.SelectionMask is null;
+            if (_doc.SelectionMask is not null)
+            {
+                // non-rect (ellipse/lasso/wand): trace ants along the true coverage edge
+                UpdateSelMaskTexture();
+                ov.MaskOn = _selMaskView is not null;
+                ov.MaskView = _selMaskView;
+            }
+            else
+            {
+                // plain rectangle: bounding-box ants + editable grips for the marquee
+                ov.RectOn = true;
+                ov.RectX = sel.X; ov.RectY = sel.Y; ov.RectW = sel.W; ov.RectH = sel.H;
+                ov.SelHandles = ActiveTool == Sable.Tools.ToolKind.Marquee;
+            }
         }
         if (ActiveLayer is { } l)
         {

@@ -122,13 +122,20 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_selecting && _doc is not null)
         {
             var (dx, dy) = MapToDoc(sx, sy);
-            _doc.Selection = SelRect.FromCorners(_selStartX, _selStartY, dx, dy, _doc.Width, _doc.Height);
+            var rect = SelRect.FromCorners(_selStartX, _selStartY, dx, dy, _doc.Width, _doc.Height);
+            if (ActiveTool == ToolKind.EllipseMarquee && rect.W > 0 && rect.H > 0)
+                _doc.SetMaskSelection(Selections.Ellipse(_doc.Width, _doc.Height, rect));  // live ellipse outline
+            else
+                _doc.Selection = rect;        // rect marquee: live bbox (it IS a box)
         }
         else if (_lassoing && _doc is not null)
         {
             var (dx, dy) = MapToDoc(sx, sy);
             _lassoPts.Add((dx, dy));
-            _doc.Selection = LassoBounds();   // live bbox while drawing
+            if (_lassoPts.Count >= 3)
+                _doc.SetMaskSelection(Selections.Polygon(_doc.Width, _doc.Height, _lassoPts));  // live freehand path
+            else
+                _doc.Selection = LassoBounds();
         }
         else if (_selResizing && _doc is not null)
         {
@@ -173,19 +180,55 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _baseSelMask = _selMode == SelMode.Replace ? null : _doc?.SnapshotSelectionMask();
     }
 
-    /// <summary>Commit a freshly-drawn coverage mask, combined with the gesture-start selection.</summary>
+    /// <summary>Edge softness (px) applied to a selection; 0 = hard edge. Set from the options bar.</summary>
+    public float SelectionFeather { get; set; }
+
+    /// <summary>Last committed selection shape BEFORE feather (so the feather amount can be re-adjusted live).</summary>
+    private byte[]? _lastSelShape;
+
+    /// <summary>
+    /// Re-feather the current selection to <paramref name="px"/> without redrawing it. Lets the
+    /// options-bar Feather slider adjust an existing selection. Converts a plain rect to a mask.
+    /// </summary>
+    public void SetSelectionFeather(float px)
+    {
+        SelectionFeather = px;
+        if (_doc is null) return;
+        var baseM = _lastSelShape
+            ?? (_doc.Selection is { W: > 0, H: > 0 } r ? Selections.Rect(_doc.Width, _doc.Height, r) : null);
+        if (baseM is null) return;   // nothing selected
+
+        _lastSelShape = baseM;
+        int fr = (int)Math.Round(px);
+        var shown = fr > 0 ? Selections.Feather(baseM, _doc.Width, _doc.Height, fr) : (byte[])baseM.Clone();
+        _doc.SetMaskSelection(shown);
+    }
+
+    /// <summary>Commit a freshly-drawn coverage mask, combined with the gesture-start selection, then feathered.</summary>
     private void ApplyMask(byte[] newMask)
     {
         if (_doc is null) return;
-        if (_selMode == SelMode.Replace) { _doc.SetMaskSelection(newMask); return; }
-        if (_baseSelMask is null)
+
+        byte[] result;
+        if (_selMode == SelMode.Replace)
         {
-            if (_selMode == SelMode.Add) _doc.SetMaskSelection(newMask);
-            else _doc.ClearSelection();   // subtract/intersect from nothing = nothing
-            return;
+            result = newMask;
         }
-        _doc.SetMaskSelection(Selections.Combine(_baseSelMask, newMask, _selMode));
-        _baseSelMask = null;
+        else if (_baseSelMask is null)
+        {
+            if (_selMode == SelMode.Add) result = newMask;
+            else { _doc.ClearSelection(); return; }   // subtract/intersect from nothing = nothing
+        }
+        else
+        {
+            result = Selections.Combine(_baseSelMask, newMask, _selMode);
+            _baseSelMask = null;
+        }
+
+        _lastSelShape = result;   // remember the hard shape for live feather re-adjust
+        int fr = (int)Math.Round(SelectionFeather);
+        var shown = fr > 0 ? Selections.Feather(result, _doc.Width, _doc.Height, fr) : result;
+        _doc.SetMaskSelection(shown);
     }
 
     private StrokeSession? CreateSession()
@@ -367,6 +410,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 // rect marquee with a modifier → rasterize + combine (loses grips, like a mask sel)
                 ApplyMask(Selections.Rect(_doc.Width, _doc.Height, r));
             }
+            else if (wasNewDraw && SelectionFeather > 0 && _doc?.Selection is { } rf)
+            {
+                // feathered rect → becomes a soft coverage mask (grips drop, like other masks)
+                ApplyMask(Selections.Rect(_doc.Width, _doc.Height, rf));
+            }
             // else: plain rect Replace keeps Selection rect + null mask (grips stay editable)
         }
         else if (_panningMouse)
@@ -377,7 +425,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     }
 
     /// <summary>Clear any active selection.</summary>
-    public void Deselect() => _doc?.ClearSelection();
+    public void Deselect() { _doc?.ClearSelection(); _lastSelShape = null; }
 
     /// <summary>Erase the selected region of the active layer (undoable). No-op without a selection.</summary>
     public void DeleteSelection()

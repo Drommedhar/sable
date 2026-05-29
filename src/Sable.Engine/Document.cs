@@ -30,8 +30,11 @@ public sealed class Document
     /// </summary>
     public byte[]? SelectionMask { get; set; }
 
+    /// <summary>Bumped whenever the selection mask changes, so the canvas re-uploads its overlay texture.</summary>
+    public int SelectionVersion { get; private set; }
+
     /// <summary>Clear any active selection (rect + mask).</summary>
-    public void ClearSelection() { Selection = null; SelectionMask = null; }
+    public void ClearSelection() { Selection = null; SelectionMask = null; SelectionVersion++; }
 
     /// <summary>The current selection as a coverage mask (rasterizing a plain rect), or null if none.</summary>
     public byte[]? SnapshotSelectionMask()
@@ -48,6 +51,7 @@ public sealed class Document
         if (b.W <= 0 || b.H <= 0) { ClearSelection(); return; }
         SelectionMask = mask;
         Selection = b;
+        SelectionVersion++;
     }
 
     public Document(int width, int height)

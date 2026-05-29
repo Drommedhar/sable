@@ -133,6 +133,54 @@ public static class Selections
         return r;
     }
 
+    /// <summary>
+    /// Soften a coverage mask by <paramref name="radius"/> px (separable box blur, H then V)
+    /// so edits fade at selection edges instead of a hard 1px cutoff. Returns a new mask;
+    /// radius &lt;= 0 returns the input unchanged.
+    /// </summary>
+    public static byte[] Feather(byte[] mask, int w, int h, int radius)
+    {
+        if (radius <= 0 || w <= 0 || h <= 0) return mask;
+        var tmp = new byte[w * h];
+        var outm = new byte[w * h];
+        BoxH(mask, tmp, w, h, radius);
+        BoxV(tmp, outm, w, h, radius);
+        return outm;
+    }
+
+    private static void BoxH(byte[] s, byte[] d, int w, int h, int r)
+    {
+        int win = 2 * r + 1;
+        for (int y = 0; y < h; y++)
+        {
+            int row = y * w;
+            int sum = 0;
+            for (int k = -r; k <= r; k++) sum += s[row + Math.Clamp(k, 0, w - 1)];
+            for (int x = 0; x < w; x++)
+            {
+                d[row + x] = (byte)(sum / win);
+                int add = Math.Clamp(x + r + 1, 0, w - 1), rem = Math.Clamp(x - r, 0, w - 1);
+                sum += s[row + add] - s[row + rem];
+            }
+        }
+    }
+
+    private static void BoxV(byte[] s, byte[] d, int w, int h, int r)
+    {
+        int win = 2 * r + 1;
+        for (int x = 0; x < w; x++)
+        {
+            int sum = 0;
+            for (int k = -r; k <= r; k++) sum += s[Math.Clamp(k, 0, h - 1) * w + x];
+            for (int y = 0; y < h; y++)
+            {
+                d[y * w + x] = (byte)(sum / win);
+                int add = Math.Clamp(y + r + 1, 0, h - 1), rem = Math.Clamp(y - r, 0, h - 1);
+                sum += s[add * w + x] - s[rem * w + x];
+            }
+        }
+    }
+
     /// <summary>Tight bounding rect of the set pixels (for the overlay + dirty bounds), or empty.</summary>
     public static SelRect Bounds(byte[] mask, int w, int h)
     {

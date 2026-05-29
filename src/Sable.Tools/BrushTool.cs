@@ -42,10 +42,12 @@ public sealed class BrushTool
         for (int x = x0; x <= x1; x++)
         {
             if (Clip is { } cl && (x < cl.X || y < cl.Y || x >= cl.X + cl.W || y >= cl.Y + cl.H)) continue;
+            float clipCov = 1f;
             if (ClipMask is { } cm)
             {
                 int mi = y * ClipMaskW + x;
                 if (mi < 0 || mi >= cm.Length || cm[mi] == 0) continue;
+                clipCov = cm[mi] / 255f;   // soft (feathered) selection edge
             }
             float dx = (float)(x - cx), dy = (float)(y - cy);
             float dist = MathF.Sqrt(dx * dx + dy * dy);
@@ -55,7 +57,7 @@ public sealed class BrushTool
             float t = dist <= inner ? 1f : 1f - (dist - inner) / MathF.Max(1e-3f, r - inner);
             float cov = Math.Clamp(t, 0f, 1f);
             cov = cov * cov * (3f - 2f * cov);     // smoothstep
-            float sa = cov * Flow;
+            float sa = cov * Flow * clipCov;
             if (sa <= 0f) continue;
 
             int i = (y * w + x) * 4;

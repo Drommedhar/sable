@@ -115,6 +115,26 @@ public class SelectionTests
     }
 
     [Fact]
+    public void Feather_SoftensEdges_KeepsCore()
+    {
+        int w = 40, h = 40;
+        var m = Selections.Rect(w, h, new SelRect(10, 10, 20, 20));
+        var f = Selections.Feather(m, w, h, 4);
+        Assert.Equal(255, f[20 * w + 20]);                 // deep interior stays fully selected
+        int edge = f[10 * w + 20];                          // on the original hard boundary
+        Assert.InRange(edge, 1, 254);                       // now a partial (soft) value
+        Assert.True(f[6 * w + 20] > 0);                     // coverage bled outside the old edge
+        Assert.Equal(0, f[0]);                              // far corner still unselected
+    }
+
+    [Fact]
+    public void Feather_ZeroRadius_Unchanged()
+    {
+        var m = Selections.Rect(20, 20, new SelRect(5, 5, 10, 10));
+        Assert.Same(m, Selections.Feather(m, 20, 20, 0));
+    }
+
+    [Fact]
     public void SnapshotSelectionMask_RasterizesRect_NullWhenEmpty()
     {
         var doc = new Document(32, 32);
