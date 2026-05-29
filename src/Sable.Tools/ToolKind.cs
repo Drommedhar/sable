@@ -17,6 +17,17 @@ public enum ToolKind
     Fill,         // bucket / flood
     Gradient,     // linear gradient fill (foreground → transparent)
     Crop,         // resize the document to a drawn rectangle
+    ShapeRect,    // filled rectangle
+    ShapeEllipse, // filled ellipse
+    ShapeLine,    // stroked line
+    CloneStamp,   // copy pixels from a sampled source point
+    Dodge,        // lighten
+    Burn,         // darken
+    Sponge,       // desaturate
+    BlurBrush,    // soften
+    SharpenBrush, // sharpen
+    Smudge,       // push colour along the stroke
+    Type,         // text layer
     Eyedropper,
     Hand,         // pan
     Zoom,

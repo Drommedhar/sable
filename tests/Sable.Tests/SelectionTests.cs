@@ -194,6 +194,57 @@ public class SelectionTests
     }
 
     [Fact]
+    public void Dodge_Lightens_Burn_Darkens()
+    {
+        int w = 6, h = 6;
+        byte[] Mid() { var p = new byte[w * h * 4]; for (int i = 0; i < p.Length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 120; p[i + 3] = 255; } return p; }
+        int c = (3 * w + 3) * 4;
+
+        var d = Mid();
+        new BrushTool { Radius = 3, Hardness = 1f, Mode = BrushMode.Dodge, Strength = 0.5f }.Stamp(d, w, h, 3, 3);
+        Assert.True(d[c] > 120);   // lightened
+
+        var b = Mid();
+        new BrushTool { Radius = 3, Hardness = 1f, Mode = BrushMode.Burn, Strength = 0.5f }.Stamp(b, w, h, 3, 3);
+        Assert.True(b[c] < 120);   // darkened
+    }
+
+    [Fact]
+    public void Sponge_Desaturates_TowardLuminance()
+    {
+        int w = 6, h = 6;
+        var p = new byte[w * h * 4];
+        for (int i = 0; i < p.Length; i += 4) { p[i] = 200; p[i + 1] = 50; p[i + 2] = 50; p[i + 3] = 255; }
+        int c = (3 * w + 3) * 4;
+        int beforeSpread = p[c] - p[c + 1];
+        new BrushTool { Radius = 3, Hardness = 1f, Mode = BrushMode.Sponge, Strength = 0.8f }.Stamp(p, w, h, 3, 3);
+        Assert.True(p[c] - p[c + 1] < beforeSpread);   // channels pulled together (less saturated)
+    }
+
+    [Fact]
+    public void Clone_CopiesFromSourceAtOffset()
+    {
+        int w = 12, h = 12;
+        var src = new byte[w * h * 4];
+        int s = (3 * w + 3) * 4;
+        src[s] = 200; src[s + 1] = 50; src[s + 2] = 0; src[s + 3] = 255;   // orange at (3,3)
+        var dst = new byte[w * h * 4];
+
+        var b = new BrushTool
+        {
+            Radius = 1, Hardness = 1f, Flow = 1f,
+            Clone = true, CloneSrc = src, CloneSrcW = w, CloneSrcH = h,
+            CloneOffX = 5, CloneOffY = 5   // dest - 5 = source
+        };
+        b.Stamp(dst, w, h, 8, 8);          // (8,8) → samples src (3,3) = orange
+
+        int d = (8 * w + 8) * 4;
+        Assert.True(dst[d + 3] > 0);       // painted
+        Assert.Equal(200, dst[d]);         // copied source colour
+        Assert.Equal(50, dst[d + 1]);
+    }
+
+    [Fact]
     public void BrushClipMask_RestrictsPaintToMaskedPixels()
     {
         int w = 16, h = 16;

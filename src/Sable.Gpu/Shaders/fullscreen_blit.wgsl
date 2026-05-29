@@ -21,7 +21,10 @@ struct Viewport {
     maskOn: f32,
     gradOn: f32, gx0: f32, gy0: f32, gx1: f32, gy1: f32,   // gradient drag line (surface px)
     cropOn: f32,                                            // dim outside the overlay rect (crop preview)
-    _p7: f32, _p8: f32, _p9: f32, _p10: f32, _p11: f32, _p12: f32,
+    shapeOn: f32, shapeKind: f32,                           // shape drag outline (surface px)
+    shx0: f32, shy0: f32, shx1: f32, shy1: f32,
+    cloneOn: f32, clsx: f32, clsy: f32, _p13: f32,          // clone source crosshair (surface px)
+    caretOn: f32, caretX: f32, caretY0: f32, caretY1: f32,  // text caret (surface px)
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -156,6 +159,41 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let b = vec2<f32>(vp.gx1, vp.gy1);
         if (segDist(frag.xy, a, b) < 1.5) { outc = vec3<f32>(1.0) - outc; }
         if (length(frag.xy - a) < 4.0 || length(frag.xy - b) < 4.0) { outc = vec3<f32>(1.0); }
+    }
+
+    // shape tool drag outline (surface px)
+    if (vp.shapeOn > 0.5) {
+        let p = frag.xy;
+        let minx = min(vp.shx0, vp.shx1); let maxx = max(vp.shx0, vp.shx1);
+        let miny = min(vp.shy0, vp.shy1); let maxy = max(vp.shy0, vp.shy1);
+        var hit = false;
+        if (vp.shapeKind < 0.5) {           // rectangle outline
+            let onX = (abs(p.x - minx) < 1.0 || abs(p.x - maxx) < 1.0) && p.y >= miny - 1.0 && p.y <= maxy + 1.0;
+            let onY = (abs(p.y - miny) < 1.0 || abs(p.y - maxy) < 1.0) && p.x >= minx - 1.0 && p.x <= maxx + 1.0;
+            hit = onX || onY;
+        } else if (vp.shapeKind < 1.5) {    // ellipse outline
+            let cx = (minx + maxx) * 0.5; let cy = (miny + maxy) * 0.5;
+            let rx = max(0.5, (maxx - minx) * 0.5); let ry = max(0.5, (maxy - miny) * 0.5);
+            let nx = (p.x - cx) / rx; let ny = (p.y - cy) / ry;
+            let d = sqrt(nx * nx + ny * ny);
+            hit = abs(d - 1.0) < (1.5 / min(rx, ry));
+        } else {                            // line
+            hit = segDist(p, vec2<f32>(vp.shx0, vp.shy0), vec2<f32>(vp.shx1, vp.shy1)) < 1.5;
+        }
+        if (hit) { outc = vec3<f32>(1.0) - outc; }
+    }
+
+    // clone source crosshair
+    if (vp.cloneOn > 0.5) {
+        let d = abs(frag.xy - vec2<f32>(vp.clsx, vp.clsy));
+        if ((d.x < 7.0 && d.y < 1.0) || (d.y < 7.0 && d.x < 1.0)) { outc = vec3<f32>(1.0) - outc; }
+    }
+
+    // text caret
+    if (vp.caretOn > 0.5) {
+        if (abs(frag.x - vp.caretX) < 1.0 && frag.y >= vp.caretY0 && frag.y <= vp.caretY1) {
+            outc = vec3<f32>(1.0) - outc;
+        }
     }
 
     // brush cursor ring (the dab fill is previewed in the composite via the stamp pass)

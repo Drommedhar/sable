@@ -172,6 +172,8 @@ public sealed partial class LayerViewModel : ObservableObject
     // --- adjustment-layer params (only meaningful when Model is AdjustmentLayer) ---
     public bool IsAdjustment => Model is AdjustmentLayer;
     public bool IsFilter => Model is FilterLayer;
+    public bool IsShape => Model is ShapeLayer;
+    public bool IsText => Model is TextLayer;
     /// <summary>Any non-pixel effect node (has params editable in the toolbox).</summary>
     public bool IsEffect => Model is AdjustmentLayer or FilterLayer;
     public bool IsBrightnessContrast => Model is AdjustmentLayer { Kind: AdjustmentKind.BrightnessContrast };

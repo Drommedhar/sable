@@ -89,6 +89,20 @@ public sealed partial class DocumentViewModel : ObservableObject
     [RelayCommand]
     private void NewLayer() => AddLayer(new PixelLayer(Model.Width, Model.Height, $"Layer {_newLayerCounter++}"));
 
+    /// <summary>Select the row whose model is <paramref name="m"/> (no-op if not present).</summary>
+    public void SelectModel(Layer m)
+    {
+        var vm = Layers.FirstOrDefault(v => v.Model == m);
+        if (vm is not null) SelectedLayer = vm;
+    }
+
+    /// <summary>Add a pre-built layer (e.g. a drawn shape) at the top and select it. Undoable.</summary>
+    public void AddAndSelect(Layer layer)
+    {
+        Undo.Execute(new AddLayerCommand(Model, Model.Layers, layer, Model.Layers.Count));
+        SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == layer);
+    }
+
     [RelayCommand]
     private void NewAdjustment(AdjustmentKind kind) => AddLayer(new AdjustmentLayer(kind));
 

@@ -199,16 +199,25 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     {
         if (_compositor is null) return;
         Sable.Engine.Compositing.PreviewDab? dab = null;
-        if (!_painting && ActiveLayer is { } al &&
-            ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser)
+        bool previewTool = ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
+                                       or Sable.Tools.ToolKind.CloneStamp;
+        if (!_painting && ActiveLayer is { } al && previewTool)
         {
             var vp = ComputeViewport();
             double docX = vp.Scale > 0 ? (_lastMouseX - vp.Ox) / vp.Scale : -1;
             double docY = vp.Scale > 0 ? (_lastMouseY - vp.Oy) / vp.Scale : -1;
             if (docX >= 0 && docY >= 0 && docX < al.Width && docY < al.Height)
+            {
+                bool clone = ActiveTool == Sable.Tools.ToolKind.CloneStamp;
+                // clone: preview the source content under the cursor (offset = cursor - source)
+                if (clone && !_cloneSet) { _compositor.Preview = null; return; }   // no source yet
                 dab = new Sable.Engine.Compositing.PreviewDab(al, (float)docX, (float)docY,
                     Brush.Radius, Brush.Hardness, Brush.R, Brush.G, Brush.B,
-                    ActiveTool == Sable.Tools.ToolKind.Eraser);
+                    Erase: ActiveTool == Sable.Tools.ToolKind.Eraser,
+                    IsClone: clone,
+                    CloneOffX: clone ? (int)System.Math.Round(docX - _cloneSrcX) : 0,
+                    CloneOffY: clone ? (int)System.Math.Round(docY - _cloneSrcY) : 0);
+            }
         }
         _compositor.Preview = dab;
     }
@@ -321,20 +330,59 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.CropOn = true;
             ov.RectX = cr.X; ov.RectY = cr.Y; ov.RectW = cr.W; ov.RectH = cr.H;
         }
+        if (ActiveTool == Sable.Tools.ToolKind.CloneStamp && _cloneSet)
+        {
+            var vp = ComputeViewport();
+            double srcDx, srcDy;
+            if (_painting) { var (lx, ly) = MapToDoc(_lastMouseX, _lastMouseY); srcDx = lx - Brush.CloneOffX; srcDy = ly - Brush.CloneOffY; }
+            else { srcDx = _cloneSrcX; srcDy = _cloneSrcY; }
+            ov.CloneSrcOn = true;
+            ov.CloneSrcSx = (float)(vp.Ox + srcDx * vp.Scale);
+            ov.CloneSrcSy = (float)(vp.Oy + srcDy * vp.Scale);
+        }
+        if (EditingText is { } et)
+        {
+            var vp = ComputeViewport();
+            double cxDoc = et.X + et.OffsetX + et.CaretX;       // end of the last line
+            double y0Doc = et.Y + et.OffsetY + et.CaretY;
+            double chDoc = et.CaretH > 0 ? et.CaretH : et.FontSize;
+            ov.CaretOn = true;
+            ov.CaretX = (float)(vp.Ox + cxDoc * vp.Scale);
+            ov.CaretY0 = (float)(vp.Oy + y0Doc * vp.Scale);
+            ov.CaretY1 = (float)(vp.Oy + (y0Doc + chDoc) * vp.Scale);
+        }
+        if (_shaping)
+        {
+            ov.ShapeOn = true;
+            ov.ShapeKind = ActiveTool switch
+            {
+                Sable.Tools.ToolKind.ShapeEllipse => 1,
+                Sable.Tools.ToolKind.ShapeLine => 2,
+                _ => 0
+            };
+            ov.ShX0 = (float)_shapeStartSx; ov.ShY0 = (float)_shapeStartSy;
+            ov.ShX1 = (float)_shapeEndSx; ov.ShY1 = (float)_shapeEndSy;
+        }
+        // Move: tight content bounds of the selected layer of ANY type (shape = the shape rect)
+        if (ActiveTool == Sable.Tools.ToolKind.Move && !ov.RectOn && SelLayer is { } sl && _doc is { } md)
+        {
+            var (bx, by, bw, bh) = sl.ContentBounds(md.Width, md.Height);
+            ov.RectOn = true;
+            ov.RectX = bx + sl.OffsetX; ov.RectY = by + sl.OffsetY; ov.RectW = bw; ov.RectH = bh;
+        }
         if (ActiveLayer is { } l)
         {
-            if (ActiveTool == Sable.Tools.ToolKind.Move && !ov.RectOn)
-            {
-                ov.RectOn = true;
-                ov.RectX = l.OffsetX; ov.RectY = l.OffsetY; ov.RectW = l.Width; ov.RectH = l.Height;
-            }
-            else if (ActiveTool == Sable.Tools.ToolKind.Transform)
+            if (ActiveTool == Sable.Tools.ToolKind.Transform)
             {
                 ov.GizmoOn = true;
                 ov.Corners = CornersSurface(l);
                 ov.RotateHandleDist = RotHandleDist;
             }
-            else if (ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser)
+            else if (ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
+                                or Sable.Tools.ToolKind.CloneStamp or Sable.Tools.ToolKind.Dodge
+                                or Sable.Tools.ToolKind.Burn or Sable.Tools.ToolKind.Sponge
+                                or Sable.Tools.ToolKind.BlurBrush or Sable.Tools.ToolKind.SharpenBrush
+                                or Sable.Tools.ToolKind.Smudge)
             {
                 var vp = ComputeViewport();
                 ov.BrushOn = true;

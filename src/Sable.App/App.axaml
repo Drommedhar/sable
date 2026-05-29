@@ -6,8 +6,8 @@
     <!-- Pro-tool control tuning: thin, dark, low-contrast sliders (PLAN §13.3).
          These override Fluent's chunky defaults via its documented resource keys. -->
     <Application.Resources>
-        <x:Double x:Key="SliderHorizontalHeight">20</x:Double>
-        <x:Double x:Key="SliderTrackThemeHeight">3</x:Double>
+        <x:Double x:Key="SliderHorizontalHeight">22</x:Double>
+        <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
 
         <SolidColorBrush x:Key="SliderTrackFill" Color="#FF3C3C3C" />
         <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#FF454545" />
@@ -111,29 +111,90 @@
             <Setter Property="Background" Value="#FF356699" />
         </Style>
 
-        <!-- thin slider: small handle, compact footprint -->
+        <!-- ===== unified chrome controls: 24px tall, dark #2b2b2b, blue #5687C0 accent ===== -->
+
+        <!-- slider: stock Fluent Track (reliable), but a small custom thumb so it doesn't clip.
+             Negative top margin pulls the track up to vertically centre with the row text. -->
         <Style Selector="Slider">
             <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,-4,0,0" />
         </Style>
         <Style Selector="Slider /template/ Thumb">
-            <Setter Property="Width" Value="13" />
-            <Setter Property="Height" Value="13" />
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="14" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Ellipse Width="14" Height="14" Fill="#FFE6E6E6" />
+                </ControlTemplate>
+            </Setter>
         </Style>
 
         <!-- compact dark combo box -->
         <Style Selector="ComboBox">
-            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MinHeight" Value="0" />
             <Setter Property="Height" Value="24" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="Padding" Value="8,0" />
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Background" Value="#FF2B2B2B" />
             <Setter Property="BorderBrush" Value="#FF3C3C3C" />
             <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="ComboBox /template/ Border#Background">
             <Setter Property="Background" Value="#FF2B2B2B" />
             <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+        </Style>
+
+        <!-- compact dark text box + numeric up/down (share the same field look) -->
+        <Style Selector="TextBox">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="NumericUpDown">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="ShowButtonSpinner" Value="False" />
+        </Style>
+        <!-- belt + suspenders: hide the spinner button area outright -->
+        <Style Selector="NumericUpDown /template/ ButtonSpinner">
+            <Setter Property="ShowButtonSpinner" Value="False" />
+        </Style>
+
+        <!-- compact options-bar toggle (B / I / U / S / alignment) -->
+        <Style Selector="ToggleButton.opt">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Background" Value="#FF2F2F2F" />
+            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton.opt:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+        <Style Selector="ToggleButton.opt:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A6EA5" />
         </Style>
 
         <!-- compact checkbox -->

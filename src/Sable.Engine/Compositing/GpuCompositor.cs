@@ -94,7 +94,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _adjParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
 
-        _stampParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _stampParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         BuildPresentPipeline();
         BuildAdjustPipeline();
@@ -105,11 +105,12 @@ public sealed unsafe class GpuCompositor : IDisposable
     private void BuildStampPipeline()
     {
         var api = _gpu.Api;
-        var entries = stackalloc BindGroupLayoutEntry[3];
-        entries[0] = Entry(0, BufferBindingType.Uniform);     // dims
-        entries[1] = Entry(1, BufferBindingType.Uniform);     // dab
-        entries[2] = Entry(2, BufferBindingType.Storage);     // buffer (rw)
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 3, Entries = entries };
+        var entries = stackalloc BindGroupLayoutEntry[4];
+        entries[0] = Entry(0, BufferBindingType.Uniform);          // dims
+        entries[1] = Entry(1, BufferBindingType.Uniform);          // dab
+        entries[2] = Entry(2, BufferBindingType.Storage);          // buffer (rw)
+        entries[3] = Entry(3, BufferBindingType.ReadOnlyStorage);  // clone source
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 4, Entries = entries };
         _stampBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
 
         var bglLocal = _stampBgl;
@@ -326,10 +327,18 @@ public sealed unsafe class GpuCompositor : IDisposable
                 if (Preview is { } pv && ReferenceEquals(pv.Layer, layer))
                 {
                     CopyBuffer(srcBuf, _previewBuf);
-                    DispatchStamp(_previewBuf, pv);
+                    DispatchStamp(_previewBuf, srcBuf, pv);   // srcBuf = original layer = clone source
                     srcBuf = _previewBuf;
                 }
                 BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+            }
+            else if (layer is ShapeLayer sh)
+            {
+                BlendInto(ref current, ref other, GetShapeBuffer(sh), layer, maskBuf);
+            }
+            else if (layer is TextLayer txt)
+            {
+                BlendInto(ref current, ref other, GetTextBuffer(txt), layer, maskBuf);
             }
             else if (layer is GroupLayer grp)
             {
@@ -450,21 +459,23 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.CommandBufferRelease(cmd);
     }
 
-    private void DispatchStamp(Buffer* buf, PreviewDab pv)
+    private void DispatchStamp(Buffer* buf, Buffer* src, PreviewDab pv)
     {
         var api = _gpu.Api;
-        var prm = stackalloc float[8]
+        var prm = stackalloc float[12]
         {
             pv.Cx, pv.Cy, pv.Radius, pv.Hardness,
-            pv.R / 255f, pv.G / 255f, pv.B / 255f, pv.Erase ? 1f : 0f
+            pv.R / 255f, pv.G / 255f, pv.B / 255f, pv.Erase ? 1f : 0f,
+            pv.IsClone ? 1f : 0f, pv.CloneOffX, pv.CloneOffY, 0f
         };
-        api.QueueWriteBuffer(_gpu.Queue, _stampParamsBuf, 0, prm, 32);
+        api.QueueWriteBuffer(_gpu.Queue, _stampParamsBuf, 0, prm, 48);
 
-        var bg = stackalloc BindGroupEntry[3];
+        var bg = stackalloc BindGroupEntry[4];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
-        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _stampParamsBuf, Size = 32 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _stampParamsBuf, Size = 48 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = buf, Size = (ulong)_imgBytes };
-        var bgDesc = new BindGroupDescriptor { Layout = _stampBgl, EntryCount = 3, Entries = bg };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = (ulong)_imgBytes };
+        var bgDesc = new BindGroupDescriptor { Layout = _stampBgl, EntryCount = 4, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var encDesc = new CommandEncoderDescriptor();
@@ -620,6 +631,42 @@ public sealed unsafe class GpuCompositor : IDisposable
 
         px.DirtyTiles.Clear();
         px.Dirty = false;
+        return buf;
+    }
+
+    private byte[]? _shapeScratch;
+
+    /// <summary>(Re)rasterize a parametric shape layer into a GPU buffer; cached, refreshed when dirty.</summary>
+    private Buffer* GetShapeBuffer(ShapeLayer sh)
+    {
+        bool cached = _layerBuffers.TryGetValue(sh, out var existing);
+        if (cached && !sh.Dirty) return (Buffer*)existing;
+
+        Buffer* buf;
+        if (cached) buf = (Buffer*)existing;
+        else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[sh] = (nint)buf; }
+
+        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        sh.Rasterize(_shapeScratch, _width, _height);
+        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        sh.Dirty = false;
+        return buf;
+    }
+
+    /// <summary>(Re)rasterize a parametric text layer into a GPU buffer; cached, refreshed when dirty.</summary>
+    private Buffer* GetTextBuffer(TextLayer txt)
+    {
+        bool cached = _layerBuffers.TryGetValue(txt, out var existing);
+        if (cached && !txt.Dirty) return (Buffer*)existing;
+
+        Buffer* buf;
+        if (cached) buf = (Buffer*)existing;
+        else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[txt] = (nint)buf; }
+
+        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        txt.Rasterize(_shapeScratch, _width, _height);
+        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        txt.Dirty = false;
         return buf;
     }
 

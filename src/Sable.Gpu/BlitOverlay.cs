@@ -37,4 +37,17 @@ public struct BlitOverlay
 
     // crop preview — dims the document outside the crop rect (reuses RectX/Y/W/H, doc px)
     public bool CropOn;
+
+    // shape tool drag preview — outline in SURFACE pixels. ShapeKind: 0=rect,1=ellipse,2=line
+    public bool ShapeOn;
+    public int ShapeKind;
+    public float ShX0, ShY0, ShX1, ShY1;
+
+    // clone-stamp source marker — crosshair at the live source point (SURFACE px)
+    public bool CloneSrcOn;
+    public float CloneSrcSx, CloneSrcSy;
+
+    // text caret — vertical bar (SURFACE px)
+    public bool CaretOn;
+    public float CaretX, CaretY0, CaretY1;
 }

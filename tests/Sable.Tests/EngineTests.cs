@@ -44,6 +44,37 @@ public class DocumentTests
     }
 
     [Fact]
+    public void TextLayer_Rasterizes_NonEmpty()
+    {
+        var t = new TextLayer("Hi", 5, 5, 32, 255, 255, 255);
+        var buf = new byte[200 * 60 * 4];
+        t.Rasterize(buf, 200, 60);
+        int painted = 0;
+        for (int i = 3; i < buf.Length; i += 4) if (buf[i] > 0) painted++;
+        Assert.True(painted > 0);                              // glyphs rendered something
+        var (bx, by, _, _) = t.ContentBounds(200, 60);
+        Assert.Equal((5, 5), (bx, by));                        // bounds at the text position
+    }
+
+    [Fact]
+    public void ShapeLayer_Rasterizes_AndHasTightBounds()
+    {
+        var sh = new ShapeLayer(ShapeKind.Rectangle, 10, 10, 20, 30, 255, 0, 0);
+        var (bx, by, bw, bh) = sh.ContentBounds(100, 100);
+        Assert.Equal((10, 10, 20, 30), (bx, by, bw, bh));   // tight bounds = the rect, not the doc
+
+        var buf = new byte[100 * 100 * 4];
+        sh.Rasterize(buf, 100, 100);
+        Assert.Equal(255, buf[(20 * 100 + 20) * 4]);        // inside rect → red
+        Assert.Equal(255, buf[(20 * 100 + 20) * 4 + 3]);    // opaque
+        Assert.Equal(0, buf[(0 * 100 + 0) * 4 + 3]);        // outside rect → transparent
+
+        // recolour after the fact (editable fill)
+        sh.R = 0; sh.B = 255; sh.Rasterize(buf, 100, 100);
+        Assert.Equal(255, buf[(20 * 100 + 20) * 4 + 2]);    // now blue
+    }
+
+    [Fact]
     public void Crop_NegativeOrigin_GrowsCanvasWithTransparentPad()
     {
         // canvas resize (grow) is CropCommand with a negative origin — pads transparent, no scaling

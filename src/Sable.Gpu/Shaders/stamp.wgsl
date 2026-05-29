@@ -3,11 +3,13 @@
 // higher layers occlude it (matches what painting will actually produce).
 
 struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
-struct Dab { cx: f32, cy: f32, radius: f32, hardness: f32, r: f32, g: f32, b: f32, erase: f32 };
+struct Dab { cx: f32, cy: f32, radius: f32, hardness: f32, r: f32, g: f32, b: f32, erase: f32,
+             clone: f32, offx: f32, offy: f32, _pad: f32 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
 @group(0) @binding(1) var<uniform> dab: Dab;
 @group(0) @binding(2) var<storage, read_write> buf: array<u32>;
+@group(0) @binding(3) var<storage, read> src: array<u32>;   // clone source (= original layer)
 
 fn unpack(c: u32) -> vec4<f32> {
     return vec4<f32>(f32(c & 0xffu), f32((c >> 8u) & 0xffu),
@@ -36,13 +38,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let idx = gid.y * dims.width + gid.x;
     let d = unpack(buf[idx]);
+
     if (dab.erase > 0.5) {
         buf[idx] = pack(vec4<f32>(d.xyz, d.w * (1.0 - cov)));
-    } else {
-        let sa = cov;
-        let outA = sa + d.w * (1.0 - sa);
-        var rgb = vec3<f32>(dab.r, dab.g, dab.b);
-        if (outA > 0.0) { rgb = (rgb * sa + d.xyz * d.w * (1.0 - sa)) / outA; }
-        buf[idx] = pack(vec4<f32>(rgb, outA));
+        return;
     }
+
+    var srcRgb = vec3<f32>(dab.r, dab.g, dab.b);
+    var sa = cov;
+    if (dab.clone > 0.5) {
+        let sx = i32(gid.x) - i32(dab.offx);
+        let sy = i32(gid.y) - i32(dab.offy);
+        if (sx < 0 || sy < 0 || sx >= i32(dims.width) || sy >= i32(dims.height)) { return; }
+        let sc = unpack(src[u32(sy) * dims.width + u32(sx)]);
+        if (sc.w <= 0.0) { return; }
+        srcRgb = sc.xyz;
+        sa = cov * sc.w;
+    }
+
+    let outA = sa + d.w * (1.0 - sa);
+    var rgb = srcRgb;
+    if (outA > 0.0) { rgb = (srcRgb * sa + d.xyz * d.w * (1.0 - sa)) / outA; }
+    buf[idx] = pack(vec4<f32>(rgb, outA));
 }

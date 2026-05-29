@@ -32,6 +32,9 @@ public abstract class Layer
 
     public bool HasTransform => OffsetX != 0 || OffsetY != 0 || ScaleX != 1f || ScaleY != 1f || Rotation != 0f;
 
+    /// <summary>Tight content bounds in doc px (before offset). Default = whole document; shape layers override.</summary>
+    public virtual (int x, int y, int w, int h) ContentBounds(int docW, int docH) => (0, 0, docW, docH);
+
     /// <summary>Set when GPU-side data must be (re)uploaded/recomposited.</summary>
     public bool Dirty { get; set; } = true;
 

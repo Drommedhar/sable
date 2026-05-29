@@ -32,6 +32,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private bool _cropping;
     private double _cropStartDocX, _cropStartDocY;
     private SelRect? _cropRect;                          // pending crop rect (doc px); Enter commits
+    private bool _shaping;
+    private double _shapeStartDocX, _shapeStartDocY;
+    private double _shapeStartSx, _shapeStartSy, _shapeEndSx, _shapeEndSy;
+    private double _cloneSrcX, _cloneSrcY;     // clone-stamp source point (doc px)
+    private bool _cloneSet;
     private bool _selecting;        // rubber-band drag for rect + ellipse marquee
     private double _selStartX, _selStartY;
     private bool _lassoing;
@@ -52,8 +57,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _xfMoveDocX, _xfMoveDocY;
     private int _xfOrigOffX, _xfOrigOffY;
 
-    /// <summary>The active layer for paint/move. Set from the selected layer in the UI.</summary>
+    /// <summary>The active PIXEL layer for paint (brush/fill/eyedropper). Null if a non-pixel layer is selected.</summary>
     public PixelLayer? ActiveLayer { get; set; }
+
+    /// <summary>The selected layer of ANY type — drives Move + the bounds overlay (pixel, shape, group, …).</summary>
+    public Layer? SelLayer { get; set; }
 
     private ToolKind _activeTool = ToolKind.Brush;
 
@@ -61,7 +69,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     public ToolKind ActiveTool
     {
         get => _activeTool;
-        set { if (_activeTool == value) return; _activeTool = value; ToolChanged?.Invoke(value); }
+        set
+        {
+            if (_activeTool == value) return;
+            _activeTool = value;
+            if (value != ToolKind.Type) CommitTextEdit();   // leaving Type ends editing
+            ToolChanged?.Invoke(value);
+        }
     }
 
     /// <summary>Raised when the active tool changes (so the toolbar can sync highlight).</summary>
@@ -81,6 +95,56 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     /// <summary>Raised with the undoable command when a brush gesture completes.</summary>
     public Action<IUndoableCommand>? CommandProduced { get; set; }
+
+    /// <summary>Raised with a freshly-built layer (e.g. a drawn shape) to add via the document VM + select.</summary>
+    public Action<Layer>? LayerProduced { get; set; }
+
+    /// <summary>Defaults for a NEW text layer (set from the Type options bar).</summary>
+    public float TypeFontSize { get; set; } = 48f;
+    public string TypeFontFamily { get; set; } = "";
+    public bool TypeBold { get; set; }
+    public bool TypeItalic { get; set; }
+    public bool TypeUnderline { get; set; }
+    public bool TypeStrike { get; set; }
+    public int TypeAlign { get; set; }          // 0=L,1=C,2=R
+    public float TypeLineSpacing { get; set; } = 1f;
+
+    // on-canvas text editing: the layer currently being typed into (caret + window text input)
+    private TextLayer? _editingText;
+    public TextLayer? EditingText => _editingText;
+    public bool TextEditing => _editingText is not null;
+    /// <summary>Raised when text editing starts on a layer (so the UI selects it + syncs font controls).</summary>
+    public event Action<TextLayer>? TextEditStarted;
+
+    private void BeginTextEdit(TextLayer t) { _editingText = t; TextEditStarted?.Invoke(t); }
+
+    /// <summary>Insert typed text at the end of the layer being edited (live).</summary>
+    public void TextInsert(string s)
+    {
+        if (_editingText is not { } t || string.IsNullOrEmpty(s)) return;
+        t.Text += s; t.Name = t.Text.Length > 0 ? t.Text : "Text"; t.Dirty = true;
+    }
+
+    public void TextBackspace()
+    {
+        if (_editingText is { } t && t.Text.Length > 0) { t.Text = t.Text[..^1]; t.Dirty = true; }
+    }
+
+    /// <summary>Finish on-canvas text editing.</summary>
+    public void CommitTextEdit() => _editingText = null;
+
+    private TextLayer? HitTextLayer(double dx, double dy)
+    {
+        if (_doc is null) return null;
+        for (int i = _doc.Layers.Count - 1; i >= 0; i--)   // top-down
+            if (_doc.Layers[i] is TextLayer t && t.Visible)
+            {
+                var (bx, by, bw, bh) = t.ContentBounds(_doc.Width, _doc.Height);
+                if (dx >= bx + t.OffsetX && dx < bx + t.OffsetX + bw &&
+                    dy >= by + t.OffsetY && dy < by + t.OffsetY + bh) return t;
+            }
+        return null;
+    }
 
     // --- ICanvasInputSink: OS-agnostic pointer handlers (surface pixels) ----------
 
@@ -118,7 +182,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             _session?.StrokeTo(_lastDocX, _lastDocY, dx, dy);
             _lastDocX = dx; _lastDocY = dy;
         }
-        else if (_moving && ActiveLayer is { } al)
+        else if (_moving && SelLayer is { } al)
         {
             var (dx, dy) = MapToDoc(sx, sy);
             al.OffsetX = _moveOrigX + (int)Math.Round(dx - _moveStartX);
@@ -173,6 +237,10 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             var (dx, dy) = MapToDoc(sx, sy);
             _cropRect = SelRect.FromCorners(_cropStartDocX, _cropStartDocY, dx, dy, _doc.Width, _doc.Height);
+        }
+        else if (_shaping)
+        {
+            _shapeEndSx = sx; _shapeEndSy = sy;   // track for the live outline overlay
         }
         else if (_panningMouse)
         {
@@ -253,6 +321,18 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private StrokeSession? CreateSession()
     {
         if (ActiveLayer is not { } layer) return null;
+        Brush.Clone = false;   // reset; clone configured per-stroke below
+        Brush.Mode = ActiveTool switch
+        {
+            ToolKind.Dodge => BrushMode.Dodge,
+            ToolKind.Burn => BrushMode.Burn,
+            ToolKind.Sponge => BrushMode.Sponge,
+            ToolKind.BlurBrush => BrushMode.Blur,
+            ToolKind.SharpenBrush => BrushMode.Sharpen,
+            ToolKind.Smudge => BrushMode.Smudge,
+            _ => BrushMode.Paint
+        };
+        Brush.BeginStroke();
         // honor an active selection (paint only inside it): rect bbox + optional mask
         Brush.Clip = _doc?.Selection is { } s ? (s.X, s.Y, s.W, s.H) : null;
         Brush.ClipMask = _doc?.SelectionMask;
@@ -277,6 +357,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         bool alt = mods.HasFlag(CanvasMods.Alt);
         bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Eraser or ToolKind.Fill;
         if (alt && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
+        // clone stamp: Alt+click sets the source point
+        if (ActiveTool == ToolKind.CloneStamp && alt)
+        {
+            if (ActiveLayer is not null) { _cloneSrcX = dx; _cloneSrcY = dy; _cloneSet = true; }
+            return;
+        }
 
         switch (ActiveTool)
         {
@@ -301,6 +387,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _cropping = true; _input?.Capture();
                     _cropStartDocX = dx; _cropStartDocY = dy;
                     _cropRect = null;
+                }
+                break;
+            case ToolKind.ShapeRect:
+            case ToolKind.ShapeEllipse:
+            case ToolKind.ShapeLine:
+                if (_doc is not null)
+                {
+                    _shaping = true; _input?.Capture();
+                    _shapeStartDocX = dx; _shapeStartDocY = dy;
+                    _shapeStartSx = sx; _shapeStartSy = sy;
+                    _shapeEndSx = sx; _shapeEndSy = sy;
                 }
                 break;
             case ToolKind.Zoom:
@@ -370,18 +467,45 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
 
+            case ToolKind.Type:
+                if (_doc is not null)
+                {
+                    var hitText = HitTextLayer(dx, dy);
+                    if (hitText is not null) BeginTextEdit(hitText);   // click existing text → edit it
+                    else
+                    {
+                        var t = new TextLayer("", (float)dx, (float)dy, TypeFontSize, Brush.R, Brush.G, Brush.B)
+                        {
+                            FontFamily = TypeFontFamily, Bold = TypeBold, Italic = TypeItalic,
+                            Underline = TypeUnderline, Strikethrough = TypeStrike,
+                            Align = (TextAlign)TypeAlign, LineSpacing = TypeLineSpacing
+                        };
+                        LayerProduced?.Invoke(t);
+                        BeginTextEdit(t);
+                    }
+                }
+                break;
             case ToolKind.Move:
-                if (ActiveLayer is { } ml)
+                if (SelLayer is { } ml)
                 {
                     _moving = true; _input?.Capture();
                     _moveStartX = dx; _moveStartY = dy;
                     _moveOrigX = ml.OffsetX; _moveOrigY = ml.OffsetY;
                 }
                 break;
-            default: // Brush / Eraser
+            default: // Brush / Eraser / CloneStamp
+                if (ActiveTool == ToolKind.CloneStamp && !_cloneSet) break;   // need a source first (Alt+click)
                 _session = CreateSession();
                 if (_session is not null)
                 {
+                    if (ActiveTool == ToolKind.CloneStamp && ActiveLayer is { } cl)
+                    {
+                        Brush.Clone = true;
+                        Brush.CloneSrc = (byte[])cl.Pixels.Clone();   // snapshot avoids feedback during the stroke
+                        Brush.CloneSrcW = cl.Width; Brush.CloneSrcH = cl.Height;
+                        Brush.CloneOffX = (int)Math.Round(dx - _cloneSrcX);
+                        Brush.CloneOffY = (int)Math.Round(dy - _cloneSrcY);
+                    }
                     _input?.Capture();
                     _painting = true;
                     _lastDocX = dx; _lastDocY = dy;
@@ -399,9 +523,10 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             _input?.ReleaseCapture();
             var cmd = _session?.Finalize();
             _session = null;
+            Brush.Clone = false;   // clone is per-stroke; clear after
             if (cmd is not null) CommandProduced?.Invoke(cmd);
         }
-        else if (_moving && ActiveLayer is { } layer)
+        else if (_moving && SelLayer is { } layer)
         {
             _moving = false;
             _input?.ReleaseCapture();
@@ -476,6 +601,29 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             _cropping = false;
             _input?.ReleaseCapture();
             if (_cropRect is { W: < 3 } or { H: < 3 }) _cropRect = null;   // too small → discard
+        }
+        else if (_shaping && _doc is not null)
+        {
+            _shaping = false;
+            _input?.ReleaseCapture();
+            var (ex, ey) = MapToDoc(_shapeEndSx, _shapeEndSy);
+            var kind = ActiveTool switch
+            {
+                ToolKind.ShapeEllipse => ShapeKind.Ellipse,
+                ToolKind.ShapeLine => ShapeKind.Line,
+                _ => ShapeKind.Rectangle
+            };
+            float sx0 = (float)_shapeStartDocX, sy0 = (float)_shapeStartDocY;
+            float sw = (float)(ex - sx0), sh = (float)(ey - sy0);
+            if (Math.Abs(sw) >= 2 || Math.Abs(sh) >= 2)   // ignore a tiny accidental drag
+            {
+                // each shape is its own PARAMETRIC layer (editable fill + tight bounds; Move grabs it)
+                var shape = new ShapeLayer(kind, sx0, sy0, sw, sh, Brush.R, Brush.G, Brush.B)
+                {
+                    StrokeWidth = (float)(Brush.Radius * 2)
+                };
+                LayerProduced?.Invoke(shape);
+            }
         }
         else if (_panningMouse)
         {

@@ -49,6 +49,30 @@ public static class SableFile
         public float Lightness { get; set; }
         public int FilterKind { get; set; }
         public float Radius { get; set; } = 8f;
+        public int ShapeKind { get; set; }
+        public float ShX { get; set; }
+        public float ShY { get; set; }
+        public float ShW { get; set; }
+        public float ShH { get; set; }
+        public byte ShR { get; set; }
+        public byte ShG { get; set; }
+        public byte ShB { get; set; }
+        public byte ShA { get; set; } = 255;
+        public float ShStroke { get; set; } = 4f;
+        public string? Text { get; set; }
+        public float TxSize { get; set; } = 48f;
+        public float TxX { get; set; }
+        public float TxY { get; set; }
+        public byte TxR { get; set; }
+        public byte TxG { get; set; }
+        public byte TxB { get; set; }
+        public string? TxFont { get; set; }
+        public bool TxBold { get; set; }
+        public bool TxItalic { get; set; }
+        public bool TxUnderline { get; set; }
+        public bool TxStrike { get; set; }
+        public int TxAlign { get; set; }
+        public float TxLineSpacing { get; set; } = 1f;
         public string? Mask { get; set; }   // zip entry name, if the layer has a mask
         public List<LayerDto> Children { get; set; } = new();   // for groups
     }
@@ -103,6 +127,22 @@ public static class SableFile
                 ld.FilterKind = (int)flt.Kind;
                 ld.Radius = flt.Radius;
                 break;
+            case ShapeLayer sh:
+                ld.Type = "shape";
+                ld.ShapeKind = (int)sh.Kind;
+                ld.ShX = sh.X; ld.ShY = sh.Y; ld.ShW = sh.W; ld.ShH = sh.H;
+                ld.ShR = sh.R; ld.ShG = sh.G; ld.ShB = sh.B; ld.ShA = sh.A;
+                ld.ShStroke = sh.StrokeWidth;
+                break;
+            case TextLayer txt:
+                ld.Type = "text";
+                ld.Text = txt.Text; ld.TxSize = txt.FontSize;
+                ld.TxX = txt.X; ld.TxY = txt.Y;
+                ld.TxR = txt.R; ld.TxG = txt.G; ld.TxB = txt.B;
+                ld.TxFont = txt.FontFamily; ld.TxBold = txt.Bold; ld.TxItalic = txt.Italic;
+                ld.TxUnderline = txt.Underline; ld.TxStrike = txt.Strikethrough;
+                ld.TxAlign = (int)txt.Align; ld.TxLineSpacing = txt.LineSpacing;
+                break;
             case GroupLayer g:
                 ld.Type = "group";
                 foreach (var c in g.Children) ld.Children.Add(SaveLayer(zip, c, ref next));
@@ -146,6 +186,16 @@ public static class SableFile
                 HueShift = ld.HueShift, Saturation = ld.Saturation, Lightness = ld.Lightness
             },
             "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius },
+            "shape" => new ShapeLayer((ShapeKind)ld.ShapeKind, ld.ShX, ld.ShY, ld.ShW, ld.ShH, ld.ShR, ld.ShG, ld.ShB)
+            {
+                A = ld.ShA, StrokeWidth = ld.ShStroke
+            },
+            "text" => new TextLayer(ld.Text ?? "Text", ld.TxX, ld.TxY, ld.TxSize, ld.TxR, ld.TxG, ld.TxB)
+            {
+                FontFamily = ld.TxFont ?? "", Bold = ld.TxBold, Italic = ld.TxItalic,
+                Underline = ld.TxUnderline, Strikethrough = ld.TxStrike,
+                Align = (TextAlign)ld.TxAlign, LineSpacing = ld.TxLineSpacing
+            },
             "group" => LoadGroup(ld, zip, w, h),
             _ => null
         };
