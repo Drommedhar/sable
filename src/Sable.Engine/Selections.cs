@@ -197,4 +197,143 @@ public static class Selections
         if (maxX < 0) return new SelRect(0, 0, 0, 0);
         return new SelRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
     }
+
+    /// <summary>
+    /// Global colour-range selection: every pixel within <paramref name="tolerance"/> of the seed
+    /// colour (and not fully transparent), regardless of contiguity. (Magic Wand without flood-fill.)
+    /// </summary>
+    public static byte[] ColorRange(byte[] px, int w, int h, byte r, byte g, byte b, int tolerance = 32)
+    {
+        var m = new byte[w * h];
+        for (int i = 0; i < w * h; i++)
+        {
+            int j = i * 4;
+            if (px[j + 3] > 0 &&
+                Math.Abs(px[j] - r) <= tolerance &&
+                Math.Abs(px[j + 1] - g) <= tolerance &&
+                Math.Abs(px[j + 2] - b) <= tolerance)
+                m[i] = 255;
+        }
+        return m;
+    }
+
+    /// <summary>A fully-selected mask (Select All).</summary>
+    public static byte[] Full(int w, int h)
+    {
+        var m = new byte[w * h];
+        Array.Fill(m, (byte)255);
+        return m;
+    }
+
+    /// <summary>Translate a coverage mask by (dx,dy) document px (zero-fill); for moving a selection.</summary>
+    public static byte[] Shift(byte[] mask, int w, int h, int dx, int dy)
+    {
+        var o = new byte[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            int sy = y - dy;
+            if (sy < 0 || sy >= h) continue;
+            for (int x = 0; x < w; x++)
+            {
+                int sx = x - dx;
+                if (sx < 0 || sx >= w) continue;
+                o[y * w + x] = mask[sy * w + sx];
+            }
+        }
+        return o;
+    }
+
+    /// <summary>Invert coverage (255 − value) per pixel.</summary>
+    public static byte[] Invert(byte[] mask)
+    {
+        var r = new byte[mask.Length];
+        for (int i = 0; i < mask.Length; i++) r[i] = (byte)(255 - mask[i]);
+        return r;
+    }
+
+    /// <summary>Grow (dilate) the selection by <paramref name="radius"/> px (separable max).</summary>
+    public static byte[] Grow(byte[] mask, int w, int h, int radius)
+    {
+        if (radius <= 0 || w <= 0 || h <= 0) return mask;
+        var t = new byte[w * h]; var o = new byte[w * h];
+        MaxH(mask, t, w, h, radius); MaxV(t, o, w, h, radius);
+        return o;
+    }
+
+    /// <summary>Shrink (erode) the selection by <paramref name="radius"/> px (separable min).</summary>
+    public static byte[] Shrink(byte[] mask, int w, int h, int radius)
+    {
+        if (radius <= 0 || w <= 0 || h <= 0) return mask;
+        var t = new byte[w * h]; var o = new byte[w * h];
+        MinH(mask, t, w, h, radius); MinV(t, o, w, h, radius);
+        return o;
+    }
+
+    /// <summary>Smooth (round) the selection edges: box-blur then re-threshold.</summary>
+    public static byte[] Smooth(byte[] mask, int w, int h, int radius)
+    {
+        if (radius <= 0) return mask;
+        var f = Feather(mask, w, h, radius);
+        var o = new byte[mask.Length];
+        for (int i = 0; i < o.Length; i++) o[i] = (byte)(f[i] >= 128 ? 255 : 0);
+        return o;
+    }
+
+    /// <summary>Border: a band of <paramref name="radius"/> px around the selection edge (grow − shrink).</summary>
+    public static byte[] Border(byte[] mask, int w, int h, int radius)
+    {
+        if (radius <= 0) return mask;
+        var g = Grow(mask, w, h, radius);
+        var s = Shrink(mask, w, h, radius);
+        var o = new byte[mask.Length];
+        for (int i = 0; i < o.Length; i++) o[i] = (byte)Math.Clamp(g[i] - s[i], 0, 255);
+        return o;
+    }
+
+    private static void MaxH(byte[] s, byte[] d, int w, int h, int r)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            int row = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                int m = 0;
+                for (int k = -r; k <= r; k++) { int v = s[row + Math.Clamp(x + k, 0, w - 1)]; if (v > m) m = v; }
+                d[row + x] = (byte)m;
+            }
+        }
+    }
+    private static void MaxV(byte[] s, byte[] d, int w, int h, int r)
+    {
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                int m = 0;
+                for (int k = -r; k <= r; k++) { int v = s[Math.Clamp(y + k, 0, h - 1) * w + x]; if (v > m) m = v; }
+                d[y * w + x] = (byte)m;
+            }
+    }
+    private static void MinH(byte[] s, byte[] d, int w, int h, int r)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            int row = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                int m = 255;
+                for (int k = -r; k <= r; k++) { int v = s[row + Math.Clamp(x + k, 0, w - 1)]; if (v < m) m = v; }
+                d[row + x] = (byte)m;
+            }
+        }
+    }
+    private static void MinV(byte[] s, byte[] d, int w, int h, int r)
+    {
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                int m = 255;
+                for (int k = -r; k <= r; k++) { int v = s[Math.Clamp(y + k, 0, h - 1) * w + x]; if (v < m) m = v; }
+                d[y * w + x] = (byte)m;
+            }
+    }
 }

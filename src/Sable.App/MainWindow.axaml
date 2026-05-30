@@ -71,7 +71,20 @@
                 <MenuItem Header="Stamp Visible" Click="OnStamp" InputGesture="Ctrl+Shift+Alt+E" />
                 <MenuItem Header="Flatten Image" Click="OnFlatten" />
             </MenuItem>
-            <MenuItem Header="_Select" />
+            <MenuItem Header="_Select">
+                <MenuItem Header="Select All" Click="OnSelectAll" InputGesture="Ctrl+A" />
+                <MenuItem Header="Deselect" Click="OnDeselect" InputGesture="Ctrl+D" />
+                <MenuItem Header="Invert" Click="OnInvertSelection" InputGesture="Ctrl+Shift+I" />
+                <Separator />
+                <MenuItem Header="Grow (4px)" Click="OnGrowSelection" />
+                <MenuItem Header="Shrink (4px)" Click="OnShrinkSelection" />
+                <MenuItem Header="Smooth (4px)" Click="OnSmoothSelection" />
+                <MenuItem Header="Border (4px)" Click="OnBorderSelection" />
+                <MenuItem Header="Feather (4px)" Click="OnFeatherSelection" />
+                <Separator />
+                <MenuItem Header="Save Selection" Click="OnSaveSelection" />
+                <MenuItem Header="Load Selection" Click="OnLoadSelection" />
+            </MenuItem>
             <MenuItem Header="_Filter">
                 <MenuItem Header="Gaussian Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
                 <MenuItem Header="Box Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />

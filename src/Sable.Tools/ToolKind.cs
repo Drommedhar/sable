@@ -11,7 +11,9 @@ public enum ToolKind
     Marquee,      // rectangular selection
     EllipseMarquee, // elliptical selection
     Lasso,        // freehand selection
+    PolyLasso,    // polygonal selection (click vertices, double-click/Enter to close)
     MagicWand,    // contiguous-color selection
+    ColorRange,   // global colour-similarity selection (non-contiguous)
     Brush,
     Pencil,       // hard-edged aliased brush
     Eraser,

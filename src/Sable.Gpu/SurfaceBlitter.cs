@@ -154,7 +154,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[30] = ov.BrushColR; u[31] = ov.BrushColG; u[32] = ov.BrushColB;
         u[33] = ov.BrushErase ? 1f : 0f; u[34] = ov.BrushHardness;
         bool maskOn = ov.MaskOn && ov.MaskView is not null;
-        u[35] = maskOn ? 1f : 0f;
+        u[35] = maskOn ? (ov.QuickMask ? 2f : 1f) : 0f;   // 2 = rubylith fill, 1 = marching ants
         u[36] = ov.GradientOn ? 1f : 0f;
         u[37] = ov.GradX0; u[38] = ov.GradY0; u[39] = ov.GradX1; u[40] = ov.GradY1;
         u[41] = ov.CropOn ? 1f : 0f;

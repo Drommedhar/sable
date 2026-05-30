@@ -150,7 +150,12 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     }
 
     // non-rectangular selection: marching ants traced along the coverage-mask boundary
-    if (vp.maskOn > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+    // quick mask (maskOn == 2): rubylith — fill the selected area with translucent red
+    if (vp.maskOn > 1.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let cov = textureSample(maskTex, samp, vec2<f32>(u, v)).r;
+        outc = mix(outc, vec3<f32>(0.95, 0.1, 0.2), cov * 0.5);
+    }
+    else if (vp.maskOn > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let step = max(vp.invScale, 1.0);          // ~1 surface px expressed in doc px
         let du = step / vp.docW;
         let dv = step / vp.docH;

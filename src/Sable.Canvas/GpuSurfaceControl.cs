@@ -51,6 +51,55 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     private TextureView* _selMaskView;
     private int _selMaskTexW, _selMaskTexH, _selMaskVer = -1;
 
+    /// <summary>Quick-mask mode (Q): paint the selection as a red rubylith with the brush. PLAN §3.</summary>
+    public bool QuickMask { get; private set; }
+    private byte[]? _qmask;          // editable RGBA8 doc-sized quick mask (R = coverage)
+    private byte[]? _qmaskEntrySel;  // selection snapshot on entry, to restore on cancel
+
+    /// <summary>Toggle quick-mask mode: enter seeds from the current selection; exit commits it.</summary>
+    public void ToggleQuickMask()
+    {
+        if (_doc is null) return;
+        if (!QuickMask)
+        {
+            int n = _doc.Width * _doc.Height;
+            _qmask = new byte[n * 4];
+            _qmaskEntrySel = _doc.SnapshotSelectionMask();   // remember for cancel
+            if (_qmaskEntrySel is { } sel)
+                for (int i = 0; i < n; i++) { _qmask[i * 4] = sel[i]; _qmask[i * 4 + 3] = 255; }
+            QuickMask = true;
+            SyncQuickMask();
+        }
+        else
+        {
+            if (_qmask is not null) _doc.SetMaskSelection(ExtractR(_qmask, _doc.Width, _doc.Height));   // commit
+            QuickMask = false; _qmask = null; _qmaskEntrySel = null;
+        }
+    }
+
+    /// <summary>Exit quick mask WITHOUT committing — restore the selection that existed on entry (Esc).</summary>
+    public void CancelQuickMask()
+    {
+        if (!QuickMask || _doc is null) return;
+        QuickMask = false; _qmask = null;
+        if (_qmaskEntrySel is { } sel) _doc.SetMaskSelection(sel);
+        else _doc.ClearSelection();
+        _qmaskEntrySel = null;
+    }
+
+    private void SyncQuickMask()
+    {
+        if (_qmask is not null && _doc is not null)
+            _doc.SetSelectionMaskLive(ExtractR(_qmask, _doc.Width, _doc.Height));
+    }
+
+    private static byte[] ExtractR(byte[] rgba, int w, int h)
+    {
+        var m = new byte[w * h];
+        for (int i = 0; i < w * h; i++) m[i] = rgba[i * 4];
+        return m;
+    }
+
     /// <summary>Show the document grid (spacing in doc px) — toggled from View ▸ Show Grid.</summary>
     public bool ShowGrid { get; set; }
     public float GridSpacing { get; set; } = 50f;
@@ -281,7 +330,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         Sable.Engine.Compositing.PreviewDab? dab = null;
         bool previewTool = ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
                                        or Sable.Tools.ToolKind.CloneStamp;
-        if (!_painting && ActiveLayer is { } al && previewTool)
+        if (!_painting && !QuickMask && ActiveLayer is { } al && previewTool)
         {
             var vp = ComputeViewport();
             double docX = vp.Scale > 0 ? (_lastMouseX - vp.Ox) / vp.Scale : -1;
@@ -396,6 +445,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 UpdateSelMaskTexture();
                 ov.MaskOn = _selMaskView is not null;
                 ov.MaskView = _selMaskView;
+                ov.QuickMask = QuickMask;   // rubylith fill instead of ants while editing
             }
             else
             {

@@ -49,6 +49,29 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesGuidesAndSavedSelection()
+    {
+        var doc = new Document(40, 30);
+        doc.Layers.Add(new PixelLayer(40, 30, "bg"));
+        doc.GuidesX.Add(12); doc.GuidesY.Add(7);
+        var sel = new byte[40 * 30];
+        for (int i = 0; i < sel.Length; i++) sel[i] = (byte)(i % 2 == 0 ? 255 : 0);
+        doc.SavedSelection = sel;
+
+        var path = Path.Combine(Path.GetTempPath(), $"sable_test_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            Assert.Equal(new[] { 12f }, loaded.GuidesX);
+            Assert.Equal(new[] { 7f }, loaded.GuidesY);
+            Assert.NotNull(loaded.SavedSelection);
+            Assert.Equal(sel, loaded.SavedSelection);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesSubDocLayerBoundsAndOffset()
     {
         // a layer smaller than the document, positioned partly off-canvas (negative offset)

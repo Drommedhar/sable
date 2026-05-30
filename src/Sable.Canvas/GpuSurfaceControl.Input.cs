@@ -46,11 +46,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _selStartX, _selStartY;
     private bool _lassoing;
     private readonly List<(double X, double Y)> _lassoPts = new();
+    private readonly List<(double X, double Y)> _polyPts = new();   // polygonal lasso vertices
     // GIMP-style selection grips
     private bool _selResizing, _selMoving;
     private bool _hL, _hR, _hT, _hB;            // which edges follow the cursor
     private double _selL0, _selR0, _selT0, _selB0;
     private double _selMoveStartX, _selMoveStartY;
+    private bool _maskMoving;                    // moving a non-rect (mask) selection
+    private byte[]? _maskMoveOrig;
+    private double _maskMoveStartX, _maskMoveStartY;
 
     // transform gizmo state
     private const float RotHandleDist = 28f;
@@ -262,6 +266,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             double nt = Math.Clamp(_selT0 + (dy - _selMoveStartY), 0, _doc.Height - h);
             _doc.Selection = SelRect.FromCorners(nl, nt, nl + w, nt + h, _doc.Width, _doc.Height);
         }
+        else if (_maskMoving && _doc is not null && _maskMoveOrig is not null)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            var shifted = Selections.Shift(_maskMoveOrig, _doc.Width, _doc.Height,
+                (int)Math.Round(dx - _maskMoveStartX), (int)Math.Round(dy - _maskMoveStartY));
+            _doc.SetSelectionMaskLive(shifted);
+        }
         else if (_gradienting)
         {
             _gradEndSx = sx; _gradEndSy = sy;   // track for the live line overlay
@@ -353,6 +364,20 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private StrokeSession? CreateSession()
     {
+        // quick-mask mode: the brush edits the selection (white = add, eraser/black = remove)
+        if (QuickMask)
+        {
+            if (_qmask is null || _doc is null) return null;
+            Brush.BeginStroke();
+            Brush.Mode = BrushMode.Paint;
+            Brush.Clone = false; Brush.Erase = false; Brush.Pencil = false; Brush.LockAlpha = false;
+            Brush.OriginX = 0; Brush.OriginY = 0;
+            Brush.Clip = null; Brush.ClipMask = null;
+            bool remove = ActiveTool == ToolKind.Eraser;
+            Brush.R = Brush.G = Brush.B = (byte)(remove ? 0 : 255);   // black removes, white adds (src-over on R)
+            return new StrokeSession(_qmask, _doc.Width, _doc.Height, Brush, _ => SyncQuickMask());
+        }
+
         if (ActiveLayer is not { } layer) return null;
         Brush.Clone = false;   // reset; clone configured per-stroke below
         Brush.Mode = ActiveTool switch
@@ -585,6 +610,22 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
 
+            case ToolKind.PolyLasso:
+                if (_doc is not null)
+                {
+                    if (_polyPts.Count == 0) CaptureSelMode(mods);   // capture combine mode on the first vertex
+                    double cth = 8.0 / Math.Max(0.0001, EffectiveScale);
+                    if (_polyPts.Count >= 3 && Math.Abs(dx - _polyPts[0].X) <= cth && Math.Abs(dy - _polyPts[0].Y) <= cth)
+                    {
+                        CommitPolyLasso();   // clicked back on the first vertex → close
+                        break;
+                    }
+                    _polyPts.Add((dx, dy));
+                    if (_polyPts.Count >= 2)
+                        _doc.SetMaskSelection(Selections.Polygon(_doc.Width, _doc.Height, _polyPts));   // live preview
+                }
+                break;
+
             case ToolKind.MagicWand:
                 if (_doc is not null && ActiveLayer is { } wl)
                 {
@@ -594,9 +635,29 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
 
+            case ToolKind.ColorRange:
+                if (_doc is not null && ReadComposite() is { } comp)
+                {
+                    CaptureSelMode(mods);
+                    int ix = Math.Clamp((int)dx, 0, _doc.Width - 1), iy = Math.Clamp((int)dy, 0, _doc.Height - 1);
+                    int j = (iy * _doc.Width + ix) * 4;
+                    var m = Selections.ColorRange(comp, _doc.Width, _doc.Height, comp[j], comp[j + 1], comp[j + 2], 32);
+                    ApplyMask(m);
+                }
+                break;
+
             case ToolKind.Marquee:
                 if (_doc is not null)
                 {
+                    // move a non-rect (mask) selection by dragging its interior
+                    if (_doc.SelectionMask is not null && _doc.Selection is { } mb &&
+                        dx >= mb.X && dx < mb.Right && dy >= mb.Y && dy < mb.Bottom)
+                    {
+                        _maskMoving = true; _input?.Capture();
+                        _maskMoveOrig = (byte[])_doc.SelectionMask.Clone();
+                        _maskMoveStartX = dx; _maskMoveStartY = dy;
+                        break;
+                    }
                     int hit = _doc.SelectionMask is null ? HitSelHandle(sx, sy) : -1;
                     if (hit is >= 0 and < 8 && _doc.Selection is { } rs)   // grip → resize
                     {
@@ -761,6 +822,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             }
             _lassoPts.Clear();
         }
+        else if (_maskMoving)
+        {
+            _maskMoving = false; _input?.ReleaseCapture();
+            if (_doc?.SelectionMask is { } fm) _doc.SetMaskSelection(fm);   // normalise bounds (clears if fully off-canvas)
+            _maskMoveOrig = null;
+        }
         else if (_selecting || _selResizing || _selMoving)
         {
             bool wasNewDraw = _selecting;   // a fresh drag (not grip resize/move)
@@ -838,6 +905,25 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     /// <summary>Clear any active selection.</summary>
     public void Deselect() { _doc?.ClearSelection(); _lastSelShape = null; }
 
+    /// <summary>True while a polygonal-lasso selection is being clicked out.</summary>
+    public bool PolyLassoActive => _polyPts.Count > 0;
+
+    /// <summary>Close the in-progress polygonal lasso (Enter / click on first vertex). Combines + feathers.</summary>
+    public void CommitPolyLasso()
+    {
+        if (_doc is not null && _polyPts.Count >= 3)
+            ApplyMask(Selections.Polygon(_doc.Width, _doc.Height, _polyPts));
+        _polyPts.Clear();
+    }
+
+    /// <summary>Cancel the in-progress polygonal lasso (Esc), discarding the preview.</summary>
+    public void CancelPolyLasso()
+    {
+        bool had = _polyPts.Count > 0;
+        _polyPts.Clear();
+        if (had) _doc?.ClearSelection();
+    }
+
     /// <summary>Erase the selected region of the active layer (undoable). No-op without a selection.</summary>
     public void DeleteSelection()
     {
@@ -850,9 +936,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         for (int y = Math.Max(0, sel.Y); y < Math.Min(h, sel.Bottom); y++)
         for (int x = Math.Max(0, sel.X); x < Math.Min(w, sel.Right); x++)
         {
-            if (mask is not null && mask[y * mw + x] == 0) continue;
+            int cov = mask is null ? 255 : mask[y * mw + x];
+            if (cov == 0) continue;
             int i = (y * w + x) * 4;
-            target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0;
+            if (cov >= 255) { target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0; }
+            else target[i + 3] = (byte)(target[i + 3] * (255 - cov) / 255);   // feathered: erase alpha ∝ coverage
         }
         var after = SnapshotAllTiles(target, w, h);
         layer.MarkTilesDirty(after.Keys);

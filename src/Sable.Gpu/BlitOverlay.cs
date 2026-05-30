@@ -30,6 +30,7 @@ public struct BlitOverlay
     // (ellipse/lasso/wand). MaskView is a doc-sized R8 texture sampled in doc UV.
     public bool MaskOn;
     public unsafe TextureView* MaskView;
+    public bool QuickMask;   // when true, render the mask as translucent red (rubylith) instead of ants
 
     // gradient tool drag line — start/end in SURFACE pixels
     public bool GradientOn;

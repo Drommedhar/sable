@@ -16,6 +16,9 @@ public sealed class Document
     /// <summary>Print resolution metadata (dots per inch). Does not affect pixel data.</summary>
     public double Dpi { get; set; } = 96;
 
+    /// <summary>A stored selection coverage mask (Select ▸ Save/Load Selection, PLAN §3). Doc-sized.</summary>
+    public byte[]? SavedSelection { get; set; }
+
     /// <summary>Vertical guide lines (constant document X). PLAN §2.5.</summary>
     public List<float> GuidesX { get; } = new();
     /// <summary>Horizontal guide lines (constant document Y).</summary>
@@ -58,6 +61,17 @@ public sealed class Document
         if (SelectionMask is not null) return (byte[])SelectionMask.Clone();
         if (Selection is { } r && r.W > 0 && r.H > 0) return Selections.Rect(Width, Height, r);
         return null;
+    }
+
+    /// <summary>
+    /// Live-update the selection coverage mask during quick-mask painting: assigns the mask + bounds
+    /// and bumps the version WITHOUT clearing on empty (so an in-progress empty mask isn't dropped).
+    /// </summary>
+    public void SetSelectionMaskLive(byte[] mask)
+    {
+        SelectionMask = mask;
+        Selection = Selections.Bounds(mask, Width, Height);
+        SelectionVersion++;
     }
 
     /// <summary>Set a non-rectangular selection from a coverage mask (computes its bounds).</summary>

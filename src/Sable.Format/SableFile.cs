@@ -24,6 +24,7 @@ public static class SableFile
         public List<LayerDto> Layers { get; set; } = new();
         public List<float> GuidesX { get; set; } = new();
         public List<float> GuidesY { get; set; } = new();
+        public string? SavedSelection { get; set; }   // zip entry name of the stored selection mask
     }
 
     private sealed class LayerDto
@@ -135,6 +136,7 @@ public static class SableFile
         var dto = new DocDto { Width = doc.Width, Height = doc.Height };
         dto.GuidesX.AddRange(doc.GuidesX);
         dto.GuidesY.AddRange(doc.GuidesY);
+        if (doc.SavedSelection is { } sel) { dto.SavedSelection = "selection.raw"; WriteEntry(zip, dto.SavedSelection, sel); }
         foreach (var layer in doc.Layers)
             dto.Layers.Add(SaveLayer(zip, layer, ref next));
 
@@ -244,6 +246,13 @@ public static class SableFile
         var doc = new Document(dto.Width, dto.Height);
         doc.GuidesX.AddRange(dto.GuidesX);
         doc.GuidesY.AddRange(dto.GuidesY);
+        if (dto.SavedSelection is not null && zip.GetEntry(dto.SavedSelection) is { } se)
+        {
+            var buf = new byte[dto.Width * dto.Height];
+            using var es = se.Open();
+            ReadFully(es, buf);
+            doc.SavedSelection = buf;
+        }
         foreach (var ld in dto.Layers)
             if (BuildLayer(ld, zip, dto.Width, dto.Height) is { } l) doc.Layers.Add(l);
         return doc;

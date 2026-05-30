@@ -7,6 +7,62 @@ namespace Sable.Tests;
 public class SelectionTests
 {
     [Fact]
+    public void Invert_FlipsCoverage()
+    {
+        var m = Selections.Rect(10, 10, new SelRect(0, 0, 5, 10));   // left half selected
+        var inv = Selections.Invert(m);
+        Assert.Equal(0, inv[2]);                 // was selected → now 0
+        Assert.Equal(255, inv[7]);               // was 0 → now 255
+    }
+
+    [Fact]
+    public void GrowShrink_ChangeSelectedArea()
+    {
+        var m = Selections.Rect(40, 40, new SelRect(15, 15, 10, 10));   // 10x10 block
+        int Count(byte[] a) { int n = 0; foreach (var v in a) if (v > 127) n++; return n; }
+        int baseN = Count(m);
+        Assert.True(Count(Selections.Grow(m, 40, 40, 3)) > baseN);
+        Assert.True(Count(Selections.Shrink(m, 40, 40, 3)) < baseN);
+    }
+
+    [Fact]
+    public void Border_IsBandAroundEdge_EmptyInterior()
+    {
+        var m = Selections.Rect(60, 60, new SelRect(20, 20, 20, 20));
+        var b = Selections.Border(m, 60, 60, 3);
+        Assert.True(b[30 * 60 + 30] < 128);      // deep interior not in the border band
+        Assert.True(b[20 * 60 + 30] > 0);        // near the top edge is in the band
+    }
+
+    [Fact]
+    public void ColorRange_SelectsAllMatching_NonContiguous()
+    {
+        // 4x1 strip: red, blue, red, blue — color-range on red picks both reds (non-contiguous)
+        var px = new byte[4 * 1 * 4];
+        void Set(int i, byte r, byte g, byte b) { px[i * 4] = r; px[i * 4 + 1] = g; px[i * 4 + 2] = b; px[i * 4 + 3] = 255; }
+        Set(0, 255, 0, 0); Set(1, 0, 0, 255); Set(2, 255, 0, 0); Set(3, 0, 0, 255);
+        var m = Selections.ColorRange(px, 4, 1, 255, 0, 0, 10);
+        Assert.Equal(255, m[0]); Assert.Equal(0, m[1]); Assert.Equal(255, m[2]); Assert.Equal(0, m[3]);
+    }
+
+    [Fact]
+    public void Shift_TranslatesMask()
+    {
+        var m = new byte[5 * 5];
+        m[2 * 5 + 2] = 255;                       // centre set
+        var s = Selections.Shift(m, 5, 5, 1, -1); // right 1, up 1 → (3,1)
+        Assert.Equal(0, s[2 * 5 + 2]);
+        Assert.Equal(255, s[1 * 5 + 3]);
+    }
+
+    [Fact]
+    public void Full_SelectsEverything()
+    {
+        var m = Selections.Full(8, 8);
+        Assert.All(m, v => Assert.Equal(255, v));
+    }
+
+    [Fact]
     public void Ellipse_CentreSelected_CornersNot()
     {
         var m = Selections.Ellipse(100, 100, new SelRect(10, 10, 80, 80));

@@ -261,6 +261,39 @@ public partial class MainWindow : Window
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
 
+    // --- Select menu (PLAN §3 / §16.2) ---
+    private void OnSelectAll(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is { } d) d.SetMaskSelection(Sable.Engine.Selections.Full(d.Width, d.Height));
+    }
+    private void OnDeselect(object? sender, RoutedEventArgs e) => Canvas.Deselect();
+    private void OnInvertSelection(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is not { } d) return;
+        var m = d.SnapshotSelectionMask() ?? Sable.Engine.Selections.Full(d.Width, d.Height);
+        d.SetMaskSelection(Sable.Engine.Selections.Invert(m));
+    }
+    private void OnGrowSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Grow(m, w, h, 4));
+    private void OnShrinkSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Shrink(m, w, h, 4));
+    private void OnSmoothSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Smooth(m, w, h, 4));
+    private void OnBorderSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Border(m, w, h, 4));
+    private void OnFeatherSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Feather(m, w, h, 4));
+
+    private void MorphSelection(System.Func<byte[], int, int, byte[]> op)
+    {
+        if (Canvas.Document is { } d && d.SnapshotSelectionMask() is { } m)
+            d.SetMaskSelection(op(m, d.Width, d.Height));
+    }
+
+    private void OnSaveSelection(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is { } d && d.SnapshotSelectionMask() is { } m) d.SavedSelection = m;
+    }
+    private void OnLoadSelection(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is { } d && d.SavedSelection is { } m) d.SetMaskSelection((byte[])m.Clone());
+    }
+
     // --- autosave + crash recovery (PLAN §2.6) ---
     private Avalonia.Threading.DispatcherTimer? _autosaveTimer;
 
@@ -420,13 +453,24 @@ public partial class MainWindow : Window
                 case Key.E: OnMergeDown(null, null!); e.Handled = true; return;
                 case Key.N: _ = OnNewDocument(); e.Handled = true; return;
                 case Key.W when _activeTab is { } wt: _ = CloseTab(wt); e.Handled = true; return;
+                case Key.A: OnSelectAll(null, null!); e.Handled = true; return;
+                case Key.D: OnDeselect(null, null!); e.Handled = true; return;
+                case Key.I when shift: OnInvertSelection(null, null!); e.Handled = true; return;
             }
         }
         switch (e.Key)
         {
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
-            case Key.Enter: Canvas.CommitCrop(); e.Handled = true; break;     // commit a pending crop
-            case Key.Escape: Canvas.CancelCrop(); Canvas.Deselect(); e.Handled = true; break;
+            case Key.Enter:
+                if (Canvas.QuickMask) Canvas.ToggleQuickMask();       // commit quick mask
+                else if (Canvas.PolyLassoActive) Canvas.CommitPolyLasso();
+                else Canvas.CommitCrop();
+                e.Handled = true; break;
+            case Key.Escape:
+                if (Canvas.QuickMask) Canvas.CancelQuickMask();       // cancel quick mask (restore prior selection)
+                else if (Canvas.PolyLassoActive) Canvas.CancelPolyLasso();
+                else { Canvas.CancelCrop(); Canvas.Deselect(); }
+                e.Handled = true; break;
         }
     }
 
@@ -772,8 +816,10 @@ public partial class MainWindow : Window
                           new ToolDef(xform, "Transform", Sable.Tools.ToolKind.Transform) }),
             ("M", new[] { new ToolDef(rect, "Rectangle Marquee", Sable.Tools.ToolKind.Marquee),
                           new ToolDef(ellip, "Elliptical Marquee", Sable.Tools.ToolKind.EllipseMarquee) }),
-            ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso) }),
-            ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand) }),
+            ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso),
+                          new ToolDef(lasso, "Polygonal Lasso", Sable.Tools.ToolKind.PolyLasso) }),
+            ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand),
+                          new ToolDef(wand, "Colour Range", Sable.Tools.ToolKind.ColorRange) }),
             ("B", new[] { new ToolDef(brush, "Brush", Sable.Tools.ToolKind.Brush),
                           new ToolDef(pencil, "Pencil", Sable.Tools.ToolKind.Pencil),
                           new ToolDef(eraser, "Eraser", Sable.Tools.ToolKind.Eraser) }),
@@ -918,7 +964,7 @@ public partial class MainWindow : Window
                               or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         StrengthOpts.IsVisible = k is ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                                   or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
-        SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.MagicWand;
+        SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.PolyLasso or ToolKind.MagicWand or ToolKind.ColorRange;
         TypeOpts.IsVisible = k == ToolKind.Type;
         EyedropperOpts.IsVisible = k == ToolKind.Eyedropper;
         MaskHint.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser;
@@ -948,6 +994,7 @@ public partial class MainWindow : Window
             case Key.I: CycleGroup("I"); break;
             case Key.H: CycleGroup("H"); break;
             case Key.Z: CycleGroup("Z"); break;
+            case Key.Q: Canvas.ToggleQuickMask(); break;   // quick mask (paint the selection as rubylith)
             case Key.K: Canvas.PaintMask = !Canvas.PaintMask; break;   // edit layer mask
             case Key.Escape: Canvas.Deselect(); break;
             case Key.D when e.KeyModifiers == KeyModifiers.Control: Canvas.Deselect(); break;
