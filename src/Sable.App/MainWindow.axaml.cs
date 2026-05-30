@@ -842,7 +842,11 @@ public partial class MainWindow : Window
 
     private void UpdateEmptyState()
     {
-        if (EmptyState is not null) EmptyState.IsVisible = _tabs.Count == 0;
+        bool empty = _tabs.Count == 0;
+        if (EmptyState is not null) EmptyState.IsVisible = empty;
+        // the GPU canvas is a native HWND that paints OVER the Avalonia welcome overlay (airspace);
+        // hide it when there's no document so the empty/welcome state is actually visible.
+        if (Canvas is not null) Canvas.IsVisible = !empty;
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)
@@ -987,7 +991,7 @@ public partial class MainWindow : Window
             ActivateTab(_tabs.Count == 0 ? null : _tabs[System.Math.Clamp(i, 0, _tabs.Count - 1)]);
     }
 
-    private void OnNewTabButton(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
+    private void OnNewTabButton(object? sender, RoutedEventArgs e) { Log("OnNewTabButton click"); _ = OnNewDocument(); }
 
     private void OnFilesDragOver(object? sender, DragEventArgs e)
     {
@@ -1018,15 +1022,36 @@ public partial class MainWindow : Window
         }
     }
 
-    private async System.Threading.Tasks.Task OnNewDocument()
+    internal static void Log(string msg)
     {
-        var dlg = new NewDocumentWindow(_settings.DefaultDpi);
-        if (await dlg.ShowDialog<bool>(this))
-            OpenInNewTab(new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi },
-                         null, $"Untitled {_untitledCounter++}");
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sable.log"),
+                  $"{System.DateTime.Now:HH:mm:ss.fff} {msg}\n"); } catch { }
     }
 
-    private void OnNewMenu(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
+    private async System.Threading.Tasks.Task OnNewDocument()
+    {
+        Log("OnNewDocument: enter");
+        try
+        {
+            var dlg = new NewDocumentWindow(_settings.DefaultDpi);
+            Log("OnNewDocument: dialog constructed, showing");
+            var ok = await dlg.ShowDialog<bool>(this);
+            Log($"OnNewDocument: dialog closed ok={ok} w={dlg.DocWidth} h={dlg.DocHeight}");
+            if (ok)
+            {
+                var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi };
+                var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
+                if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
+                bg.Dirty = true;
+                doc.Layers.Add(bg);
+                OpenInNewTab(doc, null, $"Untitled {_untitledCounter++}");
+                Log("OnNewDocument: tab opened");
+            }
+        }
+        catch (System.Exception ex) { Log($"OnNewDocument: EXCEPTION {ex}"); }
+    }
+
+    private void OnNewMenu(object? sender, RoutedEventArgs e) { Log("OnNewMenu click"); _ = OnNewDocument(); }
 
     private async void OnNewFromClipboard(object? sender, RoutedEventArgs e)
     {

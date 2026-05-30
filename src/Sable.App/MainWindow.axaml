@@ -237,8 +237,8 @@
                 </Border>
 
                 <!-- canvas viewport: live embedded wgpu swapchain + input overlay -->
-                <Border Grid.Row="1" Margin="24" Background="#FF141414"
-                        BorderBrush="#FF000000" BorderThickness="1">
+                <Border Grid.Row="1" Margin="24" Background="{DynamicResource ChromeCanvas}"
+                        BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1">
                     <Panel>
                         <canvas:GpuSurfaceControl x:Name="Canvas" />
                         <Border x:Name="InputLayer" Background="Transparent"

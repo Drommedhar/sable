@@ -210,7 +210,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
 
         _compositor = new GpuCompositor(_gpu);
         _blitter = new SurfaceBlitter(_gpu, _format);
-        _doc ??= Document.CreateDemo();
+        // no implicit demo — the canvas stays empty until MainWindow opens a document/tab.
     }
 
     private void Configure(uint w, uint h)
