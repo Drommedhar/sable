@@ -127,6 +127,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[4] = vp.DocW; u[5] = vp.DocH; u[6] = hasPaste ? ov.PasteG : 0.16f; u[7] = hasPaste ? ov.PasteB : 0.17f;
         u[8] = ov.RectX; u[9] = ov.RectY; u[10] = ov.RectW; u[11] = ov.RectH; u[12] = ov.RectOn ? 1f : 0f;
         u[13] = ov.SelHandles ? 1f : 0f;
+        u[14] = ov.GridOn ? 1f : 0f; u[15] = ov.GridSpacing;
         if (ov.Corners is { Length: 8 })
             for (int i = 0; i < 8; i++) u[16 + i] = ov.Corners[i];
         u[24] = ov.GizmoOn ? 1f : 0f;
@@ -141,7 +142,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[41] = ov.CropOn ? 1f : 0f;
         u[42] = ov.ShapeOn ? 1f : 0f; u[43] = ov.ShapeKind;
         u[44] = ov.ShX0; u[45] = ov.ShY0; u[46] = ov.ShX1; u[47] = ov.ShY1;
-        u[48] = ov.CloneSrcOn ? 1f : 0f; u[49] = ov.CloneSrcSx; u[50] = ov.CloneSrcSy;
+        u[48] = ov.CloneSrcOn ? 1f : 0f; u[49] = ov.CloneSrcSx; u[50] = ov.CloneSrcSy; u[51] = ov.PixelGrid ? 1f : 0f;
         u[52] = ov.CaretOn ? 1f : 0f; u[53] = ov.CaretX; u[54] = ov.CaretY0; u[55] = ov.CaretY1;
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, 224);
 

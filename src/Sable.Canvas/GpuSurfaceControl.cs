@@ -51,10 +51,25 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     private TextureView* _selMaskView;
     private int _selMaskTexW, _selMaskTexH, _selMaskVer = -1;
 
+    /// <summary>Show the document grid (spacing in doc px) — toggled from View ▸ Show Grid.</summary>
+    public bool ShowGrid { get; set; }
+    public float GridSpacing { get; set; } = 50f;
+    /// <summary>Show a 1px pixel grid when zoomed in far enough.</summary>
+    public bool ShowPixelGrid { get; set; } = true;
+
     // viewport: _zoom = 1 means fit-to-window; pan in surface pixels
     private double _zoom = 1.0;
     private double _panX, _panY;
     private double _lastMouseX, _lastMouseY;   // surface px, tracked from WndProc
+
+    /// <summary>Raised when the view transform (zoom/pan) changes — for the status-bar zoom readout.</summary>
+    public event Action? ViewChanged;
+
+    /// <summary>Raised on pointer move with the document-space cursor position — for the status bar.</summary>
+    public event Action<double, double>? CursorDocMoved;
+
+    /// <summary>Effective on-screen scale (screen pixels per document pixel); 1.0 = 100%.</summary>
+    public double EffectiveScale => ComputeViewport().Scale;
 
     /// <summary>Zoom about the surface center (keyboard).</summary>
     public void ZoomBy(double factor) => ZoomAt(factor, _width / 2.0, _height / 2.0);
@@ -63,7 +78,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     public void ZoomAt(double factor, double sx, double sy)
     {
         var old = ComputeViewport();
-        if (old.Scale <= 0) { _zoom = Math.Clamp(_zoom * factor, 0.05, 64.0); return; }
+        if (old.Scale <= 0) { _zoom = Math.Clamp(_zoom * factor, 0.05, 64.0); ViewChanged?.Invoke(); return; }
 
         double docX = (sx - old.Ox) / old.Scale;
         double docY = (sy - old.Oy) / old.Scale;
@@ -76,18 +91,32 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         // solve pan so (docX,docY) maps back to (sx,sy)
         _panX = sx - docX * newScale - (_width - dw * newScale) / 2.0;
         _panY = sy - docY * newScale - (_height - dh * newScale) / 2.0;
+        ViewChanged?.Invoke();
     }
 
     public void PanBy(double dx, double dy)
     {
         _panX += dx;
         _panY += dy;
+        ViewChanged?.Invoke();
     }
 
     public void ResetView()
     {
         _zoom = 1.0; _panX = 0; _panY = 0;
+        ViewChanged?.Invoke();
     }
+
+    /// <summary>Set the on-screen zoom to <paramref name="percent"/>% (about the surface centre).</summary>
+    public void SetZoomPercent(double percent)
+    {
+        double cur = EffectiveScale;
+        if (cur <= 0) return;
+        ZoomAt((percent / 100.0) / cur, _width / 2.0, _height / 2.0);
+    }
+
+    /// <summary>Zoom to 100% (1 doc px = 1 screen px), about the surface centre.</summary>
+    public void ZoomActualPixels() => SetZoomPercent(100);
 
     /// <summary>Fit the document to the window; if <paramref name="limitTo100"/>, never zoom past 100% (1 doc px = 1 screen px).</summary>
     public void FitView(bool limitTo100)
@@ -98,6 +127,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             var vp = ComputeViewport();          // scale = fit (since _zoom == 1)
             if (vp.Scale > 1.0) _zoom = 1.0 / vp.Scale;   // cap effective scale at 1.0
         }
+        ViewChanged?.Invoke();
     }
 
     // OS-specific canvas bits (surface creation, timer resolution) live behind the backend;
@@ -438,6 +468,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             }
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
+        ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.PixelGrid = ShowPixelGrid;
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

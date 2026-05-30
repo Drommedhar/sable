@@ -78,6 +78,10 @@ public partial class MainWindow : Window
             if (_settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(manual: false);   // silent launch check
         };
         Closing += OnWindowClosing;
+
+        // live status bar (zoom + cursor position)
+        Canvas.ViewChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdateZoomLabel);
+        Canvas.CursorDocMoved += (x, y) => Avalonia.Threading.Dispatcher.UIThread.Post(() => UpdateCursorLabel(x, y));
     }
 
     private readonly Sable.Core.Settings.SableSettings _settings = Sable.Core.Settings.SettingsService.Load();
@@ -202,6 +206,42 @@ public partial class MainWindow : Window
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
+
+    // --- status bar: zoom UI + document info + cursor position (PLAN §2.5) ---
+    private void OnZoomFit(object? sender, RoutedEventArgs e) { Canvas.FitView(false); UpdateZoomLabel(); }
+    private void OnZoomActual(object? sender, RoutedEventArgs e) { Canvas.ZoomActualPixels(); UpdateZoomLabel(); }
+    private void OnZoomInMenu(object? sender, RoutedEventArgs e) { Canvas.ZoomBy(1.25); UpdateZoomLabel(); }
+    private void OnZoomOutMenu(object? sender, RoutedEventArgs e) { Canvas.ZoomBy(0.8); UpdateZoomLabel(); }
+
+    private void OnToggleGrid(object? sender, RoutedEventArgs e) => Canvas.ShowGrid = GridMenuItem.IsChecked;
+    private void OnTogglePixelGrid(object? sender, RoutedEventArgs e) => Canvas.ShowPixelGrid = PixelGridMenuItem.IsChecked;
+
+    private void OnZoomBoxKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        var s = (ZoomBox.Text ?? "").Replace("%", "").Trim();
+        if (double.TryParse(s, out var pct)) { Canvas.SetZoomPercent(System.Math.Clamp(pct, 5, 6400)); }
+        UpdateZoomLabel();
+        e.Handled = true;
+    }
+
+    private void UpdateZoomLabel()
+    {
+        if (ZoomBox is null) return;
+        ZoomBox.Text = $"{Canvas.EffectiveScale * 100:0}%";
+    }
+
+    private void UpdateCursorLabel(double docX, double docY)
+    {
+        if (CursorLabel is not null) CursorLabel.Text = $"{(int)System.Math.Floor(docX)}, {(int)System.Math.Floor(docY)} px";
+    }
+
+    private void UpdateDocInfo()
+    {
+        if (DocInfoLabel is null) return;
+        if (_activeTab?.Doc is { } d) DocInfoLabel.Text = $"{d.Width} x {d.Height} px ({d.Dpi:0} ppi)";
+        else DocInfoLabel.Text = "—";
+    }
 
     private void OnCheckUpdatesMenu(object? sender, RoutedEventArgs e) => _ = CheckForUpdatesAsync(manual: true);
 
@@ -843,6 +883,7 @@ public partial class MainWindow : Window
             DataContext = null;
             _currentPath = null;
             UpdateEmptyState();
+            UpdateDocInfo();
             return;
         }
 
@@ -856,6 +897,8 @@ public partial class MainWindow : Window
         if (_fxWindow is not null) _fxWindow.DataContext = tab.Vm;
         Canvas.FitView(_settings.LimitInitialZoom);
         UpdateEmptyState();
+        UpdateDocInfo();
+        UpdateZoomLabel();
     }
 
     // wire the canvas callbacks to the active tab's view-model

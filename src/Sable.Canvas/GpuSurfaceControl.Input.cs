@@ -183,6 +183,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     void ICanvasInputSink.PointerMove(double sx, double sy, CanvasMods mods)
     {
         _lastMouseX = sx; _lastMouseY = sy;
+        if (CursorDocMoved is not null) { var (cdx, cdy) = MapToDoc(sx, sy); CursorDocMoved(cdx, cdy); }
 
         if (_hudAdjust)
         {

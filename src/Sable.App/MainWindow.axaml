@@ -86,7 +86,15 @@
                 <MenuItem Header="Add Noise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.AddNoise}" />
                 <MenuItem Header="Denoise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
             </MenuItem>
-            <MenuItem Header="_View" />
+            <MenuItem Header="_View">
+                <MenuItem Header="Zoom In" Click="OnZoomInMenu" InputGesture="Ctrl+OemPlus" />
+                <MenuItem Header="Zoom Out" Click="OnZoomOutMenu" InputGesture="Ctrl+OemMinus" />
+                <MenuItem Header="Fit to Window" Click="OnZoomFit" InputGesture="Ctrl+D0" />
+                <MenuItem Header="Actual Pixels (100%)" Click="OnZoomActual" InputGesture="Ctrl+D1" />
+                <Separator />
+                <MenuItem x:Name="GridMenuItem" Header="Show Grid" ToggleType="CheckBox" Click="OnToggleGrid" />
+                <MenuItem x:Name="PixelGridMenuItem" Header="Show Pixel Grid" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
+            </MenuItem>
             <MenuItem Header="_Window">
                 <MenuItem Header="Adjustments" Click="OnToggleAdjustments" />
                 <MenuItem Header="Layer Effects" Click="OnToggleEffects" />
@@ -261,12 +269,22 @@
                     </Panel>
                 </Border>
 
-                <!-- status strip -->
+                <!-- status strip: live zoom UI + document info + cursor position -->
                 <Border Grid.Row="2" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="14">
-                        <TextBlock Text="100%" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
-                        <TextBlock Text="512 x 512 px (300 ppi)" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
-                        <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="10">
+                        <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomFit" ToolTip.Tip="Fit (0)">
+                            <Path Classes="icon" Width="13" Height="13" Data="M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5" />
+                        </Button>
+                        <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomActual" ToolTip.Tip="100%">
+                            <TextBlock Text="1:1" FontSize="10" Foreground="{DynamicResource ChromeText}" />
+                        </Button>
+                        <TextBox x:Name="ZoomBox" Width="54" Text="100%" FontSize="11" TextAlignment="Center"
+                                 VerticalContentAlignment="Center" KeyDown="OnZoomBoxKey" ToolTip.Tip="Zoom level" />
+                        <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                        <TextBlock x:Name="DocInfoLabel" Text="—" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                        <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                        <TextBlock x:Name="CursorLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="110" />
+                        <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
                     </StackPanel>
                 </Border>
             </Grid>

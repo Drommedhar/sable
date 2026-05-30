@@ -12,7 +12,7 @@ struct Viewport {
     pasteG: f32,
     pasteB: f32,
     ovX: f32, ovY: f32, ovW: f32, ovH: f32,   // overlay rect (doc px)
-    ovOn: f32, selHandles: f32, _p4: f32, _p5: f32,  // ovOn: 1 = draw rect; selHandles: 1 = draw grips
+    ovOn: f32, selHandles: f32, gridOn: f32, gridSp: f32,  // ovOn: rect; selHandles: grips; gridOn+spacing: doc grid
     // transform gizmo: 4 corners in SURFACE px (TL,TR,BR,BL), rotate-handle distance
     c0x: f32, c0y: f32, c1x: f32, c1y: f32, c2x: f32, c2y: f32, c3x: f32, c3y: f32,
     gizmoOn: f32, rotDist: f32,
@@ -23,7 +23,7 @@ struct Viewport {
     cropOn: f32,                                            // dim outside the overlay rect (crop preview)
     shapeOn: f32, shapeKind: f32,                           // shape drag outline (surface px)
     shx0: f32, shy0: f32, shx1: f32, shy1: f32,
-    cloneOn: f32, clsx: f32, clsy: f32, _p13: f32,          // clone source crosshair (surface px)
+    cloneOn: f32, clsx: f32, clsy: f32, pixGrid: f32,       // clone crosshair; pixGrid: 1 = 1px pixel grid
     caretOn: f32, caretX: f32, caretY0: f32, caretY1: f32,  // text caret (surface px)
 };
 
@@ -70,6 +70,22 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let bg = checker(frag.xy);
         let col = textureSample(tex, samp, vec2<f32>(u, v));
         outc = col.rgb * col.a + bg * (1.0 - col.a);
+    }
+
+    // document grid + pixel grid (inside the document only); drawn under the tool overlays
+    if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let t = vp.invScale * 0.5;   // ~half a surface pixel expressed in doc px
+        if (vp.gridOn > 0.5 && vp.gridSp > 0.0) {
+            let mx = docX - round(docX / vp.gridSp) * vp.gridSp;
+            let my = docY - round(docY / vp.gridSp) * vp.gridSp;
+            if (abs(mx) <= t || abs(my) <= t) { outc = mix(outc, vec3<f32>(0.5), 0.45); }
+        }
+        // pixel grid only when zoomed in enough that 1 doc px > ~3 surface px
+        if (vp.pixGrid > 0.5 && vp.invScale < 0.34) {
+            let px = docX - round(docX);
+            let py = docY - round(docY);
+            if (abs(px) <= t || abs(py) <= t) { outc = mix(outc, vec3<f32>(0.5), 0.25); }
+        }
     }
 
     // crop preview: dim the document outside the rect + a thin border

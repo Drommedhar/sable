@@ -54,4 +54,9 @@ public struct BlitOverlay
     // pasteboard (the surround outside the document) colour, 0..1. Themed by the chrome.
     // Left at 0 → blitter falls back to the default dark grey.
     public float PasteR, PasteG, PasteB;
+
+    // document grid (doc px spacing) + 1px pixel grid (shown only when zoomed in)
+    public bool GridOn;
+    public float GridSpacing;
+    public bool PixelGrid;
 }
