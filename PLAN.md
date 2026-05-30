@@ -504,6 +504,7 @@ Flyout grouping + options bar + Shift-cycle land alongside as the strip matures.
 - Dark PS/Affinity chrome: menu, options bar, tool strip, canvas (tabs/status), Color panel (ColorView), Layers panel (tree, indent, visibility/blend/opacity/clip, add/delete/reorder/group/ungroup, **multi-select**, **drag-drop**: onto sibling=auto-group, onto group=move-in). Modeless **Adjustment/effect toolbox window** (opens on effect-layer select, centered over canvas).
 - ✅ **Affinity-style layer rows** (reworked): `[thumb|type-icon] [name] … [clip] [eye-right]`. Pixel layers = **live downscaled thumbnail** over checker (`LayerViewModel.BuildThumb`, box-average; refreshed in VM ctor/resync + after each `CommandProduced` paint/fill/erase/delete). Adjustment=sliders / Filter=droplet / Group=folder SVG glyph. Visibility = eye toggle on far right; clip-to-below = corner-arrow icon. **Group disclosure chevron** (collapse/expand hides children; collapse state in `DocumentViewModel._collapsed`, transient). Nesting guide on indented rows. Dense **blue selection bar** (`ListBox.layers > ListBoxItem` styles). Footer buttons + row glyphs now **SVG line icons** (`Path.icon`/`Button.iconbtn`/`ToggleButton.eye` in App.axaml) — no emoji.
 - ✅ **Tool-specific options bar**: `UpdateOptionsBar(kind)` shows only the panels relevant to the active tool (SizeOpts / SelectOpts feather / TypeOpts fonts / MaskHint). Text tools: family combo + B/I/U/S + size + align(L/C/R) + line-spacing; multiline (Shift+Enter); on-canvas caret per-line.
+- ✅ **Custom colour picker**: reusable `ColorPicker` UserControl = bespoke `ColorWheel` (hue ring + rotating sat/val triangle, draggable, antialiased; PLAN §13.3) + hex field + H/S/V readout, self-contained (`Color`/`SetColor`/`ColorChanged`). Replaced stock Avalonia `ColorView`; drives brush / selected shape+text recolour / gradient stop / eyedropper. Right panel rows `Auto,Auto,*` so Color sizes to content, Layers fills rest. (RGB only — alpha slider is a follow-up.)
 - ✅ **Unified control theming**: all chrome controls 24px, dark `#2B2B2B` fields / `#3C3C3C` borders / `#5687C0` accent. Slider = stock Fluent Track + small custom **thumb template** (14px ellipse, no clip) + `-4` top margin to vert-center with row text (the Fluent thumb ignores `Width`; only its template override shrinks it). Numeric fields = plain `TextBox` (NumericUpDown spinner wouldn't hide/fit at 24px — `ToggleButton.opt` compact toggles, blue when checked). **Gotcha: verify chrome visually — `Start-Process` screen-capture here is unreliable (foreground/SendKeys miss); trust the user's eyes.**
 - ✅ **Tool strip = SVG line icons** (`WireTools` `MakeIcon` builds a `Path` per button from Lucide-style geometry; main + flyout + on-change all use it). No emoji anywhere in `Sable.App` (verified by unicode grep — only `→` arrows in comments).
 - ✅ **Pro-tool control restyle (first pass)**: thin recolored sliders (Fluent resource overrides — track 3px, blue value fill, small `Thumb`), compact dark combo boxes + checkboxes (App.axaml). Gotcha logged: Fluent `Slider*ContentMargin` keys are `GridLength` not `Thickness` (wrong type = startup `InvalidCastException`).
@@ -523,11 +524,199 @@ Flyout grouping + options bar + Shift-cycle land alongside as the strip matures.
 - **Feather (DONE)**: `Selections.Feather` (separable box blur of the coverage mask); options-bar Feather slider → `GpuSurfaceControl.SelectionFeather`, applied on commit in `ApplyMask`. `BrushTool` now multiplies by clip-mask coverage (soft edges). 68 tests. NOTE: fill/delete still treat the selection as binary (feathered fill/delete edge = follow-up).
 - ⬜ Real Linux (Xlib/Wayland) + macOS (CAMetalLayer) backends: implement `IPlatformBackend.CreateSurface` (build the OS wgpu descriptor from Avalonia's handle) + an `IInputSource` for that OS. The shared canvas/tool code is ready.
 
+### Requested backlog (user-prioritised, ⬜ not started)
+- **Multi-document tabs**: a tab strip over the canvas (region §13.1 ①) — switch / close / "new" / "open in new tab". Today is single-doc (`LoadDocument` replaces). Needs: a list of open docs (each `Document` + its `DocumentViewModel`), active-tab switching (swap `Canvas.Document` + `DataContext`), per-tab dirty/title/`_currentPath`, close (with unsaved-changes prompt), File▸New, and Open/Open-Image creating a new tab instead of replacing. Tab UI + lifecycle is the bulk. **Sub-requirements (do together):**
+  - **Start with NO active image** — remove `Document.CreateDemo()` on launch; show an empty/welcome state (no tabs, or a start screen) until New/Open/paste/drop. (`MainWindow` ctor currently `LoadDocument(CreateDemo())`.)
+  - **Proper New dialog** (ties to §16.1) — size/units/DPI/colour-space/background (white/transparent), presets → creates an empty `Document` in a new tab.
+  - **New from clipboard** — Ctrl+N-from-clipboard / File▸New from Clipboard / paste when no doc → decode the clipboard image (`IClipboard`/`DataObject` bitmap) into a new tab sized to it.
+  - **Drag-and-drop image files** from the OS → drop onto the **canvas** = open as a new tab (or place into the active doc as a new layer — decide modifier: plain drop = new tab, modifier = add-as-layer), drop onto the **tab strip** = new tab. Handle multi-file drop (one tab each). Avalonia `DragDrop` on the window/canvas (mind the native-surface airspace — may need the drop handler on the Avalonia chrome around the canvas).
+- **Export dialog**: File▸Export… modal — pick format (PNG / JPEG / TIFF / WebP), per-format options (JPEG/WebP **quality**, PNG compression), optional resize/scale, preview/est-size. Encode via SkiaSharp (`ImageCodec` extend with quality + formats). Replaces the current direct "Export PNG". (`DocumentIO.ExportPng` → generalize to `Export(path, format, opts, rgba)`.)
+- **Brush hardness + flow UI**: `BrushTool` already has `Hardness`/`Flow`; expose sliders in the brush options bar (SizeOpts → add Hardness + Flow). 
+- **Affinity HUD brush adjust**: hold **Ctrl+Alt + left-drag** on canvas → live-adjust brush **size** (left/right) + **hardness** (up/down), with an on-canvas readout/ring. New modifier-gesture branch in `GpuSurfaceControl` input (intercept before normal left-down when Ctrl+Alt held); update `Brush.Radius`/`Brush.Hardness` from drag deltas; draw the size ring + hardness feedback in the blit overlay. Sync the options-bar sliders after.
+- **About dialog**: Help▸About — app name/logo, version (assembly/informational version), build, MIT licence + `THIRD_PARTY_NOTICES`, links (site/repo/releases), copyright. Small modal.
+- **Update check + auto-update** — model after Novalist (`E:\git\novalist-official` `Novalist.Core/Services/UpdateService.cs`): **custom, GitHub-Releases-based, no third-party framework** (no Velopack/Squirrel/Sparkle). `Sable.Core` (or `Sable.App`) `UpdateService` + `IUpdateService`: `CheckForUpdateAsync` polls the repo's `releases/latest` GitHub API → `UpdateInfo` (version/tag/html-url/body/asset download-url+name+size); compares to current version; picks the **OS/arch-matched asset** (RuntimeInformation, seam-injected for tests). `DownloadUpdateAsync` → `%LocalAppData%/Sable/Updates` with progress + cancel. `LaunchInstaller` runs it (per-OS: MSI/MSIX, AppImage, .app). UI: "update available" prompt (version + release notes/body) → download progress → install/relaunch; Help▸Check for Updates; settings toggle for auto-check on launch. Cross-platform asset naming per OS.
+- **GitHub Actions CI/CD** — port from Novalist (`E:\git\novalist-official/.github/workflows`), **minus the SDK build + `Sdk.Example` extension steps**:
+  - **`ci.yml`**: `dotnet build` + `dotnet test` (xUnit) on push/PR + coverage badge (`eng/Check-Coverage.ps1` / `Publish-CoverageBadge.ps1`). Drop the separate `Novalist.Sdk` test/coverage rows; keep Core/Engine/Tools/App-equivalent.
+  - **`release.yml`**: tag-triggered, **per-OS matrix** (windows-x64, macos-x64, macos-arm64, linux-x64) → `dotnet publish -p:PublishSingleFile=true` → package per OS: **Windows = Inno Setup `.iss` installer** (`.github/installers/windows/`), **macOS = ad-hoc-signed `.dmg`** (`Info.plist.template`, Gatekeeper), **Linux = AppImage**; upload as release assets (these are exactly the assets the §15 `UpdateService` downloads). Reuse Novalist's installer scripts/templates, renamed Sable. Code-signing/notarisation = later (M5).
+- _(more to come — list is open.)_
+
 ### Known gaps / debt
-- M3 AI ⬜. HiDPI assumes 1:1. Doc-swap leaks old GPU layer buffers. No ICC/16-bit-export, no history panel/non-linear undo UI, no `Dock.Avalonia`. Selection polish remaining: feather, serialize to `.sable`, mask-edge overlay retry. Large-doc paint still full-recomposites per brush move (composite-cache follow-up).
+- M3 AI ⬜. HiDPI assumes 1:1. Doc-swap leaks old GPU layer buffers. No ICC/16-bit-export, no history panel/non-linear undo UI, no `Dock.Avalonia`. Selection: not serialized to `.sable`; fill/delete treat feathered edge as binary. Large-doc paint still full-recomposites per brush move (composite-cache follow-up). Colour picker is RGB-only (no alpha slider). Gradient tool flagged incorrect (revisit deferred).
 
 ### Key files (orientation)
 - Compositor: `src/Sable.Engine/Compositing/GpuCompositor.cs` + `src/Sable.Gpu/Shaders/*.wgsl` (composite/adjust/blur/stamp/present_copy/fullscreen_blit).
 - Layers/commands: `src/Sable.Engine/Layers/*`, `src/Sable.Engine/Commands/LayerCommands.cs`, `Document.cs`, `AffineMath.cs`, `SelRect.cs`.
 - Canvas/tools/input: `src/Sable.Canvas/GpuSurfaceControl*.cs`; tools `src/Sable.Tools/*` (BrushTool/FillTool/StrokeSession/PaintRasterCommand/ToolKind).
 - Format: `src/Sable.Format/SableFile.cs`. App/UI: `src/Sable.App/MainWindow.axaml(.cs)`, `AdjustmentWindow`, `src/Sable.UI/ViewModels/*`.
+
+---
+
+## 16. Feature gap analysis — vs Photoshop / Affinity Photo (for review)
+
+Researched against Photoshop + Affinity Photo. Legend: ✅ have · 🔶 partial · ⬜ missing. Review backlog, not a commitment — grouped to prioritise.
+
+### 16.1 Document / canvas / navigation
+- ✅ open (PNG/JPEG/WebP), `.sable` save/load, crop, resize document (resample), resize canvas (anchor), zoom/pan, pasteboard.
+- ⬜ multi-document tabs · new-document dialog (presets/size/DPI/colour-space/background) · rotate canvas/view · rulers · guides (+manager) · grid · snapping (guides/grid/layers/pixel) · multiple views · navigator (placeholder) · flip canvas H/V · artboards · recent-files/templates.
+
+### 16.2 Selection & masking
+- ✅ marquee rect/ellipse, lasso, magic wand, add/subtract/intersect, feather, true-edge ants, grips, delete, deselect.
+- ⬜ polygonal lasso · magnetic lasso · selection brush · colour-range select · grow/shrink/smooth/border · refine-edge / select-and-mask (hair) · quick mask (Q) · save/load selection · invert selection · feathered fill/delete (now binary) · transform selection. 🔶 not serialised.
+- ⬜ **Clipboard: Copy / Cut / Paste** (none yet — only "new from clipboard" exists). Copy = selected region of the active layer (or whole layer if no selection) to the OS clipboard (RGBA bitmap); **Copy Merged** = composite of the selection across visible layers; Cut = copy + clear (undoable); **Paste** = clipboard image → new pixel layer (centered / in place); **Paste Into** = into the current selection (as a clipped/masked layer); **Duplicate** (Ctrl+J) = selection/layer → new layer; copy/cut/paste of **whole layers** (incl. shape/text/adjustment params, internal clipboard) and cross-tab paste.
+
+### 16.3 Layers & compositing
+- ✅ pixel/group/adjustment/filter/shape/text, opacity, 7 blend modes, raster mask, clip-to-below, non-destructive transform, reorder, multi-select, drag-drop, group/ungroup, thumbnails.
+- ⬜ full blend-mode set (have 7 of ~30) · fill opacity · Blend-If · vector mask · multi-layer clipping · pass-through groups · alpha lock · colour tags · smart objects (linked/embedded) · merge-down/flatten/merge-visible/stamp · duplicate · rasterise · layer search · locks · between-row drop reorder.
+
+### 16.4 Adjustments (have 3 of ~22)
+- ✅ Brightness/Contrast, Levels, HSL.
+- ⬜ Curves (RGB+channels+LUM) · White Balance · Black&White · Recolour · Vibrance · Exposure · Shadows/Highlights · Channel Mixer · Gradient Map · Threshold · Invert · Posterise · Colour Balance · Photo/Lens Filter · Split Toning · Selective Colour · Defringe · 3D LUT · Soft Proof · presets · adjustment brush · on-canvas handles.
+
+### 16.5 Live filters (have 1)
+- ✅ Gaussian blur.
+- ⬜ Box/Radial/Zoom/Motion/Lens/Field blur · Average/Median/Min/Max · Unsharp/Clarity/High-Pass · distort (Twirl/Pinch/Ripple/Wave/Displace/Spherical/Perspective/Lens/Mesh-Warp) · noise (Add/Denoise/Dust&Scratches) · Lighting/Bloom/Glow/Vignette · stylise (Halftone/Voronoi/Procedural-Texture/Pixellate/Mosaic/Edge-Detect) · morphology · Frequency Separation · lens correction. 🔶 filter mask/opacity ignored.
+
+### 16.6 Layer effects / FX (have none)
+- ⬜ Outer/Inner Shadow · Outer/Inner Glow · Outline/Stroke · Bevel/Emboss · Colour/Gradient/Pattern Overlay · Long Shadow · Gaussian Blur FX · 3D. (No per-layer FX stack yet.)
+
+### 16.7 Painting / brushes
+- ✅ soft round brush, eraser, flood fill, multi-stop linear gradient, clone, dodge/burn/sponge, blur/sharpen/smudge, preview+ring, size, strength.
+- ⬜ hardness+flow UI (fields exist) · brush HUD adjust (Ctrl+Alt-drag) · brush presets panel · textured/image tips, spacing/jitter/scatter/dual/rotation/wet-edges · tablet pressure/tilt (post-v1) · pencil · colour-replacement · paint-mixer · pattern stamp · symmetry/mirror · stabiliser · gradient types beyond linear (radial/conical/reflected).
+
+### 16.8 Retouching / repair
+- ✅ clone stamp.
+- ⬜ healing brush · spot healing · patch · inpainting/content-aware (LaMa, M3) · blemish/red-eye · history/undo brush · perspective clone.
+
+### 16.9 Transform / distort
+- ✅ move (offset), free transform (uniform scale + rotate).
+- ⬜ non-uniform scale + edge handles · skew/shear · perspective/distort · warp/mesh warp · content-aware scale · puppet/liquify · numeric transform panel · transform-again · align/distribute.
+
+### 16.10 Vector / shapes / text
+- ✅ rect/ellipse/line (parametric), text (parametric, font/B/I/U/S/align/leading, multiline, on-canvas edit).
+- ⬜ pen/bezier + node editing · more shapes (polygon/star/arrow/custom) · shape stroke (width/colour/dash/joins)+fill toggle · boolean ops · text-on-path · frame/area text+wrap · character/paragraph panels (kerning/tracking/super-sub/lists) · text styles · text→curves · vector export.
+
+### 16.11 Colour
+- ✅ custom HSV wheel+triangle, hex, eyedropper.
+- ⬜ swatches/palettes (placeholder) · alpha in picker · RGB/HSL/CMYK/LAB sliders · fg/bg swatches+swap · gradient presets · patterns · gamut warning/soft-proof · colour sampler points · histogram (placeholder) · info panel · 16/32-bit + ICC pipeline (internal working space exists; no UI/convert).
+
+### 16.12 File / IO / export
+- ✅ `.sable`, open PNG/JPEG/WebP/BMP, direct PNG export.
+- ⬜ Export dialog (PNG/JPEG/TIFF/WebP/GIF + quality/compression/resize/preview) · export persona/slices/presets · PSD import/export · TIFF/EXR/HDR/RAW import · SVG/PDF/EPS export · place/embed · batch · metadata/EXIF.
+
+### 16.13 History / non-destructive
+- ✅ linear undo/redo, `.sable` keeps params.
+- ⬜ History panel · non-linear history/states · named snapshots · history-brush source · configurable depth/disk-backed.
+
+### 16.14 Workflow / UI
+- ✅ dark chrome, grouped toolbar+flyouts+hotkey cycle, tool-specific options bar, custom controls, layers/color/gradient panels.
+- ⬜ `Dock.Avalonia` docking (float/tab/auto-hide) · saved workspaces · command palette · customisable shortcuts + PS/Affinity presets · right-click context menus · status-bar live info (zoom/coords/colour) · autosave/crash recovery · macros/actions+batch · plugin API · preferences dialog · real Brushes/Swatches/Channels/Paths/Navigator/History/Character/Paragraph panels (several placeholders) · multi-monitor float.
+
+### 16.15 AI (M3, parked)
+- ⬜ SAM2 smart select · background removal · upscale (Real-ESRGAN) · object removal (LaMa) · generative fill/expand (Diffusers sidecar) · model manager + VRAM gating.
+
+### 16.16 Advanced / pro — OUT OF SCOPE (user decision, deferred indefinitely)
+- ⛔ HDR merge/tone-map · panorama stitch · focus stacking · frequency separation · liquify · lens correction/defringe · 360/equirectangular · astro stacking · channels editing · apply-image · displacement maps · pattern generation. (Everything else in §16 is in scope.)
+
+### 16.17 Highest-impact missing (suggested priority)
+1. Full **blend-mode set** + fill opacity + Blend-If (cheap WGSL, big payoff).
+2. **Curves** + a few more adjustments (Vibrance/Exposure/Colour Balance/Gradient Map/Invert/B&W).
+3. **Layer FX** (drop shadow/stroke/glow) — high visual value.
+4. **Multi-document tabs** + **Export dialog** (workflow basics).
+5. Brush **hardness/flow UI** + HUD adjust + presets; **pencil**.
+6. **Guides/grid/snapping/rulers** + align/distribute.
+7. **Healing/spot/patch** + content-aware fill (some need AI).
+8. **History panel** + merge/flatten/duplicate/rasterise/lock ops.
+9. **Pen + node editing** (true vector) + shape **stroke**.
+10. **Swatches** + alpha + colour models; **16-bit/ICC**.
+
+Sources: [Affinity tools (Edits101)](https://edits101.com/affinity-photo-tools-a-complete-guide/) · [Affinity Wiki](https://affinity.fandom.com/wiki/Affinity_Photo) · [PS layer masks](https://helpx.adobe.com/photoshop/using/editing-layer-masks.html) · [PS smart objects](https://helpx.adobe.com/photoshop/desktop/create-manage-layers/smart-objects/smart-objects-overview-and-benefits.html) · [PS blend modes](https://helpx.adobe.com/photoshop/using/layer-opacity-blending.html) · [PS select & mask](https://helpx.adobe.com/photoshop/desktop/make-selections/refine-modify-selections/refine-your-selection-and-mask.html) · [Raster editors (Wikipedia)](https://en.wikipedia.org/wiki/Raster_graphics_editor).
+
+---
+
+## 17. Cross-cutting / infra / UX backlog (all in scope)
+
+Not in the §16 feature comparison but needed. ⬜ all not started.
+
+### 17.1 App lifecycle / infra
+- **Settings/preferences store** (persisted to `%AppData%/Sable` or platform-equiv) + **Preferences dialog**.
+- **Themes**: light + gray-level variants (§13.3 promised; only dark exists), switchable in prefs.
+- **Window/session state** persistence (size/pos/maximized) + **restore last session** (reopen tabs/docs) + **recent files** list.
+- **File associations**: double-click `.sable` opens app, "Open with", OS file-type registration via installer.
+- **Telemetry / crash reporting** (opt-in) + **logging/diagnostics** framework.
+- **Autosave / crash recovery** (periodic snapshot of open docs; recover on next launch).
+
+### 17.2 Editing / UX gaps
+- **Smart guides** (alignment hints while moving) + **snap to layer edges/centres** (distinct from static guides/grid in §16.1).
+- **Zoom UI** — fit / 100% / zoom-% field in the status bar (only keys/wheel today).
+- **Layer rotate/flip** quick ops (90° CW/CCW, free, flip H/V) — separate from the transform gizmo.
+- **Eyedropper options** — sample size (point/3×3/5×5), sample active-layer vs all-layers; sample anywhere on screen.
+- **Non-destructive crop** toggle ("keep cropped pixels") + crop **ratio presets**.
+- **Quick export** / export-selection-only / export-each-layer.
+- **Tab UX** — reorder tabs, overflow scroll when many, detach tab to its own window.
+
+### 17.3 Architecture debt (real, affects scale)
+- **Layers are NOT actually GPU-tiled**: `PixelLayer` is one doc-sized buffer; the 256² tiling exists only for undo snapshots + partial upload. The §3 "tiled, GPU-resident" invariant isn't truly met → VRAM/perf blows up on 100MP docs and with many open tabs. Real tiled layer storage (atlas, partial residency, eviction) is the big engine refactor for scale. Tie to the composite-cache perf work.
+- **HiDPI / per-monitor DPI**: canvas assumes 1:1; needs render-scaling-aware surface sizing + input mapping.
+- **Doc-swap GPU buffer leak** (already noted §15) — must fix before multi-tab (each tab swap currently leaks).
+
+### 17.4 Maybe / TBD
+- **Localization / i18n** (CLAUDE.md references locale JSON — decide if Sable ships localizable strings).
+- Accessibility (keyboard nav, screen-reader labels).
+
+---
+
+## 18. Implementation roadmap (consolidated — canonical build order)
+
+Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The old §8 M0–M5 are superseded for remaining work by this. **Status: §16/§17 baseline = M0–M2 done, mid-M4.** Two tracks can run in parallel: **Engine** (compositor/effects/selection) and **App** (chrome/workflow/IO) — noted per phase. Each item = its own ticket; ship + test each.
+
+### Phase 0 — Prereqs / debt to clear first (small, unblocks later)
+- **Fix doc-swap GPU buffer leak** (§15/§17.3) — *blocks multi-tab* (every tab switch leaks today).
+- **Blend-mode contract groundwork** — extend `BlendMode` enum + `composite.wgsl` to a switch ready for the full set.
+- THIRD_PARTY_NOTICES + licence-audit stub (§12).
+
+### Phase 1 — "Feels complete" editor core  *(Engine track, cheap × high-impact, §16.17 top)*
+1. **Full blend-mode set** (~30) + **fill opacity** + **Blend-If** — `composite.wgsl` switch + per-layer params + UI (§16.3).
+2. **Adjustments expansion** — Curves (RGB+channels+LUM) first, then Vibrance, Exposure, Colour Balance, Gradient Map, Invert, B&W, Channel Mixer, Threshold, Posterise. Each = `adjust.wgsl` case + PackParams + toolbox + serializer (recipe exists).
+3. **Layer FX** (per-layer non-destructive stack) — Outer/Inner Shadow, Outer/Inner Glow, Stroke, Colour/Gradient Overlay; compositor FX pass + UI + serialize (§16.6).
+4. **More live filters** — Unsharp/Sharpen/High-Pass/Clarity, Box/Motion/Radial blur, Add Noise/Denoise; + **filter mask/opacity** (close the 🔶). (§16.5)
+5. **Clipboard** — Copy/Cut/Paste/Copy-Merged/Paste-Into/Duplicate(Ctrl+J), layer + selection, internal + OS clipboard (§16.2).
+6. **Layer ops** — merge-down/flatten/merge-visible/stamp, duplicate, rasterise, lock(pos/pixels/alpha), colour tag, between-row drop-reorder + indicator (§16.3).
+7. **Brush** — hardness + flow UI, **HUD adjust** (Ctrl+Alt-drag), pencil, eyedropper options; gradient radial/conical/reflected (§16.7, §17.2).
+
+### Phase 2 — Document & workflow infrastructure  *(App track, can parallel Phase 1)*
+1. **Multi-document tabs** (after Phase-0 leak fix): tab strip, per-tab Document+VM, switch/close(unsaved prompt), **no-demo start / welcome**, **New dialog**, **New from clipboard**, **drag-drop files** → tab/layer (§15 backlog).
+2. **Export dialog** — PNG/JPEG/TIFF/WebP/GIF + quality/compression/resize/preview; generalize `DocumentIO.Export` (§16.12).
+3. **Settings store + Preferences dialog** + **light/gray themes** + **window/session restore** + **recent files** (§17.1).
+4. **About dialog** + **UpdateService** (GitHub releases, Novalist-style) + **CI/CD workflows** (ci + release, Novalist-port minus SDK) (§15 backlog).
+5. **Rulers / guides / grid / snapping + smart guides + zoom UI + status-bar live info** (§16.1, §17.2).
+6. **File associations** + autosave/crash-recovery (§17.1).
+
+### Phase 3 — Selection & masking depth  *(Engine track)*
+- Polygonal + magnetic lasso, selection brush, colour-range select, grow/shrink/smooth/border, **refine-edge/select-and-mask**, **quick mask (Q)**, invert, save/load selection (+ serialize), transform selection, feathered fill/delete (§16.2).
+
+### Phase 4 — Vector & text depth
+- **Pen tool + bézier node editing**, shape **stroke/fill/dash/joins** + boolean ops + more shapes (polygon/star/arrow/custom), **text-on-path**, frame/area text + wrap, character/paragraph panels (kerning/tracking/super-sub/lists), text styles, text→curves (§16.10).
+
+### Phase 5 — Retouch & transform depth
+- Healing brush / spot heal / patch, perspective clone; non-uniform scale + edge handles, skew/shear, perspective/distort, warp/mesh warp, content-aware scale, liquify, align/distribute, numeric transform panel, layer rotate/flip quick ops (§16.8, §16.9, §17.2). (Content-aware fill → needs Phase 8 AI.)
+
+### Phase 6 — Colour & IO depth
+- Swatches/palettes panel, alpha in picker, RGB/HSL/CMYK/LAB sliders, fg/bg swatches, gradient/pattern presets, gamut/soft-proof, histogram/info panels; **16/32-bit + ICC pipeline** (UI + convert at boundaries); **PSD import/export**, TIFF/EXR/HDR/RAW import, SVG/PDF export, place/embed, batch (§16.11, §16.12).
+
+### Phase 7 — Architecture & scale  *(Engine track, heavy)*
+- **Real GPU-tiled layer storage** (atlas + partial residency + eviction) — meet the §3 invariant; unblocks 100MP + many tabs.
+- **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint.
+- **HiDPI / per-monitor DPI**.
+- **History panel** + non-linear history/states + named snapshots.
+- **Dock.Avalonia docking** + saved workspaces + command palette + customisable shortcuts + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
+
+### Phase 8 — AI (was M3)
+- ONNX light tier in-process: SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal. Then Diffusers **sidecar** (uv venv, IPC) for generative fill/expand + **model manager + VRAM gating** (§6, §16.15).
+
+### Phase 9 — Cross-platform
+- Real **Linux** (Xlib/Wayland) + **macOS** (CAMetalLayer) backends (surface + input) — seam ready (`IPlatformBackend`/`IInputSource`). Per-OS packaging.
+
+### Phase 10 — Polish & release (was M5)
+- Tablet pressure/tilt, telemetry/crash (opt-in), perf pass (brush latency, large docs), packaging/signing/**notarisation** (MSIX/MSI · AppImage/Flatpak · .app), docs, i18n decision, accessibility.
+
+**Sequencing notes**: Phases 1 & 2 are the big near-term value and run in parallel (Engine vs App). Phase 0 leak fix gates Phase 2 tabs. Phase 7 tiling is the one large engine refactor — schedule before heavy multi-tab/100MP use bites. Out of scope: §16.16 (advanced/pro).
