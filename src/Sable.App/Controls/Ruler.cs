@@ -20,6 +20,20 @@ public sealed class Ruler : Control
     private double _origin;          // doc (0,0) position in this ruler's DIP space
     private double _scale = 1;       // DIP per doc px
     private double _cursor = double.NaN;
+    private float[] _guides = Array.Empty<float>();
+
+    /// <summary>Guide positions (doc coord along this axis) to mark on the ruler.</summary>
+    public void SetGuides(float[] guides)
+    {
+        if (guides.Length == _guides.Length)
+        {
+            bool same = true;
+            for (int i = 0; i < guides.Length; i++) if (guides[i] != _guides[i]) { same = false; break; }
+            if (same) return;
+        }
+        _guides = guides;
+        InvalidateVisual();
+    }
 
     /// <summary>Set the viewport mapping (doc-origin + scale, both DIP). Triggers a redraw.</summary>
     public void SetView(double origin, double scale)
@@ -37,10 +51,21 @@ public sealed class Ruler : Control
         InvalidateVisual();
     }
 
+    /// <summary>Raised when the ruler is clicked, with the document coordinate along its axis (new guide).</summary>
+    public event Action<double>? GuideRequested;
+
     public Ruler()
     {
         // chrome colours come from the active theme variant → re-draw when the theme changes
         ActualThemeVariantChanged += (_, _) => InvalidateVisual();
+    }
+
+    protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        var p = e.GetPosition(this);
+        double pos = Orientation == Orient.Horizontal ? p.X : p.Y;
+        GuideRequested?.Invoke((pos - _origin) / _scale);
     }
 
     private IBrush Res(string key, IBrush fallback)
@@ -94,6 +119,19 @@ public sealed class Ruler : Control
                     using (ctx.PushTransform(Matrix.CreateRotation(-Math.PI / 2) * Matrix.CreateTranslation(1, p - 2)))
                         ctx.DrawText(ft, new Point(0, 0));
                 }
+            }
+        }
+
+        // guide markers (cyan line across the ruler at each guide position)
+        if (_guides.Length > 0)
+        {
+            var gp = new Pen(cursorBrush, 1);
+            foreach (var g in _guides)
+            {
+                double p = _origin + g * _scale;
+                if (p < 0 || p > len) continue;
+                if (horiz) ctx.DrawLine(gp, new Point(p, 0), new Point(p, thick));
+                else ctx.DrawLine(gp, new Point(0, p), new Point(thick, p));
             }
         }
 

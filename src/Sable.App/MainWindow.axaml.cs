@@ -88,6 +88,18 @@ public partial class MainWindow : Window
         });
         // canvas can change scale on window resize without a ViewChanged → refresh rulers on layout
         Canvas.LayoutUpdated += (_, _) => UpdateRulers();
+
+        // click a ruler to drop a guide: top ruler → vertical guide (X), left ruler → horizontal guide (Y)
+        RulerH.GuideRequested += d => AddGuide(vertical: true, d);
+        RulerV.GuideRequested += d => AddGuide(vertical: false, d);
+    }
+
+    private void AddGuide(bool vertical, double docPos)
+    {
+        if (_activeTab?.Doc is not { } doc) return;
+        int p = (int)System.Math.Round(docPos);
+        if (vertical) { if (p < 0 || p > doc.Width) return; if (!doc.GuidesX.Contains(p)) doc.GuidesX.Add(p); }
+        else { if (p < 0 || p > doc.Height) return; if (!doc.GuidesY.Contains(p)) doc.GuidesY.Add(p); }
     }
 
     private void UpdateRulers()
@@ -96,6 +108,11 @@ public partial class MainWindow : Window
         var (ox, oy, scale) = Canvas.ViewportDip;
         RulerH.SetView(ox, scale);
         RulerV.SetView(oy, scale);
+        if (_activeTab?.Doc is { } d)
+        {
+            RulerH.SetGuides(d.GuidesX.ToArray());   // top ruler = X axis = vertical guides
+            RulerV.SetGuides(d.GuidesY.ToArray());
+        }
     }
 
     private readonly Sable.Core.Settings.SableSettings _settings = Sable.Core.Settings.SettingsService.Load();
@@ -233,6 +250,12 @@ public partial class MainWindow : Window
         CanvasGrid.RowDefinitions[0].Height = new GridLength(on ? 18 : 0);
         CanvasGrid.ColumnDefinitions[0].Width = new GridLength(on ? 18 : 0);
         RulerH.IsVisible = on; RulerV.IsVisible = on;
+    }
+
+    private void OnToggleSnap(object? sender, RoutedEventArgs e) => Canvas.SnapEnabled = SnapMenuItem.IsChecked;
+    private void OnClearGuides(object? sender, RoutedEventArgs e)
+    {
+        if (_activeTab?.Doc is { } d) { d.GuidesX.Clear(); d.GuidesY.Clear(); }
     }
 
     private void OnToggleGrid(object? sender, RoutedEventArgs e) => Canvas.ShowGrid = GridMenuItem.IsChecked;

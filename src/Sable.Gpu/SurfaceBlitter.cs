@@ -1,3 +1,4 @@
+using System;
 using Silk.NET.Core.Native;
 using Silk.NET.WebGPU;
 
@@ -16,6 +17,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private BindGroupLayout* _bgl;
     private RenderPipeline* _pipeline;
     private Silk.NET.WebGPU.Buffer* _vpBuf;
+    private Silk.NET.WebGPU.Buffer* _guidesBuf;   // guide line positions (storage)
+    private Silk.NET.WebGPU.Buffer* _smartBuf;    // transient smart-guide alignment lines
+    private const int GuidesFloats = 512;         // [countX, countY, _, _, Xs..., Ys...]
     private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
     private TextureView* _dummyMaskView;
 
@@ -38,7 +42,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         };
         _sampler = api.DeviceCreateSampler(gpu.Device, in samplerDesc);
 
-        var bglEntries = stackalloc BindGroupLayoutEntry[4];
+        var bglEntries = stackalloc BindGroupLayoutEntry[6];
         bglEntries[0] = new BindGroupLayoutEntry
         {
             Binding = 0, Visibility = ShaderStage.Fragment,
@@ -67,7 +71,17 @@ public sealed unsafe class SurfaceBlitter : IDisposable
                 ViewDimension = TextureViewDimension.Dimension2D
             }
         };
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 4, Entries = bglEntries };
+        bglEntries[4] = new BindGroupLayoutEntry   // guides positions (storage): [countX, countY, _, _, Xs..., Ys...]
+        {
+            Binding = 4, Visibility = ShaderStage.Fragment,
+            Buffer = new BufferBindingLayout { Type = BufferBindingType.ReadOnlyStorage }
+        };
+        bglEntries[5] = new BindGroupLayoutEntry   // smart-guide (alignment) lines, same layout, magenta
+        {
+            Binding = 5, Visibility = ShaderStage.Fragment,
+            Buffer = new BufferBindingLayout { Type = BufferBindingType.ReadOnlyStorage }
+        };
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 6, Entries = bglEntries };
         _bgl = api.DeviceCreateBindGroupLayout(gpu.Device, in bglDesc);
 
         // 1×1 R8 placeholder bound when no mask selection is active (binding must be satisfied)
@@ -83,6 +97,10 @@ public sealed unsafe class SurfaceBlitter : IDisposable
 
         var vpDesc = new BufferDescriptor { Size = 224, Usage = BufferUsage.Uniform | BufferUsage.CopyDst };
         _vpBuf = api.DeviceCreateBuffer(gpu.Device, in vpDesc);
+
+        var gDesc = new BufferDescriptor { Size = GuidesFloats * 4, Usage = BufferUsage.Storage | BufferUsage.CopyDst };
+        _guidesBuf = api.DeviceCreateBuffer(gpu.Device, in gDesc);
+        _smartBuf = api.DeviceCreateBuffer(gpu.Device, in gDesc);
 
         var bglLocal = _bgl;
         var plDesc = new PipelineLayoutDescriptor { BindGroupLayoutCount = 1, BindGroupLayouts = &bglLocal };
@@ -146,13 +164,36 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[52] = ov.CaretOn ? 1f : 0f; u[53] = ov.CaretX; u[54] = ov.CaretY0; u[55] = ov.CaretY1;
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, 224);
 
+        // pack guide positions: [countX, countY, _, _, Xs..., Ys...] (doc px)
+        var gx = ov.GuidesX; var gy = ov.GuidesY;
+        int cap = (GuidesFloats - 4) / 2;
+        int nx = gx is null ? 0 : Math.Min(gx.Length, cap);
+        int ny = gy is null ? 0 : Math.Min(gy.Length, cap);
+        var gbuf = stackalloc float[GuidesFloats];
+        gbuf[0] = nx; gbuf[1] = ny;
+        for (int i = 0; i < nx; i++) gbuf[4 + i] = gx![i];
+        for (int i = 0; i < ny; i++) gbuf[4 + cap + i] = gy![i];
+        api.QueueWriteBuffer(_gpu.Queue, _guidesBuf, 0, gbuf, GuidesFloats * 4);
+
+        // smart-guide (alignment) lines — same packing, drawn magenta
+        var smx = ov.SmartX; var smy = ov.SmartY;
+        int snx = smx is null ? 0 : Math.Min(smx.Length, cap);
+        int sny = smy is null ? 0 : Math.Min(smy.Length, cap);
+        var sbuf = stackalloc float[GuidesFloats];
+        sbuf[0] = snx; sbuf[1] = sny;
+        for (int i = 0; i < snx; i++) sbuf[4 + i] = smx![i];
+        for (int i = 0; i < sny; i++) sbuf[4 + cap + i] = smy![i];
+        api.QueueWriteBuffer(_gpu.Queue, _smartBuf, 0, sbuf, GuidesFloats * 4);
+
         var maskView = maskOn ? ov.MaskView : _dummyMaskView;
-        var bgEntries = stackalloc BindGroupEntry[4];
+        var bgEntries = stackalloc BindGroupEntry[6];
         bgEntries[0] = new BindGroupEntry { Binding = 0, TextureView = source };
         bgEntries[1] = new BindGroupEntry { Binding = 1, Sampler = _sampler };
         bgEntries[2] = new BindGroupEntry { Binding = 2, Buffer = _vpBuf, Size = 224 };
         bgEntries[3] = new BindGroupEntry { Binding = 3, TextureView = maskView };
-        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 4, Entries = bgEntries };
+        bgEntries[4] = new BindGroupEntry { Binding = 4, Buffer = _guidesBuf, Size = GuidesFloats * 4 };
+        bgEntries[5] = new BindGroupEntry { Binding = 5, Buffer = _smartBuf, Size = GuidesFloats * 4 };
+        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 6, Entries = bgEntries };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var color = new RenderPassColorAttachment
@@ -189,6 +230,8 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         if (_bgl is not null) api.BindGroupLayoutRelease(_bgl);
         if (_sampler is not null) api.SamplerRelease(_sampler);
         if (_vpBuf is not null) api.BufferRelease(_vpBuf);
+        if (_guidesBuf is not null) api.BufferRelease(_guidesBuf);
+        if (_smartBuf is not null) api.BufferRelease(_smartBuf);
         if (_dummyMaskView is not null) api.TextureViewRelease(_dummyMaskView);
         if (_dummyMask is not null) api.TextureRelease(_dummyMask);
     }

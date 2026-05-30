@@ -484,6 +484,13 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
         ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.PixelGrid = ShowPixelGrid;
+        if (_doc is { } gd)
+        {
+            if (gd.GuidesX.Count > 0) ov.GuidesX = gd.GuidesX.ToArray();
+            if (gd.GuidesY.Count > 0) ov.GuidesY = gd.GuidesY.ToArray();
+        }
+        if (_smartX.Count > 0) ov.SmartX = _smartX.ToArray();
+        if (_smartY.Count > 0) ov.SmartY = _smartY.ToArray();
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

@@ -31,6 +31,8 @@ struct Viewport {
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> vp: Viewport;
 @group(0) @binding(3) var maskTex: texture_2d<f32>;   // selection coverage (R8), doc UV
+@group(0) @binding(4) var<storage, read> guides: array<f32>;   // [countX, countY, _, _, Xs..., Ys...] doc px
+@group(0) @binding(5) var<storage, read> smart: array<f32>;    // smart-guide alignment lines (same layout)
 
 @vertex
 fn vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
@@ -86,6 +88,24 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             let py = docY - round(docY);
             if (abs(px) <= t || abs(py) <= t) { outc = mix(outc, vec3<f32>(0.5), 0.25); }
         }
+    }
+
+    // guides (cyan lines at constant doc X / Y), inside the document
+    if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let gt = vp.invScale * 0.6;
+        let nx = u32(guides[0]); let ny = u32(guides[1]);
+        let cap = (512u - 4u) / 2u;
+        var ghit = false;
+        for (var i = 0u; i < nx; i = i + 1u) { if (abs(docX - guides[4u + i]) <= gt) { ghit = true; } }
+        for (var i = 0u; i < ny; i = i + 1u) { if (abs(docY - guides[4u + cap + i]) <= gt) { ghit = true; } }
+        if (ghit) { outc = vec3<f32>(0.0, 0.63, 0.9); }
+
+        // smart-guide alignment lines (magenta), span the whole surface (not just doc)
+        let snx = u32(smart[0]); let sny = u32(smart[1]);
+        var shit = false;
+        for (var i = 0u; i < snx; i = i + 1u) { if (abs(docX - smart[4u + i]) <= gt) { shit = true; } }
+        for (var i = 0u; i < sny; i = i + 1u) { if (abs(docY - smart[4u + cap + i]) <= gt) { shit = true; } }
+        if (shit) { outc = vec3<f32>(1.0, 0.2, 0.6); }
     }
 
     // crop preview: dim the document outside the rect + a thin border

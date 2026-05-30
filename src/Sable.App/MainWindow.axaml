@@ -95,6 +95,9 @@
                 <MenuItem x:Name="RulersMenuItem" Header="Show Rulers" ToggleType="CheckBox" IsChecked="True" Click="OnToggleRulers" />
                 <MenuItem x:Name="GridMenuItem" Header="Show Grid" ToggleType="CheckBox" Click="OnToggleGrid" />
                 <MenuItem x:Name="PixelGridMenuItem" Header="Show Pixel Grid" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
+                <Separator />
+                <MenuItem x:Name="SnapMenuItem" Header="Snap to Guides/Grid" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
+                <MenuItem Header="Clear Guides" Click="OnClearGuides" />
             </MenuItem>
             <MenuItem Header="_Window">
                 <MenuItem Header="Adjustments" Click="OnToggleAdjustments" />

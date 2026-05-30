@@ -16,6 +16,11 @@ public sealed class Document
     /// <summary>Print resolution metadata (dots per inch). Does not affect pixel data.</summary>
     public double Dpi { get; set; } = 96;
 
+    /// <summary>Vertical guide lines (constant document X). PLAN §2.5.</summary>
+    public List<float> GuidesX { get; } = new();
+    /// <summary>Horizontal guide lines (constant document Y).</summary>
+    public List<float> GuidesY { get; } = new();
+
     /// <summary>Change the canvas dimensions (crop/resize). Layer buffers are rebuilt by the caller/command.</summary>
     public void SetSize(int width, int height)
     {

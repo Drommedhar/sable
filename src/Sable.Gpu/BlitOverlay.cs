@@ -59,4 +59,12 @@ public struct BlitOverlay
     public bool GridOn;
     public float GridSpacing;
     public bool PixelGrid;
+
+    // guide lines (document px): vertical (constant X) + horizontal (constant Y)
+    public float[]? GuidesX;
+    public float[]? GuidesY;
+
+    // transient smart-guide alignment lines (magenta) shown while moving a layer
+    public float[]? SmartX;
+    public float[]? SmartY;
 }

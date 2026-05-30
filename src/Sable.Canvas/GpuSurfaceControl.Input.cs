@@ -185,6 +185,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _lastMouseX = sx; _lastMouseY = sy;
         if (CursorDocMoved is not null) { var (cdx, cdy) = MapToDoc(sx, sy); CursorDocMoved(cdx, cdy); }
 
+        if (_guideAxis != 0 && _doc is { } gd)
+        {
+            var (gdx, gdy) = MapToDoc(sx, sy);
+            if (_guideAxis == 1) gd.GuidesX[_guideIdx] = (float)Math.Round(gdx);
+            else gd.GuidesY[_guideIdx] = (float)Math.Round(gdy);
+            return;
+        }
+
         if (_hudAdjust)
         {
             // Affinity HUD: horizontal drag = size, vertical = hardness. Ring stays anchored
@@ -205,8 +213,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_moving && SelLayer is { } al)
         {
             var (dx, dy) = MapToDoc(sx, sy);
-            al.OffsetX = _moveOrigX + (int)Math.Round(dx - _moveStartX);
-            al.OffsetY = _moveOrigY + (int)Math.Round(dy - _moveStartY);
+            double rawX = _moveOrigX + (dx - _moveStartX);
+            double rawY = _moveOrigY + (dy - _moveStartY);
+            // smart guides (align to other layers / doc) first; fall back to guide/grid snap per axis
+            var (snX, snY) = SmartSnap(al, rawX, rawY);
+            al.OffsetX = (int)Math.Round(_smartX.Count > 0 ? snX : SnapAxis(snX, true));
+            al.OffsetY = (int)Math.Round(_smartY.Count > 0 ? snY : SnapAxis(snY, false));
             _doc?.MarkStructureChanged();   // recomposite (no re-upload; pixels unchanged)
         }
         else if (_transforming)
@@ -216,6 +228,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_selecting && _doc is not null)
         {
             var (dx, dy) = MapToDoc(sx, sy);
+            (dx, dy) = Snap(dx, dy);   // marquee corner snaps to guides/grid/edges
             var rect = SelRect.FromCorners(_selStartX, _selStartY, dx, dy, _doc.Width, _doc.Height);
             if (ActiveTool == ToolKind.EllipseMarquee && rect.W > 0 && rect.H > 0)
                 _doc.SetMaskSelection(Selections.Ellipse(_doc.Width, _doc.Height, rect));  // live ellipse outline
@@ -389,10 +402,101 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY);
     }
 
+    // guide drag state: 0 = none, 1 = vertical guide (GuidesX), 2 = horizontal guide (GuidesY)
+    private int _guideAxis;
+    private int _guideIdx;
+
+    /// <summary>Snap to guides / grid / document edges (View ▸ Snap). PLAN §2.5.</summary>
+    public bool SnapEnabled { get; set; } = true;
+
+    private double SnapAxis(double v, bool xAxis)
+    {
+        if (!SnapEnabled || _doc is not { } d) return v;
+        double th = 6.0 / Math.Max(0.0001, EffectiveScale);   // ~6 screen px in doc units
+        double best = v, bestD = th;
+        void Try(double c) { double dd = Math.Abs(v - c); if (dd < bestD) { bestD = dd; best = c; } }
+        Try(0); Try(xAxis ? d.Width : d.Height);                       // document edges
+        foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);       // guides
+        if (ShowGrid && GridSpacing > 0) Try(Math.Round(v / GridSpacing) * GridSpacing);   // grid
+        return best;
+    }
+
+    private (double x, double y) Snap(double dx, double dy) => (SnapAxis(dx, true), SnapAxis(dy, false));
+
+    // smart-guide alignment lines (doc px) collected during the current move; drawn magenta
+    private readonly List<float> _smartX = new();
+    private readonly List<float> _smartY = new();
+
+    /// <summary>
+    /// Smart guides (PLAN §2.5): snap the moved layer's left/centre/right + top/centre/bottom to
+    /// other layers' edges/centres and the document edges/centre, recording the alignment lines.
+    /// Returns the snapped offset.
+    /// </summary>
+    private (double x, double y) SmartSnap(Sable.Engine.Layers.Layer moving, double rawX, double rawY)
+    {
+        _smartX.Clear(); _smartY.Clear();
+        if (!SnapEnabled || _doc is not { } d) return (rawX, rawY);
+        double th = 6.0 / Math.Max(0.0001, EffectiveScale);
+        var cb = moving.ContentBounds(d.Width, d.Height);
+        double mw = cb.w, mh = cb.h;
+
+        var vcand = new List<double> { 0, d.Width / 2.0, d.Width };
+        var hcand = new List<double> { 0, d.Height / 2.0, d.Height };
+        CollectLayerLines(d.Layers, moving, vcand, hcand);
+
+        double Best(double raw, double origin, double size, List<double> cand, List<float> lines)
+        {
+            double l = raw + origin, c = l + size / 2.0, r = l + size;
+            double bestD = th, dxBest = 0; bool found = false; double line = 0;
+            foreach (var cc in cand)
+                foreach (var e in stackalloc[] { l, c, r })
+                {
+                    double dd = Math.Abs(e - cc);
+                    if (dd < bestD) { bestD = dd; dxBest = cc - e; found = true; line = cc; }
+                }
+            if (found) { lines.Add((float)line); return raw + dxBest; }
+            return raw;
+        }
+
+        double outX = Best(rawX, cb.x, mw, vcand, _smartX);
+        double outY = Best(rawY, cb.y, mh, hcand, _smartY);
+        return (outX, outY);
+    }
+
+    private void CollectLayerLines(List<Sable.Engine.Layers.Layer> layers, Sable.Engine.Layers.Layer moving,
+        List<double> vcand, List<double> hcand)
+    {
+        foreach (var l in layers)
+        {
+            if (ReferenceEquals(l, moving) || !l.Visible) continue;
+            if (l is Sable.Engine.Layers.GroupLayer g) { CollectLayerLines(g.Children, moving, vcand, hcand); continue; }
+            if (l is not (Sable.Engine.Layers.PixelLayer or Sable.Engine.Layers.ShapeLayer or Sable.Engine.Layers.TextLayer)) continue;
+            var cb = l.ContentBounds(_doc!.Width, _doc.Height);
+            double L = l.OffsetX + cb.x, T = l.OffsetY + cb.y;
+            vcand.Add(L); vcand.Add(L + cb.w / 2.0); vcand.Add(L + cb.w);
+            hcand.Add(T); hcand.Add(T + cb.h / 2.0); hcand.Add(T + cb.h);
+        }
+    }
+
+    /// <summary>Grab a guide line under the cursor (any tool) for move/delete. Returns true if grabbed.</summary>
+    private bool TryGrabGuide(double dx, double dy)
+    {
+        if (_doc is not { } d) return false;
+        double th = 5.0 / Math.Max(0.0001, EffectiveScale);   // ~5 screen px in doc units
+        for (int i = 0; i < d.GuidesX.Count; i++)
+            if (Math.Abs(dx - d.GuidesX[i]) <= th) { _guideAxis = 1; _guideIdx = i; return true; }
+        for (int i = 0; i < d.GuidesY.Count; i++)
+            if (Math.Abs(dy - d.GuidesY[i]) <= th) { _guideAxis = 2; _guideIdx = i; return true; }
+        return false;
+    }
+
     private void OnLeftDown(double sx, double sy, CanvasMods mods)
     {
         var (dx, dy) = MapToDoc(sx, sy);
         bool alt = mods.HasFlag(CanvasMods.Alt);
+
+        // grab a guide line first (works under any tool)
+        if (TryGrabGuide(dx, dy)) { _input?.Capture(); return; }
         bool brushy = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
             or ToolKind.CloneStamp or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
             or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
@@ -569,6 +673,19 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void OnLeftUp()
     {
+        if (_guideAxis != 0)
+        {
+            // dropped outside the document → delete the guide
+            if (_doc is { } gd)
+            {
+                var (ux, uy) = MapToDoc(_lastMouseX, _lastMouseY);
+                if (_guideAxis == 1 && (ux < 0 || ux > gd.Width) && _guideIdx < gd.GuidesX.Count) gd.GuidesX.RemoveAt(_guideIdx);
+                else if (_guideAxis == 2 && (uy < 0 || uy > gd.Height) && _guideIdx < gd.GuidesY.Count) gd.GuidesY.RemoveAt(_guideIdx);
+            }
+            _guideAxis = 0; _input?.ReleaseCapture();
+            return;
+        }
+
         if (_hudAdjust)
         {
             _hudAdjust = false;
@@ -602,6 +719,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_moving && SelLayer is { } layer)
         {
             _moving = false;
+            _smartX.Clear(); _smartY.Clear();   // hide alignment lines
             _input?.ReleaseCapture();
             if (_doc is not null && (layer.OffsetX != _moveOrigX || layer.OffsetY != _moveOrigY))
                 CommandProduced?.Invoke(new MoveOffsetCommand(_doc, layer, _moveOrigX, _moveOrigY, layer.OffsetX, layer.OffsetY));

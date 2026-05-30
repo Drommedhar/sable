@@ -22,6 +22,8 @@ public static class SableFile
         public int Width { get; set; }
         public int Height { get; set; }
         public List<LayerDto> Layers { get; set; } = new();
+        public List<float> GuidesX { get; set; } = new();
+        public List<float> GuidesY { get; set; } = new();
     }
 
     private sealed class LayerDto
@@ -131,6 +133,8 @@ public static class SableFile
 
         int next = 0;
         var dto = new DocDto { Width = doc.Width, Height = doc.Height };
+        dto.GuidesX.AddRange(doc.GuidesX);
+        dto.GuidesY.AddRange(doc.GuidesY);
         foreach (var layer in doc.Layers)
             dto.Layers.Add(SaveLayer(zip, layer, ref next));
 
@@ -238,6 +242,8 @@ public static class SableFile
                   ?? throw new InvalidDataException("Corrupt .sable manifest");
 
         var doc = new Document(dto.Width, dto.Height);
+        doc.GuidesX.AddRange(dto.GuidesX);
+        doc.GuidesY.AddRange(dto.GuidesY);
         foreach (var ld in dto.Layers)
             if (BuildLayer(ld, zip, dto.Width, dto.Height) is { } l) doc.Layers.Add(l);
         return doc;
