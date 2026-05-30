@@ -230,6 +230,15 @@ unsafe
         bool ok = px[cRight] == 255 && px[cRight + 3] == 255 && px[cLeft + 3] == 0 && px[cOut + 3] == 0;
         Console.WriteLine($"sub-doc masked layer: right=({px[cRight]},{px[cRight+1]},{px[cRight+2]},{px[cRight+3]}) " +
             $"leftA={px[cLeft+3]} outsideA={px[cOut+3]} ok={ok}");
+
+        // live preview dab on the offset layer (DispatchStamp in buffer space) — must not crash + must mark a pixel.
+        // place it on the visible right half (doc 36,36 → buffer 12,12, mask=1)
+        bcomp.Preview = new Sable.Engine.Compositing.PreviewDab(small, 36f, 36f, 2f, 1f, 0, 255, 0, false);
+        var pv2 = bcomp.CompositeToBytes(bdoc);
+        int cPrev = Idx(36, 36);   // green dab centre over the red square
+        bool prevOk = pv2[cPrev + 1] > 200 && pv2[cPrev] < 60 && pv2[cPrev + 3] > 0;
+        Console.WriteLine($"offset-layer preview dab: centre=({pv2[cPrev]},{pv2[cPrev+1]},{pv2[cPrev+2]},{pv2[cPrev+3]}) ok={prevOk}");
+        bcomp.Preview = null;
     }
 
     // --- M1 verification: .sable save/load round-trip ---------------------------

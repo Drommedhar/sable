@@ -48,6 +48,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     private Buffer* _blurParamsBuf;
     private Buffer* _filterTemp;
     private Buffer* _previewBuf;                                // active layer copy + preview dab
+    private int _previewBytes;                                  // current _previewBuf allocation (grows for oversized layers)
     private ComputePipeline* _fxPipeline;
     private BindGroupLayout* _fxBgl;
     private Buffer* _fxParamsBuf;
@@ -325,6 +326,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _readback = NewBuffer(_imgBytes, BufferUsage.MapRead | BufferUsage.CopyDst);
         _filterTemp = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _previewBuf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _previewBytes = _imgBytes;
         _fxLdoc = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _fxTint = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _fxBlur = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
@@ -435,13 +437,14 @@ public sealed unsafe class GpuCompositor : IDisposable
                 var srcBuf = GetLayerBuffer(px);
                 // brush preview: stamp the dab into a copy of the layer, then composite normally
                 // (so erase reveals layers below and paint respects the layer's blend/opacity).
-                // The preview buffer is document-sized, so only use it for a doc-aligned layer;
-                // an offset/oversized layer paints without the live dab (follow-up).
-                bool docAligned = px.Width == _width && px.Height == _height && px.OffsetX == 0 && px.OffsetY == 0;
-                if (Preview is { } pv && ReferenceEquals(pv.Layer, layer) && docAligned)
+                // The preview buffer is sized to the layer (grows for an oversized/offset layer) and
+                // the dab centre is mapped into buffer space, so it works on any layer bounds.
+                if (Preview is { } pv && ReferenceEquals(pv.Layer, layer))
                 {
-                    CopyBuffer(srcBuf, _previewBuf);
-                    DispatchStamp(_previewBuf, srcBuf, pv);   // srcBuf = original layer = clone source
+                    int layerBytes = px.Width * px.Height * 4;
+                    EnsurePreviewBuffer(layerBytes);
+                    CopyBuffer(srcBuf, _previewBuf, layerBytes);
+                    DispatchStamp(_previewBuf, srcBuf, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
                     srcBuf = _previewBuf;
                 }
                 BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf, px.Width, px.Height);
@@ -688,12 +691,21 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.BindGroupRelease(bindGroup);
     }
 
-    private void CopyBuffer(Buffer* src, Buffer* dst)
+    // grow the preview scratch buffer when the active layer is larger than the document
+    private void EnsurePreviewBuffer(int bytes)
+    {
+        if (bytes <= _previewBytes) return;
+        if (_previewBuf is not null) _gpu.Api.BufferRelease(_previewBuf);
+        _previewBuf = NewBuffer(bytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _previewBytes = bytes;
+    }
+
+    private void CopyBuffer(Buffer* src, Buffer* dst, int? bytes = null)
     {
         var api = _gpu.Api;
         var encDesc = new CommandEncoderDescriptor();
         var encoder = api.DeviceCreateCommandEncoder(_gpu.Device, in encDesc);
-        api.CommandEncoderCopyBufferToBuffer(encoder, src, 0, dst, 0, (ulong)_imgBytes);
+        api.CommandEncoderCopyBufferToBuffer(encoder, src, 0, dst, 0, (ulong)(bytes ?? _imgBytes));
         var cmdDesc = new CommandBufferDescriptor();
         var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);
         api.QueueSubmit(_gpu.Queue, 1, &cmd);
@@ -701,12 +713,18 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.CommandBufferRelease(cmd);
     }
 
-    private void DispatchStamp(Buffer* buf, Buffer* src, PreviewDab pv)
+    // buf/src are the layer's own buffer (size lw*lh*4); the dab centre is converted to buffer
+    // space (doc centre minus the layer origin) so the preview lands correctly on an offset layer.
+    private void DispatchStamp(Buffer* buf, Buffer* src, PreviewDab pv, int lw, int lh, int ox, int oy)
     {
         var api = _gpu.Api;
+        // the stamp shader indexes by dims.width/height → set them to the layer buffer size
+        var dimsv = stackalloc uint[4] { (uint)lw, (uint)lh, 0, 0 };
+        api.QueueWriteBuffer(_gpu.Queue, _dimsBuf, 0, dimsv, 16);
+        ulong bytes = (ulong)lw * (ulong)lh * 4;
         var prm = stackalloc float[12]
         {
-            pv.Cx, pv.Cy, pv.Radius, pv.Hardness,
+            pv.Cx - ox, pv.Cy - oy, pv.Radius, pv.Hardness,
             pv.R / 255f, pv.G / 255f, pv.B / 255f, pv.Erase ? 1f : 0f,
             pv.IsClone ? 1f : 0f, pv.CloneOffX, pv.CloneOffY, 0f
         };
@@ -715,8 +733,8 @@ public sealed unsafe class GpuCompositor : IDisposable
         var bg = stackalloc BindGroupEntry[4];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _stampParamsBuf, Size = 48 };
-        bg[2] = new BindGroupEntry { Binding = 2, Buffer = buf, Size = (ulong)_imgBytes };
-        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = (ulong)_imgBytes };
+        bg[2] = new BindGroupEntry { Binding = 2, Buffer = buf, Size = bytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = bytes };
         var bgDesc = new BindGroupDescriptor { Layout = _stampBgl, EntryCount = 4, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
@@ -726,7 +744,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         var pass = api.CommandEncoderBeginComputePass(encoder, in passDesc);
         api.ComputePassEncoderSetPipeline(pass, _stampPipeline);
         api.ComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, null);
-        api.ComputePassEncoderDispatchWorkgroups(pass, (uint)((_width + 15) / 16), (uint)((_height + 15) / 16), 1);
+        api.ComputePassEncoderDispatchWorkgroups(pass, (uint)((lw + 15) / 16), (uint)((lh + 15) / 16), 1);
         api.ComputePassEncoderEnd(pass);
         var cmdDesc = new CommandBufferDescriptor();
         var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);

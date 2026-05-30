@@ -202,12 +202,13 @@
 
         <!-- ===== unified chrome controls: 24px tall, dark #2b2b2b, blue #5687C0 accent ===== -->
 
-        <!-- slider: stock Fluent Track (reliable), but a small custom thumb so it doesn't clip.
-             Negative top margin pulls the track up to vertically centre with the row text. -->
+        <!-- slider: stock Fluent Track (reliable) + small custom thumb. Fluent reserves height below
+             the track, so a -12 top margin lifts the thumb centre onto the row-text centre
+             (pixel-measured: thumb c=63.5 == text c=63.5; re-measure before changing). -->
         <Style Selector="Slider">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0,-4,0,0" />
+            <Setter Property="Margin" Value="0,-12,0,0" />
         </Style>
         <Style Selector="Slider /template/ Thumb">
             <Setter Property="Width" Value="14" />
