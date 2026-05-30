@@ -30,6 +30,7 @@ public static class SableFile
         public string Type { get; set; } = "pixel";
         public int BlendMode { get; set; }
         public float Opacity { get; set; } = 1f;
+        public float FillOpacity { get; set; } = 1f;
         public bool Visible { get; set; } = true;
         public bool Clip { get; set; }
         public int OffsetX { get; set; }
@@ -44,9 +45,21 @@ public static class SableFile
         public float InBlack { get; set; }
         public float InWhite { get; set; } = 1f;
         public float Gamma { get; set; } = 1f;
+        public float OutBlack { get; set; }
+        public float OutWhite { get; set; } = 1f;
         public float HueShift { get; set; }
         public float Saturation { get; set; } = 1f;
         public float Lightness { get; set; }
+        public float Exposure { get; set; }
+        public float Vibrance { get; set; }
+        public float Threshold { get; set; } = 0.5f;
+        public float Posterize { get; set; } = 6f;
+        public float BwR { get; set; } = 0.3f;
+        public float BwG { get; set; } = 0.59f;
+        public float BwB { get; set; } = 0.11f;
+        public float Temperature { get; set; }
+        public float Tint { get; set; }
+        public float[][]? Curves { get; set; }   // [channel][x0,y0,x1,y1,...]
         public int FilterKind { get; set; }
         public float Radius { get; set; } = 8f;
         public int ShapeKind { get; set; }
@@ -100,6 +113,7 @@ public static class SableFile
             Name = layer.Name,
             BlendMode = (int)layer.BlendMode,
             Opacity = layer.Opacity,
+            FillOpacity = layer.FillOpacity,
             Visible = layer.Visible,
             Clip = layer.ClipToBelow,
             OffsetX = layer.OffsetX,
@@ -120,7 +134,11 @@ public static class SableFile
                 ld.AdjustmentKind = (int)adj.Kind;
                 ld.Brightness = adj.Brightness; ld.Contrast = adj.Contrast;
                 ld.InBlack = adj.InBlack; ld.InWhite = adj.InWhite; ld.Gamma = adj.Gamma;
+                ld.OutBlack = adj.OutBlack; ld.OutWhite = adj.OutWhite;
                 ld.HueShift = adj.HueShift; ld.Saturation = adj.Saturation; ld.Lightness = adj.Lightness;
+                ld.Exposure = adj.Exposure; ld.Vibrance = adj.Vibrance; ld.Threshold = adj.Threshold; ld.Posterize = adj.Posterize;
+                ld.BwR = adj.BwR; ld.BwG = adj.BwG; ld.BwB = adj.BwB; ld.Temperature = adj.Temperature; ld.Tint = adj.Tint;
+                ld.Curves = adj.Curves.Select(ch => ch.SelectMany(p => new[] { p.x, p.y }).ToArray()).ToArray();
                 break;
             case FilterLayer flt:
                 ld.Type = "filter";
@@ -179,12 +197,7 @@ public static class SableFile
         Layer? created = ld.Type switch
         {
             "pixel" => LoadPixel(ld, zip, w, h),
-            "adjustment" => new AdjustmentLayer((AdjustmentKind)ld.AdjustmentKind)
-            {
-                Brightness = ld.Brightness, Contrast = ld.Contrast,
-                InBlack = ld.InBlack, InWhite = ld.InWhite, Gamma = ld.Gamma,
-                HueShift = ld.HueShift, Saturation = ld.Saturation, Lightness = ld.Lightness
-            },
+            "adjustment" => BuildAdjustment(ld),
             "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius },
             "shape" => new ShapeLayer((ShapeKind)ld.ShapeKind, ld.ShX, ld.ShY, ld.ShW, ld.ShH, ld.ShR, ld.ShG, ld.ShB)
             {
@@ -204,6 +217,7 @@ public static class SableFile
         created.Name = ld.Name;
         created.BlendMode = (BlendMode)ld.BlendMode;
         created.Opacity = ld.Opacity;
+        created.FillOpacity = ld.FillOpacity;
         created.Visible = ld.Visible;
         created.ClipToBelow = ld.Clip;
         created.OffsetX = ld.OffsetX;
@@ -218,6 +232,31 @@ public static class SableFile
             ReadFully(es, created.Mask!);
         }
         return created;
+    }
+
+    private static AdjustmentLayer BuildAdjustment(LayerDto ld)
+    {
+        var a = new AdjustmentLayer((AdjustmentKind)ld.AdjustmentKind)
+        {
+            Brightness = ld.Brightness, Contrast = ld.Contrast,
+            InBlack = ld.InBlack, InWhite = ld.InWhite, Gamma = ld.Gamma,
+            OutBlack = ld.OutBlack, OutWhite = ld.OutWhite,
+            HueShift = ld.HueShift, Saturation = ld.Saturation, Lightness = ld.Lightness,
+            Exposure = ld.Exposure, Vibrance = ld.Vibrance, Threshold = ld.Threshold, Posterize = ld.Posterize,
+            BwR = ld.BwR, BwG = ld.BwG, BwB = ld.BwB, Temperature = ld.Temperature, Tint = ld.Tint
+        };
+        if (ld.Curves is { } cs)
+        {
+            for (int ch = 0; ch < a.Curves.Length && ch < cs.Length; ch++)
+            {
+                var flat = cs[ch];
+                var pts = a.Curves[ch];
+                pts.Clear();
+                for (int i = 0; i + 1 < flat.Length; i += 2) pts.Add((flat[i], flat[i + 1]));
+                if (pts.Count < 2) { pts.Clear(); pts.Add((0f, 0f)); pts.Add((1f, 1f)); }
+            }
+        }
+        return a;
     }
 
     private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h)

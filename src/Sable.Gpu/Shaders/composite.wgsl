@@ -10,7 +10,7 @@ struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
 struct Params {
     mode: u32, opacity: f32, clip: f32,
     m00: f32, m01: f32, m10: f32, m11: f32, b0: f32, b1: f32,
-    _p0: f32, _p1: f32, _p2: f32,
+    fillOpacity: f32, _p1: f32, _p2: f32,
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -36,21 +36,104 @@ fn pack(c: vec4<f32>) -> u32 {
     return r | (g << 8u) | (b << 16u) | (a << 24u);
 }
 
-fn overlay1(cb: f32, cs: f32) -> f32 {
+// --- per-channel blend helpers (cb = backdrop, cs = source) ---
+fn b_overlay(cb: f32, cs: f32) -> f32 {
     if (cb <= 0.5) { return 2.0 * cb * cs; }
     return 1.0 - 2.0 * (1.0 - cb) * (1.0 - cs);
 }
+fn b_colorBurn(cb: f32, cs: f32) -> f32 {
+    if (cs <= 0.0) { return 0.0; }
+    return 1.0 - min(1.0, (1.0 - cb) / cs);
+}
+fn b_colorDodge(cb: f32, cs: f32) -> f32 {
+    if (cs >= 1.0) { return 1.0; }
+    return min(1.0, cb / (1.0 - cs));
+}
+fn b_softLight(cb: f32, cs: f32) -> f32 {
+    if (cs <= 0.5) { return cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb); }
+    var d = sqrt(cb);
+    if (cb <= 0.25) { d = ((16.0 * cb - 12.0) * cb + 4.0) * cb; }
+    return cb + (2.0 * cs - 1.0) * (d - cb);
+}
+fn b_vividLight(cb: f32, cs: f32) -> f32 {
+    if (cs <= 0.5) { return b_colorBurn(cb, 2.0 * cs); }
+    return b_colorDodge(cb, 2.0 * cs - 1.0);
+}
+fn b_pinLight(cb: f32, cs: f32) -> f32 {
+    if (cs <= 0.5) { return min(cb, 2.0 * cs); }
+    return max(cb, 2.0 * cs - 1.0);
+}
+fn b_reflect(cb: f32, cs: f32) -> f32 {
+    if (cs >= 1.0) { return 1.0; }
+    return min(1.0, cb * cb / (1.0 - cs));
+}
+fn each(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
+    switch mode {
+        case 7u:  { return vec3<f32>(b_colorBurn(cb.x, cs.x), b_colorBurn(cb.y, cs.y), b_colorBurn(cb.z, cs.z)); }
+        case 10u: { return vec3<f32>(b_colorDodge(cb.x, cs.x), b_colorDodge(cb.y, cs.y), b_colorDodge(cb.z, cs.z)); }
+        case 12u: { return vec3<f32>(b_softLight(cb.x, cs.x), b_softLight(cb.y, cs.y), b_softLight(cb.z, cs.z)); }
+        case 13u: { return vec3<f32>(b_overlay(cs.x, cb.x), b_overlay(cs.y, cb.y), b_overlay(cs.z, cb.z)); } // HardLight = Overlay(cs,cb)
+        case 14u: { return vec3<f32>(b_vividLight(cb.x, cs.x), b_vividLight(cb.y, cs.y), b_vividLight(cb.z, cs.z)); }
+        case 16u: { return vec3<f32>(b_pinLight(cb.x, cs.x), b_pinLight(cb.y, cs.y), b_pinLight(cb.z, cs.z)); }
+        case 28u: { return vec3<f32>(b_reflect(cb.x, cs.x), b_reflect(cb.y, cs.y), b_reflect(cb.z, cs.z)); }
+        case 29u: { return vec3<f32>(b_reflect(cs.x, cb.x), b_reflect(cs.y, cb.y), b_reflect(cs.z, cb.z)); } // Glow = Reflect(cs,cb)
+        default:  { return vec3<f32>(b_overlay(cb.x, cs.x), b_overlay(cb.y, cs.y), b_overlay(cb.z, cs.z)); } // Overlay
+    }
+}
 
-// blend function B(cb, cs): cb = backdrop, cs = source color
+// --- non-separable (W3C) helpers ---
+fn lum(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.3, 0.59, 0.11)); }
+fn clipColor(c: vec3<f32>) -> vec3<f32> {
+    let l = lum(c);
+    let n = min(min(c.x, c.y), c.z);
+    let x = max(max(c.x, c.y), c.z);
+    var r = c;
+    if (n < 0.0) { r = l + (r - l) * l / (l - n); }
+    if (x > 1.0) { r = l + (r - l) * (1.0 - l) / (x - l); }
+    return r;
+}
+fn setLum(c: vec3<f32>, l: f32) -> vec3<f32> { return clipColor(c + (l - lum(c))); }
+fn satv(c: vec3<f32>) -> f32 { return max(max(c.x, c.y), c.z) - min(min(c.x, c.y), c.z); }
+fn setSat(c: vec3<f32>, s: f32) -> vec3<f32> {
+    let mn = min(min(c.x, c.y), c.z);
+    let mx = max(max(c.x, c.y), c.z);
+    if (mx > mn) { return (c - mn) * s / (mx - mn); }
+    return vec3<f32>(0.0);
+}
+
+// blend function B(cb, cs)
 fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
     switch mode {
-        case 1u: { return cb * cs; }                                   // Multiply
-        case 2u: { return cb + cs - cb * cs; }                         // Screen
-        case 3u: { return vec3<f32>(overlay1(cb.x, cs.x), overlay1(cb.y, cs.y), overlay1(cb.z, cs.z)); } // Overlay
-        case 4u: { return min(cb, cs); }                               // Darken
-        case 5u: { return max(cb, cs); }                               // Lighten
-        case 6u: { return min(cb + cs, vec3<f32>(1.0)); }              // Add
-        default: { return cs; }                                        // Normal
+        case 1u:  { return cb * cs; }                                  // Multiply
+        case 2u:  { return cb + cs - cb * cs; }                        // Screen
+        case 3u:  { return each(cb, cs, 3u); }                         // Overlay
+        case 4u:  { return min(cb, cs); }                              // Darken
+        case 5u:  { return max(cb, cs); }                              // Lighten
+        case 6u:  { return min(cb + cs, vec3<f32>(1.0)); }             // Add / LinearDodge
+        case 7u:  { return each(cb, cs, 7u); }                         // ColorBurn
+        case 8u:  { return max(cb + cs - 1.0, vec3<f32>(0.0)); }       // LinearBurn
+        case 9u:  { if (lum(cb) <= lum(cs)) { return cb; } return cs; }// DarkerColor
+        case 10u: { return each(cb, cs, 10u); }                        // ColorDodge
+        case 11u: { if (lum(cb) >= lum(cs)) { return cb; } return cs; }// LighterColor
+        case 12u: { return each(cb, cs, 12u); }                        // SoftLight
+        case 13u: { return each(cb, cs, 13u); }                        // HardLight
+        case 14u: { return each(cb, cs, 14u); }                        // VividLight
+        case 15u: { return clamp(cb + 2.0 * cs - 1.0, vec3<f32>(0.0), vec3<f32>(1.0)); } // LinearLight
+        case 16u: { return each(cb, cs, 16u); }                        // PinLight
+        case 17u: { return floor(clamp(cb + cs, vec3<f32>(0.0), vec3<f32>(1.0)) + vec3<f32>(0.0001)); } // HardMix (approx)
+        case 18u: { return abs(cb - cs); }                             // Difference
+        case 19u: { return cb + cs - 2.0 * cb * cs; }                  // Exclusion
+        case 20u: { return max(cb - cs, vec3<f32>(0.0)); }             // Subtract
+        case 21u: { return clamp(cb / max(cs, vec3<f32>(0.0001)), vec3<f32>(0.0), vec3<f32>(1.0)); } // Divide
+        case 22u: { return setLum(setSat(cs, satv(cb)), lum(cb)); }    // Hue
+        case 23u: { return setLum(setSat(cb, satv(cs)), lum(cb)); }    // Saturation
+        case 24u: { return setLum(cs, lum(cb)); }                      // Color
+        case 25u: { return setLum(cb, lum(cs)); }                      // Luminosity
+        case 26u: { return (cb + cs) * 0.5; }                          // Average
+        case 27u: { return 1.0 - abs(1.0 - cb - cs); }                 // Negation
+        case 28u: { return each(cb, cs, 28u); }                        // Reflect
+        case 29u: { return each(cb, cs, 29u); }                        // Glow
+        default:  { return cs; }                                       // Normal
     }
 }
 
@@ -82,7 +165,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 mix(maskTexel(x0, y0 + 1), maskTexel(x0 + 1, y0 + 1), fx), fy);
     let da = d.w;
     let clipMul = mix(1.0, da, params.clip); // clip to backdrop alpha when clip=1
-    let sa = s.w * params.opacity * m * clipMul;   // effective source alpha
+    let sa = s.w * params.opacity * params.fillOpacity * m * clipMul;   // effective source alpha
 
     // blended color, then where backdrop is opaque use blended, else raw source
     let b = blend(d.xyz, s.xyz, params.mode);

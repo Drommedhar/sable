@@ -3,21 +3,14 @@
              x:Class="Sable.App.App"
              RequestedThemeVariant="Dark">
 
-    <!-- Pro-tool control tuning: thin, dark, low-contrast sliders (PLAN §13.3).
-         These override Fluent's chunky defaults via its documented resource keys. -->
+    <!-- Pro-tool control tuning (PLAN §13.3). All sizing tokens live in Theme.axaml
+         (single source of truth); styles below consume them via StaticResource. -->
     <Application.Resources>
-        <x:Double x:Key="SliderHorizontalHeight">22</x:Double>
-        <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
-
-        <SolidColorBrush x:Key="SliderTrackFill" Color="#FF3C3C3C" />
-        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#FF454545" />
-        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#FF454545" />
-        <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF5687C0" />
-        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF6699D6" />
-        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF6699D6" />
-        <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFE0E0E0" />
-        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFFFF" />
-        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFBFBFBF" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://Sable.App/Theme.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 
     <Application.Styles>
@@ -27,20 +20,22 @@
         <!-- Sable dark chrome: dense, pro-tool styling (PLAN §13.3). -->
         <Style Selector="Menu">
             <Setter Property="Background" Value="#FF2D2D2D" />
-            <Setter Property="Height" Value="28" />
+            <Setter Property="Height" Value="{StaticResource MenuBarHeight}" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         </Style>
         <Style Selector="MenuItem">
             <Setter Property="Foreground" Value="#FFCCCCCC" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         </Style>
         <Style Selector="TextBlock.panelHeader">
             <Setter Property="Foreground" Value="#FFAAAAAA" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Padding" Value="8,4" />
         </Style>
         <Style Selector="Button.tool">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="34" />
+            <Setter Property="Width" Value="{StaticResource ToolButtonSize}" />
+            <Setter Property="Height" Value="{StaticResource ToolButtonSize}" />
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
@@ -65,9 +60,9 @@
 
         <!-- compact icon button for the layers-panel footer -->
         <Style Selector="Button.iconbtn">
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="26" />
-            <Setter Property="Padding" Value="5" />
+            <Setter Property="Width" Value="{StaticResource IconButtonSize}" />
+            <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
+            <Setter Property="Padding" Value="4" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="3" />
@@ -80,8 +75,8 @@
 
         <!-- borderless visibility (eye) toggle on the right of each layer row -->
         <Style Selector="ToggleButton.eye">
-            <Setter Property="Width" Value="26" />
-            <Setter Property="Height" Value="26" />
+            <Setter Property="Width" Value="{StaticResource IconButtonSize}" />
+            <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
             <Setter Property="Padding" Value="3" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -133,8 +128,8 @@
         <!-- compact dark combo box -->
         <Style Selector="ComboBox">
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Height" Value="{StaticResource ControlHeight}" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="Padding" Value="8,0" />
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Background" Value="#FF2B2B2B" />
@@ -150,8 +145,8 @@
         <!-- compact dark text box + numeric up/down (share the same field look) -->
         <Style Selector="TextBox">
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Height" Value="{StaticResource ControlHeight}" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="Padding" Value="6,0" />
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Background" Value="#FF2B2B2B" />
@@ -161,8 +156,8 @@
         </Style>
         <Style Selector="NumericUpDown">
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Height" Value="{StaticResource ControlHeight}" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Background" Value="#FF2B2B2B" />
             <Setter Property="BorderBrush" Value="#FF3C3C3C" />
@@ -179,10 +174,10 @@
         <Style Selector="ToggleButton.opt">
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="24" />
+            <Setter Property="Height" Value="{StaticResource ControlHeight}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
             <Setter Property="Background" Value="#FF2F2F2F" />
             <Setter Property="BorderBrush" Value="#FF3C3C3C" />
             <Setter Property="BorderThickness" Value="1" />
@@ -197,10 +192,16 @@
             <Setter Property="Background" Value="#FF3A6EA5" />
         </Style>
 
+        <!-- adjustment-panel slider label (Affinity) -->
+        <Style Selector="TextBlock.adjLabel">
+            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+        </Style>
+
         <!-- compact checkbox -->
         <Style Selector="CheckBox">
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
         </Style>
     </Application.Styles>
 </Application>

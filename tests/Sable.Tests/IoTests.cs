@@ -123,6 +123,108 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesFillOpacity()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "A") { FillOpacity = 0.42f });
+        var path = Path.Combine(Path.GetTempPath(), $"fill_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            Assert.Equal(0.42f, loaded.Layers[0].FillOpacity, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesSingleParamAdjustments()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Exposure) { Exposure = 1.25f });
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Vibrance) { Vibrance = -0.3f });
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Threshold) { Threshold = 0.4f });
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Posterize) { Posterize = 8f });
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Invert));
+        var path = Path.Combine(Path.GetTempPath(), $"sp_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            Assert.Equal(1.25f, ((AdjustmentLayer)loaded.Layers[1]).Exposure, 4);
+            Assert.Equal(-0.3f, ((AdjustmentLayer)loaded.Layers[2]).Vibrance, 4);
+            Assert.Equal(0.4f, ((AdjustmentLayer)loaded.Layers[3]).Threshold, 4);
+            Assert.Equal(8f, ((AdjustmentLayer)loaded.Layers[4]).Posterize, 4);
+            Assert.Equal(AdjustmentKind.Invert, ((AdjustmentLayer)loaded.Layers[5]).Kind);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesBwAndWhiteBalance()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.BlackWhite) { BwR = 0.5f, BwG = 0.2f, BwB = 0.7f });
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.WhiteBalance) { Temperature = 0.3f, Tint = -0.4f });
+        var path = Path.Combine(Path.GetTempPath(), $"bw_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var bw = (AdjustmentLayer)loaded.Layers[1];
+            Assert.Equal(0.5f, bw.BwR, 4); Assert.Equal(0.2f, bw.BwG, 4); Assert.Equal(0.7f, bw.BwB, 4);
+            var wb = (AdjustmentLayer)loaded.Layers[2];
+            Assert.Equal(0.3f, wb.Temperature, 4); Assert.Equal(-0.4f, wb.Tint, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesOutputLevels()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.Levels) { OutBlack = 0.1f, OutWhite = 0.7f });
+        var path = Path.Combine(Path.GetTempPath(), $"olv_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var la = Assert.IsType<AdjustmentLayer>(loaded.Layers[1]);
+            Assert.Equal(0.1f, la.OutBlack, 4);
+            Assert.Equal(0.7f, la.OutWhite, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesCurvePoints()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        var adj = new AdjustmentLayer(AdjustmentKind.Curves);
+        adj.Curves[0].Insert(1, (0.4f, 0.7f));
+        adj.Curves[1].Insert(1, (0.25f, 0.1f));
+        doc.Layers.Add(adj);
+        var path = Path.Combine(Path.GetTempPath(), $"curve_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var la = Assert.IsType<AdjustmentLayer>(loaded.Layers[1]);
+            Assert.Equal(AdjustmentKind.Curves, la.Kind);
+            Assert.Equal(3, la.Curves[0].Count);
+            Assert.Equal(0.4f, la.Curves[0][1].x, 4);
+            Assert.Equal(0.7f, la.Curves[0][1].y, 4);
+            Assert.Equal(0.25f, la.Curves[1][1].x, 4);
+            Assert.Equal(0.1f, la.Curves[1][1].y, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesGaussianBlurFilter()
     {
         var doc = new Document(16, 16);

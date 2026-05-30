@@ -625,6 +625,7 @@ public partial class MainWindow : Window
         if (_adjWindow is not null) { _adjWindow.Activate(); return; }
 
         var win = new AdjustmentWindow { DataContext = DataContext };
+        win.CompositeProvider = () => Canvas.ReadComposite();   // backdrop histogram source
         win.Closed += (_, _) => _adjWindow = null;
         _adjWindow = win;
         win.Show(this);            // modeless, owned by main

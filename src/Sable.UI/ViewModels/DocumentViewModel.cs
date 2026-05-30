@@ -160,6 +160,16 @@ public sealed partial class DocumentViewModel : ObservableObject
             Undo.Execute(new UngroupCommand(Model, g));
     }
 
+    /// <summary>Add a white raster mask to the selected layer, or remove it if it already has one.</summary>
+    [RelayCommand]
+    private void ToggleMask()
+    {
+        if (SelectedLayer?.Model is not { } m) return;
+        if (m.HasMask) m.RemoveMask();
+        else m.AddWhiteMask(Model.Width, Model.Height);
+        SelectedLayer.RaiseMaskChanged();
+    }
+
     /// <summary>
     /// Drag-drop: drop <paramref name="dragged"/> onto <paramref name="target"/>.
     /// Onto a group → move into it; onto a sibling layer → auto-group the two;

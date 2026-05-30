@@ -40,6 +40,8 @@ public sealed unsafe class GpuCompositor : IDisposable
     private Buffer* _dimsBuf;
     private Buffer* _paramsBuf;
     private Buffer* _adjParamsBuf;
+    private Buffer* _curveLutBuf;
+    private readonly float[] _lutScratch = new float[AdjustmentLayer.CurveChannels * AdjustmentLayer.LutSize];
     private Buffer* _blurParamsBuf;
     private Buffer* _filterTemp;
     private Buffer* _previewBuf;                                // active layer copy + preview dab
@@ -92,6 +94,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _dimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
         _paramsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
         _adjParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _curveLutBuf = NewBuffer(4 * 256 * 4, BufferUsage.Storage | BufferUsage.CopyDst); // 4ch×256×f32
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         _stampParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
@@ -160,13 +163,14 @@ public sealed unsafe class GpuCompositor : IDisposable
     private void BuildAdjustPipeline()
     {
         var api = _gpu.Api;
-        var entries = stackalloc BindGroupLayoutEntry[5];
+        var entries = stackalloc BindGroupLayoutEntry[6];
         entries[0] = Entry(0, BufferBindingType.Uniform);          // dims
         entries[1] = Entry(1, BufferBindingType.Uniform);          // adj params
         entries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);  // src (backdrop)
         entries[3] = Entry(3, BufferBindingType.Storage);          // out
         entries[4] = Entry(4, BufferBindingType.ReadOnlyStorage);  // mask
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 5, Entries = entries };
+        entries[5] = Entry(5, BufferBindingType.ReadOnlyStorage);  // curve LUT
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 6, Entries = entries };
         _adjBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
 
         var bglLocal = _adjBgl;
@@ -293,6 +297,19 @@ public sealed unsafe class GpuCompositor : IDisposable
         fixed (byte* pz = _zero) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, pz, (nuint)_imgBytes);
     }
 
+    /// <summary>
+    /// Release all cached per-layer GPU buffers (layer pixels + masks). Call when the
+    /// document is swapped (open/new tab) — the old doc's layers are gone, so their
+    /// cached buffers would otherwise leak. New buffers rebuild lazily next composite.
+    /// </summary>
+    public void ReleaseLayerCaches()
+    {
+        foreach (var p in _layerBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
+        _layerBuffers.Clear();
+        foreach (var p in _maskBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
+        _maskBuffers.Clear();
+    }
+
     /// <summary>Composite the document and return the result texture view.</summary>
     public TextureView* Composite(Document doc)
     {
@@ -353,6 +370,12 @@ public sealed unsafe class GpuCompositor : IDisposable
                 var p = new Span<float>((float*)(prm + 2), 6);
                 adj.PackParams(p);
                 api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 32);
+                if (adj.Kind == AdjustmentKind.Curves)
+                {
+                    adj.BuildLut(_lutScratch);
+                    fixed (float* lp = _lutScratch)
+                        api.QueueWriteBuffer(_gpu.Queue, _curveLutBuf, 0, lp, (nuint)(_lutScratch.Length * 4));
+                }
                 DispatchAdjust(current, other, maskBuf);
                 var t1 = current; current = other; other = t1;
             }
@@ -379,6 +402,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         var inv = AffineMath.DocToLayer(_width, _height,
             layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
         for (int i = 0; i < 6; i++) prm[3 + i] = inv[i];
+        prm[9] = layer.FillOpacity;
         _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 48);
         DispatchBlend(current, src, other, maskBuf);
         var tmp = current; current = other; other = tmp;
@@ -419,13 +443,14 @@ public sealed unsafe class GpuCompositor : IDisposable
     private void DispatchAdjust(Buffer* src, Buffer* outp, Buffer* mask)
     {
         var api = _gpu.Api;
-        var bg = stackalloc BindGroupEntry[5];
+        var bg = stackalloc BindGroupEntry[6];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _adjParamsBuf, Size = 32 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = outp, Size = (ulong)_imgBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = mask, Size = (ulong)_imgBytes };
-        var bgDesc = new BindGroupDescriptor { Layout = _adjBgl, EntryCount = 5, Entries = bg };
+        bg[5] = new BindGroupEntry { Binding = 5, Buffer = _curveLutBuf, Size = 4 * 256 * 4 };
+        var bgDesc = new BindGroupDescriptor { Layout = _adjBgl, EntryCount = 6, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var encDesc = new CommandEncoderDescriptor();
@@ -725,6 +750,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_dimsBuf is not null) api.BufferRelease(_dimsBuf);
         if (_paramsBuf is not null) api.BufferRelease(_paramsBuf);
         if (_adjParamsBuf is not null) api.BufferRelease(_adjParamsBuf);
+        if (_curveLutBuf is not null) api.BufferRelease(_curveLutBuf);
         if (_blurParamsBuf is not null) api.BufferRelease(_blurParamsBuf);
         if (_pipeline is not null) api.ComputePipelineRelease(_pipeline);
         if (_bgl is not null) api.BindGroupLayoutRelease(_bgl);

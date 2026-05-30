@@ -3,7 +3,8 @@
              xmlns:local="clr-namespace:Sable.App"
              x:Class="Sable.App.ColorPicker">
     <StackPanel Spacing="8">
-        <local:ColorWheel x:Name="Wheel" HorizontalAlignment="Stretch" />
+        <local:ColorWheel x:Name="Wheel" HorizontalAlignment="Center"
+                          MaxWidth="{StaticResource ColorWheelMaxSize}" />
         <StackPanel Orientation="Horizontal" Spacing="6">
             <TextBlock Text="#" Foreground="#FF9A9A9A" VerticalAlignment="Center" FontSize="12" />
             <TextBox x:Name="HexBox" Width="92" Text="FFFFFF" TextChanged="OnHexChanged" />

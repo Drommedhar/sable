@@ -317,12 +317,15 @@ public class AdjustmentLayerTests
     [Fact]
     public void PackParams_Levels()
     {
-        var a = new AdjustmentLayer(AdjustmentKind.Levels) { InBlack = 0.1f, InWhite = 0.9f, Gamma = 2f };
+        var a = new AdjustmentLayer(AdjustmentKind.Levels)
+        { InBlack = 0.1f, InWhite = 0.9f, Gamma = 2f, OutBlack = 0.05f, OutWhite = 0.8f };
         Span<float> p = stackalloc float[6];
         a.PackParams(p);
         Assert.Equal(0.1f, p[0], 4);
         Assert.Equal(0.9f, p[1], 4);
         Assert.Equal(2f, p[2], 4);
+        Assert.Equal(0.05f, p[3], 4);
+        Assert.Equal(0.8f, p[4], 4);
     }
 
     [Fact]
@@ -334,6 +337,54 @@ public class AdjustmentLayerTests
         Assert.Equal(0.25f, p[0], 4);
         Assert.Equal(1.5f, p[1], 4);
         Assert.Equal(-0.2f, p[2], 4);
+    }
+
+    [Theory]
+    [InlineData(AdjustmentKind.Exposure)]
+    [InlineData(AdjustmentKind.Vibrance)]
+    [InlineData(AdjustmentKind.Threshold)]
+    [InlineData(AdjustmentKind.Posterize)]
+    public void PackParams_SingleParam(AdjustmentKind kind)
+    {
+        var a = new AdjustmentLayer(kind);
+        a.Exposure = 1.5f; a.Vibrance = 0.4f; a.Threshold = 0.6f; a.Posterize = 5f;
+        Span<float> p = stackalloc float[6];
+        a.PackParams(p);
+        float expected = kind switch
+        {
+            AdjustmentKind.Exposure => 1.5f,
+            AdjustmentKind.Vibrance => 0.4f,
+            AdjustmentKind.Threshold => 0.6f,
+            _ => 5f,
+        };
+        Assert.Equal(expected, p[0], 4);
+    }
+
+    [Fact]
+    public void Curves_DefaultLutIsIdentity()
+    {
+        var a = new AdjustmentLayer(AdjustmentKind.Curves);
+        Assert.True(a.CurvesAreIdentity());
+        Span<float> lut = stackalloc float[AdjustmentLayer.CurveChannels * AdjustmentLayer.LutSize];
+        a.BuildLut(lut);
+        for (int ch = 0; ch < AdjustmentLayer.CurveChannels; ch++)
+        {
+            int b = ch * AdjustmentLayer.LutSize;
+            Assert.Equal(0f, lut[b], 3);
+            Assert.Equal(1f, lut[b + AdjustmentLayer.LutSize - 1], 3);
+            Assert.Equal(0.5f, lut[b + 127], 2);   // midpoint passes through
+        }
+    }
+
+    [Fact]
+    public void Curves_RaisedMidpointLiftsLut()
+    {
+        var a = new AdjustmentLayer(AdjustmentKind.Curves);
+        a.Curves[0].Insert(1, (0.5f, 0.75f));      // lift the composite midtone
+        Assert.False(a.CurvesAreIdentity());
+        Assert.True(a.EvalChannel(0, 0.5f) > 0.7f);
+        Assert.Equal(0f, a.EvalChannel(0, 0f), 3);
+        Assert.Equal(1f, a.EvalChannel(0, 1f), 3);
     }
 }
 

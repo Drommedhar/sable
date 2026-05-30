@@ -89,7 +89,13 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     public Document? Document
     {
         get => _doc;
-        set { _doc = value; _compositeView = null; }
+        set
+        {
+            if (ReferenceEquals(_doc, value)) return;
+            _compositor?.ReleaseLayerCaches();   // free the old doc's cached GPU buffers (no leak on swap)
+            _doc = value;
+            _compositeView = null;
+        }
     }
 
     /// <summary>Flatten the current document to RGBA8 on the GPU and read it back (for export).</summary>

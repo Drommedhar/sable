@@ -11,8 +11,11 @@ public abstract class Layer
 {
     public string Name { get; set; } = "Layer";
 
-    /// <summary>0..1 layer opacity.</summary>
+    /// <summary>0..1 layer opacity (scales the whole layer incl. future FX).</summary>
     public float Opacity { get; set; } = 1f;
+
+    /// <summary>0..1 fill opacity (scales the layer's pixels only, not FX — PS "Fill"). Multiplies with Opacity for now.</summary>
+    public float FillOpacity { get; set; } = 1f;
 
     public BlendMode BlendMode { get; set; } = BlendMode.Normal;
 

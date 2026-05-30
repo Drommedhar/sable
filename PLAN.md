@@ -473,7 +473,7 @@ Flyout grouping + options bar + Shift-cycle land alongside as the strip matures.
 - Partial GPU upload: per-layer `DirtyTiles` → only changed tiles re-uploaded (mask still full-upload 🔶).
 
 ### Effects (M4) — all non-destructive, masked, serialized
-- Adjustments ✅: Brightness/Contrast, Levels, HSL (unified `adjust.wgsl`, generic params). More (Curves/ColourBalance/etc.) ⬜.
+- Adjustments ✅: Brightness/Contrast, Levels, HSL, Curves (unified `adjust.wgsl`, generic params + curve LUT). More (ColourBalance/Vibrance/etc.) ⬜.
 - Live filters 🔶: Gaussian blur ✅ (separable, `blur.wgsl`). Filter mask/opacity ⬜ (blur applies fully). Sharpen/others ⬜.
 - Recipe: new adjustment = AdjustmentKind + adjust.wgsl case + PackParams + toolbox sliders + serializer; new filter = FilterKind + WGSL + compositor branch + serializer.
 
@@ -566,11 +566,15 @@ Researched against Photoshop + Affinity Photo. Legend: ✅ have · 🔶 partial 
 
 ### 16.3 Layers & compositing
 - ✅ pixel/group/adjustment/filter/shape/text, opacity, 7 blend modes, raster mask, clip-to-below, non-destructive transform, reorder, multi-select, drag-drop, group/ungroup, thumbnails.
-- ⬜ full blend-mode set (have 7 of ~30) · fill opacity · Blend-If · vector mask · multi-layer clipping · pass-through groups · alpha lock · colour tags · smart objects (linked/embedded) · merge-down/flatten/merge-visible/stamp · duplicate · rasterise · layer search · locks · between-row drop reorder.
+- ✅ **full blend-mode set** (30: PS + Affinity extras, `composite.wgsl`). ✅ **fill opacity** (`Layer.FillOpacity`, composite.wgsl `params.fillOpacity` scales source alpha; layer-panel Fill slider; serialized in `.sable`). ⬜ Blend-If · vector mask · multi-layer clipping · pass-through groups · alpha lock · colour tags · smart objects (linked/embedded) · merge-down/flatten/merge-visible/stamp · duplicate · rasterise · layer search · locks · between-row drop reorder.
 
-### 16.4 Adjustments (have 3 of ~22)
-- ✅ Brightness/Contrast, Levels, HSL.
-- ⬜ Curves (RGB+channels+LUM) · White Balance · Black&White · Recolour · Vibrance · Exposure · Shadows/Highlights · Channel Mixer · Gradient Map · Threshold · Invert · Posterise · Colour Balance · Photo/Lens Filter · Split Toning · Selective Colour · Defringe · 3D LUT · Soft Proof · presets · adjustment brush · on-canvas handles.
+### 16.4 Adjustments (have 11 of ~22)
+- ✅ **Exposure** (stops, gain 2^x) · **Vibrance** (smart sat via HSL) · **Threshold** (luminance cut) · **Posterise** (level quantise) · **Invert** · **Black & White** (R/G/B luminance weights) · **White Balance** (temperature/tint) — `adjust.wgsl` cases 4-10, ≤6 params each (fit existing 32B adj buffer), gradient-slider toolbox panels, serialized.
+- ⬜ **Colour Balance / Channel Mixer** need >6 params → require expanding the adj uniform buffer (32B→64B: `_adjParamsBuf`, `prm` stackalloc, `DispatchAdjust`, `adjust.wgsl` Adj struct) — deliberate infra turn.
+- ✅ Brightness/Contrast, **Levels** (in black/white/gamma + **output black/white** remap), HSL, **Curves** (RGB composite + per-channel R/G/B; 4×256 GPU LUT bound to `adjust.wgsl` binding 5, `AdjustmentLayer.BuildLut`/`EvalChannel` monotone Catmull-Rom; bespoke `CurveEditor` control in the AdjustmentWindow — click=add point, drag=shape, right-click=delete, RGB/R/G/B channel tabs; serialized as point lists in `.sable`).
+- ✅ **Affinity-style adjustment panel** (`AdjustmentWindow`): header + **Reset** button, **gradient slider tracks** (`GradientSlider` control — hue rainbow / sat ramp / grey for levels), numeric **value box** beside each slider, **histogram** behind Curves (`CurveEditor.SetHistogram`) + above Levels (`HistogramView`) via `Histogram.Compute/Draw` (fed by `MainWindow` `CompositeProvider = Canvas.ReadComposite`; **whole-composite approx — backdrop-below is a follow-up**), footer **Opacity + Blend Mode**.
+- ⬜ LUM-channel curve · White Balance · Black&White · Recolour · Vibrance · Exposure · Shadows/Highlights · Channel Mixer · Gradient Map · Threshold · Invert · Posterise · Colour Balance · Photo/Lens Filter · Split Toning · Selective Colour · Defringe · 3D LUT · Soft Proof · presets · adjustment brush · on-canvas handles.
+- **Curves recipe note**: an adjustment needing a LUT (vs 6 scalar params) uses the `_curveLutBuf` storage binding + `adj.Kind` switch case in `adjust.wgsl`; reuse this for Gradient Map.
 
 ### 16.5 Live filters (have 1)
 - ✅ Gaussian blur.
@@ -618,7 +622,7 @@ Researched against Photoshop + Affinity Photo. Legend: ✅ have · 🔶 partial 
 - ⛔ HDR merge/tone-map · panorama stitch · focus stacking · frequency separation · liquify · lens correction/defringe · 360/equirectangular · astro stacking · channels editing · apply-image · displacement maps · pattern generation. (Everything else in §16 is in scope.)
 
 ### 16.17 Highest-impact missing (suggested priority)
-1. Full **blend-mode set** + fill opacity + Blend-If (cheap WGSL, big payoff).
+1. ✅ Full **blend-mode set** (done) + ⬜ fill opacity + ⬜ Blend-If.
 2. **Curves** + a few more adjustments (Vibrance/Exposure/Colour Balance/Gradient Map/Invert/B&W).
 3. **Layer FX** (drop shadow/stroke/glow) — high visual value.
 4. **Multi-document tabs** + **Export dialog** (workflow basics).
@@ -669,14 +673,14 @@ Not in the §16 feature comparison but needed. ⬜ all not started.
 
 Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The old §8 M0–M5 are superseded for remaining work by this. **Status: §16/§17 baseline = M0–M2 done, mid-M4.** Two tracks can run in parallel: **Engine** (compositor/effects/selection) and **App** (chrome/workflow/IO) — noted per phase. Each item = its own ticket; ship + test each.
 
-### Phase 0 — Prereqs / debt to clear first (small, unblocks later)
-- **Fix doc-swap GPU buffer leak** (§15/§17.3) — *blocks multi-tab* (every tab switch leaks today).
-- **Blend-mode contract groundwork** — extend `BlendMode` enum + `composite.wgsl` to a switch ready for the full set.
-- THIRD_PARTY_NOTICES + licence-audit stub (§12).
+### Phase 0 — Prereqs / debt to clear first  ✅ DONE
+- ✅ **Doc-swap GPU buffer leak fixed**: `GpuCompositor.ReleaseLayerCaches()` (releases `_layerBuffers` + `_maskBuffers`); `GpuSurfaceControl.Document` setter calls it on swap (guarded by ref-equality). No leak when opening/switching docs → unblocks multi-tab.
+- ✅ **Full blend-mode set** (not just groundwork — done): `BlendMode` enum now 30 (PS set + Affinity extras), `composite.wgsl` `blend()` implements all incl. non-separable Hue/Sat/Colour/Luminosity + Darker/LighterColour (W3C `setLum`/`setSat`/`clipColor` helpers) and per-channel ColorBurn/Dodge/SoftLight/HardLight/VividLight/PinLight/LinearLight/HardMix/Difference/Exclusion/Subtract/Divide/Average/Negation/Reflect/Glow. Layer-panel blend ComboBox auto-lists all (binds `BlendModes` = `Enum.GetValues`). WGSL validated (compiles at pipeline creation = startup OK). **Phase 1 #1 remainder: fill-opacity + Blend-If still ⬜.** (Polish: prettify enum display names "ColorBurn"→"Colour Burn".)
+- ✅ **THIRD_PARTY_NOTICES.md** stub at repo root (libs + licences + watch-list); CI licence-audit step still ⬜.
 
 ### Phase 1 — "Feels complete" editor core  *(Engine track, cheap × high-impact, §16.17 top)*
-1. **Full blend-mode set** (~30) + **fill opacity** + **Blend-If** — `composite.wgsl` switch + per-layer params + UI (§16.3).
-2. **Adjustments expansion** — Curves (RGB+channels+LUM) first, then Vibrance, Exposure, Colour Balance, Gradient Map, Invert, B&W, Channel Mixer, Threshold, Posterise. Each = `adjust.wgsl` case + PackParams + toolbox + serializer (recipe exists).
+1. ✅ Full blend-mode set (~30) · ✅ fill opacity (`Layer.FillOpacity` → composite.wgsl `params.fillOpacity`, Fill slider, serialized) · ⬜ **Blend-If** (next: expand Params to blend-range — This-Layer + Underlying black/white, luminance factor multiplies `sa`) — `composite.wgsl` switch + per-layer params + UI (§16.3).
+2. **Adjustments expansion** — ✅ Curves · Exposure · Vibrance · Threshold · Posterise · Invert · B&W · White Balance · Levels output-levels (GPU + toolbox + serialize). ⬜ LUM-channel curve · Gradient Map (reuse curve LUT path) · Colour Balance + Channel Mixer (need 32B→64B adj buffer expansion). Each = `adjust.wgsl` case + PackParams + toolbox + serializer (recipe exists).
 3. **Layer FX** (per-layer non-destructive stack) — Outer/Inner Shadow, Outer/Inner Glow, Stroke, Colour/Gradient Overlay; compositor FX pass + UI + serialize (§16.6).
 4. **More live filters** — Unsharp/Sharpen/High-Pass/Clarity, Box/Motion/Radial blur, Add Noise/Denoise; + **filter mask/opacity** (close the 🔶). (§16.5)
 5. **Clipboard** — Copy/Cut/Paste/Copy-Merged/Paste-Into/Duplicate(Ctrl+J), layer + selection, internal + OS clipboard (§16.2).

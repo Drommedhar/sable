@@ -1,0 +1,42 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ============================================================
+         Sable UI theme tokens — SINGLE SOURCE OF TRUTH for sizing.
+         Adjust here to retune the whole UI density (PLAN §13.3).
+         Tuned denser to match Affinity's compact pro layout.
+         ============================================================ -->
+
+    <!-- type scale -->
+    <x:Double x:Key="FontSizeSmall">11</x:Double>   <!-- labels, control text -->
+    <x:Double x:Key="FontSizeBody">12</x:Double>    <!-- menu, tabs, body -->
+    <x:Double x:Key="FontSizeTiny">10</x:Double>    <!-- hints, captions -->
+
+    <!-- bar heights -->
+    <x:Double x:Key="MenuBarHeight">24</x:Double>
+    <x:Double x:Key="OptionsBarHeight">28</x:Double>
+    <x:Double x:Key="StatusBarHeight">20</x:Double>
+
+    <!-- controls -->
+    <x:Double x:Key="ControlHeight">22</x:Double>   <!-- combo / textbox / numeric / opt toggle -->
+    <x:Double x:Key="ToolButtonSize">28</x:Double>  <!-- left tool palette buttons -->
+    <x:Double x:Key="IconButtonSize">24</x:Double>  <!-- footer / eye icon buttons -->
+    <x:Double x:Key="LayerRowHeight">28</x:Double>
+    <x:Double x:Key="ColorWheelMaxSize">190</x:Double>
+
+    <!-- slider geometry (Fluent resource keys — keep these exact names) -->
+    <x:Double x:Key="SliderHorizontalHeight">18</x:Double>
+    <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
+
+    <!-- slider brushes (moved here so all chrome tuning is in one file) -->
+    <SolidColorBrush x:Key="SliderTrackFill" Color="#FF3C3C3C" />
+    <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#FF454545" />
+    <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#FF454545" />
+    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF5687C0" />
+    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF6699D6" />
+    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF6699D6" />
+    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFE0E0E0" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFBFBFBF" />
+
+</ResourceDictionary>
