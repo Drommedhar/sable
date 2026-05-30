@@ -991,7 +991,7 @@ public partial class MainWindow : Window
             ActivateTab(_tabs.Count == 0 ? null : _tabs[System.Math.Clamp(i, 0, _tabs.Count - 1)]);
     }
 
-    private void OnNewTabButton(object? sender, RoutedEventArgs e) { Log("OnNewTabButton click"); _ = OnNewDocument(); }
+    private void OnNewTabButton(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
 
     private void OnFilesDragOver(object? sender, DragEventArgs e)
     {
@@ -1022,36 +1022,21 @@ public partial class MainWindow : Window
         }
     }
 
-    internal static void Log(string msg)
-    {
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sable.log"),
-                  $"{System.DateTime.Now:HH:mm:ss.fff} {msg}\n"); } catch { }
-    }
-
     private async System.Threading.Tasks.Task OnNewDocument()
     {
-        Log("OnNewDocument: enter");
-        try
+        var dlg = new NewDocumentWindow(_settings.DefaultDpi);
+        if (await dlg.ShowDialog<bool>(this))
         {
-            var dlg = new NewDocumentWindow(_settings.DefaultDpi);
-            Log("OnNewDocument: dialog constructed, showing");
-            var ok = await dlg.ShowDialog<bool>(this);
-            Log($"OnNewDocument: dialog closed ok={ok} w={dlg.DocWidth} h={dlg.DocHeight}");
-            if (ok)
-            {
-                var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi };
-                var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
-                if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
-                bg.Dirty = true;
-                doc.Layers.Add(bg);
-                OpenInNewTab(doc, null, $"Untitled {_untitledCounter++}");
-                Log("OnNewDocument: tab opened");
-            }
+            var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi };
+            var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
+            if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
+            bg.Dirty = true;
+            doc.Layers.Add(bg);
+            OpenInNewTab(doc, null, $"Untitled {_untitledCounter++}");
         }
-        catch (System.Exception ex) { Log($"OnNewDocument: EXCEPTION {ex}"); }
     }
 
-    private void OnNewMenu(object? sender, RoutedEventArgs e) { Log("OnNewMenu click"); _ = OnNewDocument(); }
+    private void OnNewMenu(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
 
     private async void OnNewFromClipboard(object? sender, RoutedEventArgs e)
     {
@@ -1131,15 +1116,31 @@ public partial class MainWindow : Window
         vm.SelectModel(px);
     }
 
-    /// <summary>Build a doc-sized pixel layer holding the region (at the selection / centered), optional mask = paste-into.</summary>
+    /// <summary>
+    /// Build a pixel layer holding the region. Plain paste = a region-sized layer placed at an
+    /// offset (off-canvas pixels preserved, not clipped). Paste-into (with a doc-sized selection
+    /// mask) = a doc-sized layer so the mask aligns.
+    /// </summary>
     private PixelLayer LayerFromRegion(byte[] px, int w, int h, byte[]? maskFull)
     {
         var doc = Canvas.Document!;
-        var layer = new PixelLayer(doc.Width, doc.Height, "Pasted");
-        int ox, oy;
-        if (maskFull is not null && doc.Selection is { } sel) { ox = sel.X; oy = sel.Y; }
-        else { ox = (doc.Width - w) / 2; oy = (doc.Height - h) / 2; }
-        var dst = layer.Pixels;
+
+        if (maskFull is null)
+        {
+            // region-sized layer, centred (or at the selection), keeps everything incl. off-canvas
+            var layer = new PixelLayer(w, h, "Pasted");
+            px.CopyTo(layer.Pixels.AsSpan());
+            layer.OffsetX = doc.Selection is { } s ? s.X : (doc.Width - w) / 2;
+            layer.OffsetY = doc.Selection is { } s2 ? s2.Y : (doc.Height - h) / 2;
+            layer.Dirty = true;
+            return layer;
+        }
+
+        // paste-into: doc-sized so the selection mask lines up
+        var full = new PixelLayer(doc.Width, doc.Height, "Pasted");
+        int ox = doc.Selection is { } sel ? sel.X : (doc.Width - w) / 2;
+        int oy = doc.Selection is { } sel2 ? sel2.Y : (doc.Height - h) / 2;
+        var dst = full.Pixels;
         for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
         {
@@ -1148,9 +1149,9 @@ public partial class MainWindow : Window
             int si = (y * w + x) * 4, di = (ty * doc.Width + tx) * 4;
             dst[di] = px[si]; dst[di + 1] = px[si + 1]; dst[di + 2] = px[si + 2]; dst[di + 3] = px[si + 3];
         }
-        if (maskFull is not null) { layer.Mask = maskFull; layer.MaskDirty = true; }
-        layer.Dirty = true;
-        return layer;
+        full.Mask = maskFull; full.MaskDirty = true;
+        full.Dirty = true;
+        return full;
     }
 
     // OS clipboard image interop (Avalonia 12 ClipboardExtensions.Set/TryGetBitmapAsync).

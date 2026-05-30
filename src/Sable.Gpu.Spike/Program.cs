@@ -207,6 +207,31 @@ unsafe
     }
     // (pure-logic verification lives in tests/Sable.Tests — this spike is a GPU smoke test.)
 
+    // --- dynamic layer bounds: composite a sub-document layer placed at an offset ---
+    {
+        var bdoc = new Sable.Engine.Document(64, 64);
+        bdoc.Layers.Add(new Sable.Engine.Layers.PixelLayer(64, 64, "bg"));   // transparent bg
+        var small = new Sable.Engine.Layers.PixelLayer(16, 16, "red") { OffsetX = 24, OffsetY = 24 };
+        for (int i = 0; i < small.Pixels.Length; i += 4)
+        { small.Pixels[i] = 255; small.Pixels[i + 1] = 0; small.Pixels[i + 2] = 0; small.Pixels[i + 3] = 255; }
+        // layer-aligned mask: hide the left half of the 16x16 square
+        small.AddWhiteMask(16, 16);
+        for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 8; x++) { int mi = (y * 16 + x) * 4; small.Mask![mi] = 0; }
+        small.MaskDirty = true;
+        bdoc.Layers.Add(small);
+        using var bcomp = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var px = bcomp.CompositeToBytes(bdoc);
+        int Idx(int x, int y) => (y * 64 + x) * 4;
+        // square spans doc [24,40); mask hides its left half (layer x<8 → doc x<32)
+        int cRight = Idx(36, 31);   // right half: visible red
+        int cLeft = Idx(27, 31);    // left half: masked out (transparent)
+        int cOut = Idx(4, 4);       // outside the square: transparent
+        bool ok = px[cRight] == 255 && px[cRight + 3] == 255 && px[cLeft + 3] == 0 && px[cOut + 3] == 0;
+        Console.WriteLine($"sub-doc masked layer: right=({px[cRight]},{px[cRight+1]},{px[cRight+2]},{px[cRight+3]}) " +
+            $"leftA={px[cLeft+3]} outsideA={px[cOut+3]} ok={ok}");
+    }
+
     // --- M1 verification: .sable save/load round-trip ---------------------------
     var sdoc = Sable.Engine.Document.CreateDemo(80, 60);
     var sablePath = Path.GetFullPath("roundtrip.sable");

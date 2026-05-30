@@ -22,7 +22,9 @@ public sealed unsafe class GpuCompositor : IDisposable
 {
     private readonly WgpuDevice _gpu;
     private readonly Dictionary<Layer, nint> _layerBuffers = new();
+    private readonly Dictionary<Layer, int> _layerBufferBytes = new();   // allocated size per layer buffer (for grow/realloc detection)
     private readonly Dictionary<Layer, nint> _maskBuffers = new();
+    private readonly Dictionary<Layer, int> _maskBufferBytes = new();
 
     /// <summary>Live brush-preview dab composited into the stack after its target layer (null = none).</summary>
     public PreviewDab? Preview { get; set; }
@@ -352,8 +354,10 @@ public sealed unsafe class GpuCompositor : IDisposable
         // invalidate cached layer + mask + scratch buffers (size changed)
         foreach (var p in _layerBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _layerBuffers.Clear();
+        _layerBufferBytes.Clear();
         foreach (var p in _maskBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
+        _maskBufferBytes.Clear();
         ReleaseScratch();
         _valid = true;
     }
@@ -394,8 +398,10 @@ public sealed unsafe class GpuCompositor : IDisposable
     {
         foreach (var p in _layerBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _layerBuffers.Clear();
+        _layerBufferBytes.Clear();
         foreach (var p in _maskBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
+        _maskBufferBytes.Clear();
     }
 
     /// <summary>Composite the document and return the result texture view.</summary>
@@ -428,27 +434,30 @@ public sealed unsafe class GpuCompositor : IDisposable
             {
                 var srcBuf = GetLayerBuffer(px);
                 // brush preview: stamp the dab into a copy of the layer, then composite normally
-                // (so erase reveals layers below and paint respects the layer's blend/opacity)
-                if (Preview is { } pv && ReferenceEquals(pv.Layer, layer))
+                // (so erase reveals layers below and paint respects the layer's blend/opacity).
+                // The preview buffer is document-sized, so only use it for a doc-aligned layer;
+                // an offset/oversized layer paints without the live dab (follow-up).
+                bool docAligned = px.Width == _width && px.Height == _height && px.OffsetX == 0 && px.OffsetY == 0;
+                if (Preview is { } pv && ReferenceEquals(pv.Layer, layer) && docAligned)
                 {
                     CopyBuffer(srcBuf, _previewBuf);
                     DispatchStamp(_previewBuf, srcBuf, pv);   // srcBuf = original layer = clone source
                     srcBuf = _previewBuf;
                 }
-                BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf, px.Width, px.Height);
             }
             else if (layer is ShapeLayer sh)
             {
-                BlendContentWithFx(ref current, ref other, GetShapeBuffer(sh), layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, GetShapeBuffer(sh), layer, maskBuf, _width, _height);
             }
             else if (layer is TextLayer txt)
             {
-                BlendContentWithFx(ref current, ref other, GetTextBuffer(txt), layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, GetTextBuffer(txt), layer, maskBuf, _width, _height);
             }
             else if (layer is GroupLayer grp)
             {
                 var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
-                BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf, _width, _height);
             }
             else if (layer is AdjustmentLayer adj)
             {
@@ -464,7 +473,8 @@ public sealed unsafe class GpuCompositor : IDisposable
                     fixed (float* lp = _lutScratch)
                         api.QueueWriteBuffer(_gpu.Queue, _curveLutBuf, 0, lp, (nuint)(_lutScratch.Length * 4));
                 }
-                DispatchAdjust(current, other, maskBuf);
+                // adjustment layers are document-sized → the doc-sized white mask is a valid no-mask fallback
+                DispatchAdjust(current, other, maskBuf is not null ? maskBuf : _whiteMask);
                 var t1 = current; current = other; other = t1;
             }
             else if (layer is FilterLayer flt)
@@ -477,8 +487,8 @@ public sealed unsafe class GpuCompositor : IDisposable
         return current;
     }
 
-    // write the 48B blend params: mode(u32), opacity, clip, inv-affine(6), fill, pad×2
-    private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill)
+    // write the 48B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask, pad
+    private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill, bool hasMask)
     {
         var prm = stackalloc float[12];
         ((uint*)prm)[0] = mode;
@@ -486,16 +496,19 @@ public sealed unsafe class GpuCompositor : IDisposable
         prm[2] = clip;
         for (int i = 0; i < 6; i++) prm[3 + i] = inv[i];
         prm[9] = fill;
+        prm[10] = hasMask ? 1f : 0f;
         _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 48);
     }
 
-    // blend src (a pixel layer or a group's result) onto the accumulator
-    private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf)
+    // blend src (a pixel layer or a group's result) onto the accumulator.
+    // srcW/srcH = the source buffer's own size; the transform pivots about the source's centre,
+    // and OffsetX/Y places the source's top-left in document space.
+    private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf, int srcW, int srcH)
     {
-        var inv = AffineMath.DocToLayer(_width, _height,
+        var inv = AffineMath.DocToLayer(srcW, srcH,
             layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
-        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity);
-        DispatchBlend(current, src, other, maskBuf);
+        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity, maskBuf is not null);
+        DispatchBlend(current, src, other, maskBuf, srcW, srcH);
         var tmp = current; current = other; other = tmp;
     }
 
@@ -505,19 +518,19 @@ public sealed unsafe class GpuCompositor : IDisposable
         BlendMode mode, float opacity, float offX, float offY, Buffer* maskBuf)
     {
         Span<float> inv = stackalloc float[6] { 1, 0, 0, 1, -offX, -offY };
-        WriteBlendParams((uint)mode, opacity, 0f, inv, 1f);
-        DispatchBlend(current, src, other, maskBuf);
+        WriteBlendParams((uint)mode, opacity, 0f, inv, 1f, maskBuf is not null);
+        DispatchBlend(current, src, other, maskBuf, _width, _height);   // doc-space sprite
         var tmp = current; current = other; other = tmp;
     }
 
     // render a content layer into doc space (offset/transform + mask applied) → _fxLdoc, for FX source
-    private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf)
+    private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH)
     {
-        var inv = AffineMath.DocToLayer(_width, _height,
+        var inv = AffineMath.DocToLayer(srcW, srcH,
             layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
         ClearBuffer(_fxTint);   // transparent backdrop
-        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f);
-        DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf);
+        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null);
+        DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf, srcW, srcH);
     }
 
     private void DispatchFx(Buffer* src, Buffer* outp, uint mode, float r, float g, float b, float size, float pos,
@@ -556,15 +569,15 @@ public sealed unsafe class GpuCompositor : IDisposable
     }
 
     // composite a content layer plus its non-destructive effects (shadow/glow behind, overlay/stroke front)
-    private void BlendContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* srcBuf, Layer layer, Buffer* maskBuf)
+    private void BlendContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* srcBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH)
     {
         if (!layer.HasEffects)
         {
-            BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+            BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH);
             return;
         }
 
-        RasterizeLayerToDoc(srcBuf, layer, maskBuf);   // _fxLdoc = layer in doc space
+        RasterizeLayerToDoc(srcBuf, layer, maskBuf, srcW, srcH);   // _fxLdoc = layer in doc space
 
         // behind effects (drop shadow / outer glow), in Effects-list order
         foreach (var fx in layer.Effects)
@@ -575,11 +588,11 @@ public sealed unsafe class GpuCompositor : IDisposable
                 WriteBlurParams(fx.Radius, 0f, 1f); DispatchBlur(_fxBlur, _fxTint);
                 float ox = fx.Kind == LayerEffectKind.DropShadow ? fx.OffsetX : 0f;
                 float oy = fx.Kind == LayerEffectKind.DropShadow ? fx.OffsetY : 0f;
-                BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, ox, oy, _whiteMask);
+                BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, ox, oy, null);
             }
 
         // the layer itself
-        BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+        BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH);
 
         // front effects, in Effects-list order (so list reordering changes the stacking)
         foreach (var fx in layer.Effects)
@@ -608,7 +621,7 @@ public sealed unsafe class GpuCompositor : IDisposable
                 default:
                     continue;   // behind effects already handled
             }
-            BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, 0f, 0f, _whiteMask);
+            BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, 0f, 0f, null);
         }
     }
 
@@ -842,16 +855,26 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.BindGroupRelease(bindGroup);
     }
 
-    private void DispatchBlend(Buffer* dst, Buffer* src, Buffer* outp, Buffer* mask)
+    // srcW/srcH = the source buffer's own dimensions (doc-sized for sprites/groups, the layer's
+    // own size for a PixelLayer with independent bounds). The mask is sampled with the same
+    // layer coords, so it must match the source layout (doc-sized white mask is uniform → safe).
+    // mask == null → the layer has no mask (params.hasMask is 0); bind src as a harmless dummy so
+    // the bind group is complete. A real mask is layer-aligned, so its size equals srcBytes.
+    private void DispatchBlend(Buffer* dst, Buffer* src, Buffer* outp, Buffer* mask, int srcW, int srcH)
     {
         var api = _gpu.Api;
+        // refresh dims with this layer's src size (output grid stays the document)
+        var dimsv = stackalloc uint[4] { (uint)_width, (uint)_height, (uint)srcW, (uint)srcH };
+        api.QueueWriteBuffer(_gpu.Queue, _dimsBuf, 0, dimsv, 16);
+        ulong srcBytes = (ulong)srcW * (ulong)srcH * 4;
+        var maskBuf = mask is not null ? mask : src;
         var bg = stackalloc BindGroupEntry[6];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 48 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = dst, Size = (ulong)_imgBytes };
-        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = (ulong)_imgBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = srcBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
-        bg[5] = new BindGroupEntry { Binding = 5, Buffer = mask, Size = (ulong)_imgBytes };
+        bg[5] = new BindGroupEntry { Binding = 5, Buffer = maskBuf, Size = srcBytes };
         var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 6, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
@@ -904,7 +927,15 @@ public sealed unsafe class GpuCompositor : IDisposable
 
     private Buffer* GetLayerBuffer(PixelLayer px)
     {
+        int layerBytes = px.Width * px.Height * 4;
         bool cached = _layerBuffers.TryGetValue(px, out var existing);
+        // a resized layer buffer (e.g. grown bounds) must be reallocated, not partially written
+        if (cached && _layerBufferBytes.TryGetValue(px, out var cb) && cb != layerBytes)
+        {
+            _gpu.Api.BufferRelease((Buffer*)existing);
+            _layerBuffers.Remove(px); _layerBufferBytes.Remove(px);
+            cached = false; existing = 0;
+        }
         if (cached && !px.Dirty) return (Buffer*)existing;
 
         Buffer* buf;
@@ -931,14 +962,15 @@ public sealed unsafe class GpuCompositor : IDisposable
             else
             {
                 // bulk/external change with no tile info → upload whole
-                fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+                fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)layerBytes);
             }
         }
         else
         {
-            buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+            buf = NewBuffer(layerBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
             _layerBuffers[px] = (nint)buf;
-            fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+            _layerBufferBytes[px] = layerBytes;
+            fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)layerBytes);
         }
 
         px.DirtyTiles.Clear();
@@ -982,20 +1014,31 @@ public sealed unsafe class GpuCompositor : IDisposable
         return buf;
     }
 
+    // Returns the layer's mask GPU buffer (sized to the mask's own bytes, which match the layer
+    // buffer for a pixel layer), or null when the layer has no mask. The mask is sampled with the
+    // same layer coords as the source, so its size must equal the source's.
     private Buffer* GetMaskBuffer(Layer layer)
     {
-        if (!layer.HasMask) return _whiteMask;
+        if (!layer.HasMask) return null;
+        int maskBytes = layer.Mask!.Length;
 
-        _maskBuffers.TryGetValue(layer, out var existing);
+        bool cached = _maskBuffers.TryGetValue(layer, out var existing);
+        if (cached && _maskBufferBytes.TryGetValue(layer, out var cb) && cb != maskBytes)
+        {
+            _gpu.Api.BufferRelease((Buffer*)existing);
+            _maskBuffers.Remove(layer); _maskBufferBytes.Remove(layer);
+            cached = false; existing = 0;
+        }
         Buffer* buf;
-        if (existing != 0 && !layer.MaskDirty) return (Buffer*)existing;
-        if (existing != 0) buf = (Buffer*)existing;
+        if (cached && !layer.MaskDirty) return (Buffer*)existing;
+        if (cached) buf = (Buffer*)existing;
         else
         {
-            buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst);
+            buf = NewBuffer(maskBytes, BufferUsage.Storage | BufferUsage.CopyDst);
             _maskBuffers[layer] = (nint)buf;
+            _maskBufferBytes[layer] = maskBytes;
         }
-        fixed (byte* p = layer.Mask!) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        fixed (byte* p = layer.Mask!) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)maskBytes);
         layer.MaskDirty = false;
         return buf;
     }
@@ -1034,8 +1077,10 @@ public sealed unsafe class GpuCompositor : IDisposable
         var api = _gpu.Api;
         foreach (var p in _layerBuffers.Values) api.BufferRelease((Buffer*)p);
         _layerBuffers.Clear();
+        _layerBufferBytes.Clear();
         foreach (var p in _maskBuffers.Values) api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
+        _maskBufferBytes.Clear();
         ReleaseSizeResources();
         if (_dimsBuf is not null) api.BufferRelease(_dimsBuf);
         if (_paramsBuf is not null) api.BufferRelease(_paramsBuf);

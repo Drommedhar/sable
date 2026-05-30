@@ -5,12 +5,14 @@
 // Pixels packed as array<u32> (byte0=R..byte3=A, straight alpha). Blend math follows
 // the W3C compositing model: blended color B(cs,cd), then src-over with mixed alpha.
 
-struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
+// width/height = output (document) grid; srcW/srcH = the source layer buffer's own size
+// (may differ from the document for layers with independent bounds).
+struct Dims { width: u32, height: u32, srcW: u32, srcH: u32 };
 // clip: 1 = clip to backdrop alpha; m*/b* = inverse (doc→layer) affine for the layer transform
 struct Params {
     mode: u32, opacity: f32, clip: f32,
     m00: f32, m01: f32, m10: f32, m11: f32, b0: f32, b1: f32,
-    fillOpacity: f32, _p1: f32, _p2: f32,
+    fillOpacity: f32, hasMask: f32, _p2: f32,
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -138,12 +140,12 @@ fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
 }
 
 fn srcTexel(ix: i32, iy: i32) -> vec4<f32> {
-    if (ix < 0 || iy < 0 || ix >= i32(dims.width) || iy >= i32(dims.height)) { return vec4<f32>(0.0); }
-    return unpack(src[u32(iy) * dims.width + u32(ix)]);
+    if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return vec4<f32>(0.0); }
+    return unpack(src[u32(iy) * dims.srcW + u32(ix)]);
 }
 fn maskTexel(ix: i32, iy: i32) -> f32 {
-    if (ix < 0 || iy < 0 || ix >= i32(dims.width) || iy >= i32(dims.height)) { return 0.0; }
-    return unpack(mask[u32(iy) * dims.width + u32(ix)]).x;
+    if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return 0.0; }
+    return unpack(mask[u32(iy) * dims.srcW + u32(ix)]).x;
 }
 
 @compute @workgroup_size(16, 16)
@@ -161,8 +163,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fx = lx - f32(x0); let fy = ly - f32(y0);
     let s = mix(mix(srcTexel(x0, y0), srcTexel(x0 + 1, y0), fx),
                 mix(srcTexel(x0, y0 + 1), srcTexel(x0 + 1, y0 + 1), fx), fy);
-    let m = mix(mix(maskTexel(x0, y0), maskTexel(x0 + 1, y0), fx),
+    var m = 1.0;
+    if (params.hasMask > 0.5) {
+        m = mix(mix(maskTexel(x0, y0), maskTexel(x0 + 1, y0), fx),
                 mix(maskTexel(x0, y0 + 1), maskTexel(x0 + 1, y0 + 1), fx), fy);
+    }
     let da = d.w;
     let clipMul = mix(1.0, da, params.clip); // clip to backdrop alpha when clip=1
     let sa = s.w * params.opacity * params.fillOpacity * m * clipMul;   // effective source alpha

@@ -24,6 +24,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private float _hudStartRadius, _hudStartHardness;
     private double _lastDocX, _lastDocY;
     private StrokeSession? _session;
+    private PixelLayer? _strokeLayer;          // active pixel-paint layer (null for mask paint)
+    private RasterState _strokeBefore;         // pre-stroke raster snapshot (whole-raster undo + auto-crop)
     private bool _panningMouse;
     private int _lastPanX, _lastPanY;
     private bool _moving;
@@ -350,26 +352,40 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             _ => BrushMode.Paint
         };
         Brush.BeginStroke();
-        // honor an active selection (paint only inside it): rect bbox + optional mask
+        bool maskMode = PaintMask;
+        // pixel paint: capture the pre-stroke raster state (whole-raster undo, since the gesture
+        // grows the buffer to paint then auto-crops it to content). Mask paint keeps tile undo.
+        if (!maskMode)
+        {
+            if (layer.LockPixels) return null;   // locked pixels: no painting
+            _strokeLayer = layer;
+            _strokeBefore = RasterState.Capture(layer);
+        }
+        else _strokeLayer = null;
+        // grow a sub-document / offset layer so it covers the whole canvas (keeps off-canvas pixels);
+        // after this the buffer's (0,0) sits at (OffsetX,OffsetY) in document space.
+        if (_doc is { } d) layer.ExpandToCover(d.Width, d.Height);
+        Brush.OriginX = layer.OffsetX;
+        Brush.OriginY = layer.OffsetY;
+        // honor an active selection (paint only inside it): rect bbox + optional mask (doc-space)
         Brush.Clip = _doc?.Selection is { } s ? (s.X, s.Y, s.W, s.H) : null;
         Brush.ClipMask = _doc?.SelectionMask;
         Brush.ClipMaskW = _doc?.Width ?? 0;
         // brush color is user-chosen (black on a mask = hide, white = reveal)
-        if (PaintMask)
+        if (maskMode)
         {
             Brush.Erase = false;
             Brush.LockAlpha = false;
             if (!layer.HasMask) layer.AddWhiteMask(layer.Width, layer.Height);
             // mask upload is full-buffer for now (partial mask upload later)
             return new StrokeSession(layer.Mask!, layer.Width, layer.Height, Brush,
-                _ => { layer.MaskDirty = true; layer.Dirty = true; });
+                _ => { layer.MaskDirty = true; layer.Dirty = true; }, layer.OffsetX, layer.OffsetY);
         }
-        if (layer.LockPixels) return null;   // locked pixels: no painting
         Brush.Erase = ActiveTool == ToolKind.Eraser;
         Brush.Pencil = ActiveTool == ToolKind.Pencil;   // hard aliased edge
         Brush.LockAlpha = layer.LockAlpha;   // preserve existing alpha (transparency lock)
         return new StrokeSession(layer.Pixels, layer.Width, layer.Height, Brush,
-            tiles => layer.MarkTilesDirty(tiles));
+            tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY);
     }
 
     private void OnLeftDown(double sx, double sy, CanvasMods mods)
@@ -564,10 +580,23 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             _painting = false;
             _input?.ReleaseCapture();
-            var cmd = _session?.Finalize();
-            _session = null;
             Brush.Clone = false;   // clone is per-stroke; clear after
-            if (cmd is not null) CommandProduced?.Invoke(cmd);
+            if (_strokeLayer is { } pl)
+            {
+                // pixel paint: auto-crop the layer to its painted content, then record the whole
+                // gesture (grow + paint + trim) as one undoable raster-state swap.
+                _session = null;
+                pl.TrimToContent();
+                var after = RasterState.Capture(pl);
+                CommandProduced?.Invoke(new RasterStateCommand(pl, _strokeBefore, after, () => pl.Dirty = true));
+                _strokeLayer = null;
+            }
+            else
+            {
+                var cmd = _session?.Finalize();   // mask paint keeps tile-diff undo
+                _session = null;
+                if (cmd is not null) CommandProduced?.Invoke(cmd);
+            }
         }
         else if (_moving && SelLayer is { } layer)
         {
@@ -898,16 +927,16 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private void DoFill(double dx, double dy)
     {
         if (ActiveLayer is not { } layer || layer.LockPixels) return;   // locked pixels: no fill
-        var target = layer.Pixels;
-        int w = layer.Width, h = layer.Height;
-        var before = SnapshotAllTiles(target, w, h);
+        var beforeState = RasterState.Capture(layer);                   // pre-expand state (whole-raster undo)
+        if (_doc is { } d) layer.ExpandToCover(d.Width, d.Height);      // fillable across the canvas
+        int ox = layer.OffsetX, oy = layer.OffsetY;
         var clip = _doc?.Selection is { } s ? ((int, int, int, int)?)(s.X, s.Y, s.W, s.H) : null;
-        int changed = FillTool.Flood(target, w, h, (int)dx, (int)dy, Brush.R, Brush.G, Brush.B, 255, 32, clip,
-            _doc?.SelectionMask, _doc?.Width ?? 0);
-        if (changed == 0) return;
-        var after = SnapshotAllTiles(target, w, h);
-        layer.MarkTilesDirty(after.Keys);
-        CommandProduced?.Invoke(new PaintRasterCommand(target, w, h, before, after, t => layer.MarkTilesDirty(t)));
+        int changed = FillTool.Flood(layer.Pixels, layer.Width, layer.Height, (int)dx - ox, (int)dy - oy,
+            Brush.R, Brush.G, Brush.B, 255, 32, clip, _doc?.SelectionMask, _doc?.Width ?? 0, ox, oy);
+        layer.TrimToContent();   // auto-crop to content (also undoes the expand when nothing changed)
+        if (changed == 0) { layer.Dirty = true; return; }
+        layer.Dirty = true;
+        CommandProduced?.Invoke(new RasterStateCommand(layer, beforeState, RasterState.Capture(layer), () => layer.Dirty = true));
     }
 
     private static Dictionary<(int, int), byte[]> SnapshotAllTiles(byte[] px, int w, int h)
@@ -926,14 +955,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void SampleColor(double dx, double dy)
     {
-        byte[]? src; int sw, sh;
+        byte[]? src; int sw, sh, ox = 0, oy = 0;
         if (EyedropperAllLayers && ReadComposite() is { } comp && _doc is not null)
         { src = comp; sw = _doc.Width; sh = _doc.Height; }
         else if (ActiveLayer is { } layer)
-        { src = layer.Pixels; sw = layer.Width; sh = layer.Height; }
+        { src = layer.Pixels; sw = layer.Width; sh = layer.Height; ox = layer.OffsetX; oy = layer.OffsetY; }
         else return;
 
-        int cx = (int)Math.Clamp(dx, 0, sw - 1), cy = (int)Math.Clamp(dy, 0, sh - 1);
+        // sample in buffer space (doc cursor minus the layer's origin)
+        int cx = (int)Math.Clamp(dx - ox, 0, sw - 1), cy = (int)Math.Clamp(dy - oy, 0, sh - 1);
         int rad = Math.Clamp(EyedropperRadius, 0, 4);
         long rr = 0, gg = 0, bb = 0; int n = 0;
         for (int yy = cy - rad; yy <= cy + rad; yy++)

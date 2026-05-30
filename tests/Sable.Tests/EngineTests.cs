@@ -3,6 +3,7 @@ using Sable.Core.Undo;
 using Sable.Engine;
 using Sable.Engine.Commands;
 using Sable.Engine.Layers;
+using Sable.Tools;
 using Xunit;
 
 namespace Sable.Tests;
@@ -573,5 +574,88 @@ public class RasterTilesTests
         Assert.Equal(2, RasterTiles.TilesX(w));
         Assert.Equal(256, RasterTiles.TileWidth(w, 0));
         Assert.Equal(44, RasterTiles.TileWidth(w, 1));
+    }
+}
+
+public class PixelLayerBoundsTests
+{
+    [Fact]
+    public void ExpandToCover_GrowsAndPreservesContentAndOffset()
+    {
+        // a 20x10 layer placed partly off-canvas (left & below the top edge) in a 100x80 doc
+        var px = new PixelLayer(20, 10, "sub") { OffsetX = -5, OffsetY = 70 };
+        px.Pixels[0] = 11; px.Pixels[1] = 22; px.Pixels[2] = 33; px.Pixels[3] = 255;   // top-left texel
+
+        bool changed = px.ExpandToCover(100, 80);
+
+        Assert.True(changed);
+        // union of [-5,15)x[70,80) and [0,100)x[0,80) → [-5,100)x[0,80) = 105 x 80
+        Assert.Equal(105, px.Width);
+        Assert.Equal(80, px.Height);
+        Assert.Equal(-5, px.OffsetX);
+        Assert.Equal(0, px.OffsetY);
+        // the old top-left texel moved to new-buffer (dx=0, dy=70)
+        int i = (70 * px.Width + 0) * 4;
+        Assert.Equal(11, px.Pixels[i]);
+        Assert.Equal(22, px.Pixels[i + 1]);
+        Assert.Equal(33, px.Pixels[i + 2]);
+        Assert.Equal(255, px.Pixels[i + 3]);
+    }
+
+    [Fact]
+    public void ExpandToCover_NoChange_WhenAlreadyCoversDoc()
+    {
+        var px = new PixelLayer(100, 80, "bg");   // doc-sized at origin
+        Assert.False(px.ExpandToCover(100, 80));
+        Assert.Equal(100, px.Width);
+        Assert.Equal(0, px.OffsetX);
+    }
+
+    [Fact]
+    public void TrimToContent_CropsToBoundingBox_AndShiftsOffset()
+    {
+        // doc-sized 100x80 layer, content is a single texel at (40,30)
+        var px = new PixelLayer(100, 80, "paint");
+        int i = (30 * 100 + 40) * 4;
+        px.Pixels[i] = 9; px.Pixels[i + 1] = 8; px.Pixels[i + 2] = 7; px.Pixels[i + 3] = 255;
+
+        Assert.True(px.TrimToContent());
+        Assert.Equal(1, px.Width);
+        Assert.Equal(1, px.Height);
+        Assert.Equal(40, px.OffsetX);    // content's doc position preserved
+        Assert.Equal(30, px.OffsetY);
+        Assert.Equal(9, px.Pixels[0]);
+        Assert.Equal(255, px.Pixels[3]);
+    }
+
+    [Fact]
+    public void TrimToContent_FullyTransparent_CollapsesTo1x1()
+    {
+        var px = new PixelLayer(50, 50, "empty");
+        Assert.True(px.TrimToContent());
+        Assert.Equal(1, px.Width);
+        Assert.Equal(1, px.Height);
+    }
+
+    [Fact]
+    public void RasterStateCommand_RoundTripsBufferSizeAndOffset()
+    {
+        // simulate a paint gesture that grows + crops: before = empty 1x1, after = a painted 8x8 at (20,20)
+        var layer = new PixelLayer(1, 1, "L");
+        var before = RasterState.Capture(layer);
+
+        layer.SetBuffer(8, 8, new byte[8 * 8 * 4]);
+        layer.OffsetX = 20; layer.OffsetY = 20;
+        for (int k = 3; k < layer.Pixels.Length; k += 4) layer.Pixels[k] = 255;
+        var after = RasterState.Capture(layer);
+
+        var cmd = new RasterStateCommand(layer, before, after, () => { });
+        cmd.Undo();
+        Assert.Equal(1, layer.Width);
+        Assert.Equal(0, layer.OffsetX);
+        cmd.Do();
+        Assert.Equal(8, layer.Width);
+        Assert.Equal(20, layer.OffsetX);
+        Assert.Equal(255, layer.Pixels[3]);
     }
 }

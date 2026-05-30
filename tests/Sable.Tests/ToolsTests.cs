@@ -67,6 +67,26 @@ public class BrushToolTests
         Assert.Equal(50, layer.Pixels[i + 2]);
         Assert.True(layer.Pixels[i + 3] > 0);
     }
+
+    [Fact]
+    public void Origin_AppliesDocSpaceClip_ToOffsetBuffer()
+    {
+        // a 32x32 buffer whose (0,0) is at doc (100,100); a doc-space selection clip covers only
+        // doc x>=116 (buffer x>=16). Painting the whole buffer must only mark the right half.
+        var layer = new PixelLayer(32, 32);
+        var brush = new BrushTool
+        {
+            Radius = 64, Hardness = 1f, Flow = 1f,
+            OriginX = 100, OriginY = 100,
+            Clip = (116, 100, 100, 32),   // doc rect → buffer x in [16,32)
+        };
+        brush.Stamp(layer.Pixels, 32, 32, 16, 16);
+
+        // left half (buffer x<16 → doc x<116) outside the clip → untouched
+        Assert.Equal(0, layer.Pixels[(16 * 32 + 4) * 4 + 3]);
+        // right half (buffer x>=16) inside the clip → painted
+        Assert.True(layer.Pixels[(16 * 32 + 24) * 4 + 3] > 0);
+    }
 }
 
 public class FillToolTests

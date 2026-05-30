@@ -37,6 +37,14 @@ public sealed class BrushTool
     /// <summary>Pencil: hard aliased edge (no soft falloff / antialiasing).</summary>
     public bool Pencil { get; set; }
 
+    /// <summary>
+    /// Document position of the target buffer's (0,0). When the layer buffer has independent
+    /// bounds (offset / sub-document), this maps buffer pixel (x,y) → doc pixel (x+OriginX, y+OriginY)
+    /// so the doc-space <see cref="Clip"/> rect and <see cref="ClipMask"/> still line up. 0 = aligned.
+    /// </summary>
+    public int OriginX { get; set; }
+    public int OriginY { get; set; }
+
     /// <summary>Optional clip rect (doc px) — stamps only inside it (selection). Null = unclipped.</summary>
     public (int X, int Y, int W, int H)? Clip { get; set; }
 
@@ -77,11 +85,13 @@ public sealed class BrushTool
         for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
         {
-            if (Clip is { } cl && (x < cl.X || y < cl.Y || x >= cl.X + cl.W || y >= cl.Y + cl.H)) continue;
+            int docx = x + OriginX, docy = y + OriginY;   // doc-space coord for selection clip
+            if (Clip is { } cl && (docx < cl.X || docy < cl.Y || docx >= cl.X + cl.W || docy >= cl.Y + cl.H)) continue;
             float clipCov = 1f;
             if (ClipMask is { } cm)
             {
-                int mi = y * ClipMaskW + x;
+                if (docx < 0 || docy < 0 || docx >= ClipMaskW) continue;
+                int mi = docy * ClipMaskW + docx;
                 if (mi < 0 || mi >= cm.Length || cm[mi] == 0) continue;
                 clipCov = cm[mi] / 255f;   // soft (feathered) selection edge
             }

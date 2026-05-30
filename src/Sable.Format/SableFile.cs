@@ -42,6 +42,8 @@ public static class SableFile
         public float ScaleX { get; set; } = 1f;
         public float ScaleY { get; set; } = 1f;
         public float Rotation { get; set; }
+        public int LayerW { get; set; }   // pixel-layer buffer size (0 = legacy → document size)
+        public int LayerH { get; set; }
         public string? Pixels { get; set; }   // zip entry name, if a pixel layer
         public int AdjustmentKind { get; set; }
         public float Brightness { get; set; }
@@ -170,6 +172,7 @@ public static class SableFile
         {
             case PixelLayer px:
                 ld.Type = "pixel";
+                ld.LayerW = px.Width; ld.LayerH = px.Height;
                 ld.Pixels = $"layers/{id}.raw";
                 WriteEntry(zip, ld.Pixels, px.Pixels);
                 break;
@@ -324,7 +327,10 @@ public static class SableFile
 
     private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h)
     {
-        var px = new PixelLayer(w, h, ld.Name);
+        // LayerW/H == 0 → legacy file where every layer was document-sized
+        int lw = ld.LayerW > 0 ? ld.LayerW : w;
+        int lh = ld.LayerH > 0 ? ld.LayerH : h;
+        var px = new PixelLayer(lw, lh, ld.Name);
         if (ld.Pixels is not null && zip.GetEntry(ld.Pixels) is { } pe)
         {
             using var es = pe.Open();

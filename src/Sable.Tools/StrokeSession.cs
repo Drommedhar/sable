@@ -13,23 +13,28 @@ public sealed class StrokeSession
 {
     private readonly byte[] _target;
     private readonly int _w, _h;
+    private readonly int _ox, _oy;   // document position of the target buffer's (0,0)
     private readonly BrushTool _brush;
     private readonly Action<IReadOnlyCollection<(int, int)>> _markTiles;
     private readonly Dictionary<(int tx, int ty), byte[]> _before = new();
 
     public StrokeSession(byte[] target, int width, int height, BrushTool brush,
-        Action<IReadOnlyCollection<(int, int)>> markTiles)
+        Action<IReadOnlyCollection<(int, int)>> markTiles, int originX = 0, int originY = 0)
     {
         _target = target;
         _w = width;
         _h = height;
+        _ox = originX;
+        _oy = originY;
         _brush = brush;
         _markTiles = markTiles;
     }
 
-    /// <summary>Snapshot the tiles this segment will touch, then paint it.</summary>
+    /// <summary>Snapshot the tiles this segment will touch, then paint it. Coords are document px.</summary>
     public void StrokeTo(double x0, double y0, double x1, double y1)
     {
+        // to buffer-local space (the brush re-adds the origin for doc-space selection clipping)
+        x0 -= _ox; y0 -= _oy; x1 -= _ox; y1 -= _oy;
         double r = _brush.Radius + 1;
         double minX = Math.Min(x0, x1) - r, maxX = Math.Max(x0, x1) + r;
         double minY = Math.Min(y0, y1) - r, maxY = Math.Max(y0, y1) + r;

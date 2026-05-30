@@ -49,6 +49,34 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesSubDocLayerBoundsAndOffset()
+    {
+        // a layer smaller than the document, positioned partly off-canvas (negative offset)
+        var doc = new Document(100, 80);
+        doc.Layers.Add(new PixelLayer(100, 80, "bg"));
+        var sub = new PixelLayer(20, 10, "pasted") { OffsetX = -5, OffsetY = 70 };
+        for (int i = 0; i < sub.Pixels.Length; i++) sub.Pixels[i] = (byte)(i * 7 % 251);
+        doc.Layers.Add(sub);
+
+        var path = Path.Combine(Path.GetTempPath(), $"sable_test_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var l = (PixelLayer)loaded.Layers[1];
+            Assert.Equal(20, l.Width);
+            Assert.Equal(10, l.Height);
+            Assert.Equal(-5, l.OffsetX);
+            Assert.Equal(70, l.OffsetY);
+            Assert.Equal(sub.Pixels, l.Pixels);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesLevelsAndHslAdjustments()
     {
         var doc = new Document(16, 16);

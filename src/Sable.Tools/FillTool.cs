@@ -7,16 +7,18 @@ namespace Sable.Tools;
 /// </summary>
 public static class FillTool
 {
+    // originX/originY = document position of the buffer's (0,0); clip + mask are document-space,
+    // so a buffer pixel (x,y) maps to doc (x+originX, y+originY). 0 = buffer aligned to the document.
     public static int Flood(byte[] px, int w, int h, int sx, int sy,
         byte r, byte g, byte b, byte a, int tolerance = 32, (int X, int Y, int W, int H)? clip = null,
-        byte[]? mask = null, int maskW = 0)
+        byte[]? mask = null, int maskW = 0, int originX = 0, int originY = 0)
     {
-        // restrict to clip (selection) bounds if given
+        // restrict to clip (selection) bounds if given (converted from doc space to buffer space)
         int minX = 0, minY = 0, maxX = w - 1, maxY = h - 1;
         if (clip is { } c)
         {
-            minX = Math.Max(0, c.X); minY = Math.Max(0, c.Y);
-            maxX = Math.Min(w - 1, c.X + c.W - 1); maxY = Math.Min(h - 1, c.Y + c.H - 1);
+            minX = Math.Max(0, c.X - originX); minY = Math.Max(0, c.Y - originY);
+            maxX = Math.Min(w - 1, c.X + c.W - 1 - originX); maxY = Math.Min(h - 1, c.Y + c.H - 1 - originY);
         }
         if (sx < minX || sy < minY || sx > maxX || sy > maxY) return 0;
         if (maskW == 0) maskW = w;
@@ -48,7 +50,8 @@ public static class FillTool
             int i = p * 4;
             if (!Match(i)) continue;
 
-            bool inMask = mask is null || (mask[y * maskW + x] != 0);
+            int dmx = x + originX, dmy = y + originY;   // doc-space for the selection mask
+            bool inMask = mask is null || (dmx >= 0 && dmy >= 0 && dmx < maskW && mask[dmy * maskW + dmx] != 0);
             if (inMask)
             {
                 px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a;
