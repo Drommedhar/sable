@@ -79,9 +79,23 @@ public partial class MainWindow : Window
         };
         Closing += OnWindowClosing;
 
-        // live status bar (zoom + cursor position)
-        Canvas.ViewChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdateZoomLabel);
-        Canvas.CursorDocMoved += (x, y) => Avalonia.Threading.Dispatcher.UIThread.Post(() => UpdateCursorLabel(x, y));
+        // live status bar (zoom + cursor position) + rulers
+        Canvas.ViewChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => { UpdateZoomLabel(); UpdateRulers(); });
+        Canvas.CursorDocMoved += (x, y) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            UpdateCursorLabel(x, y);
+            RulerH.SetCursor(x); RulerV.SetCursor(y);
+        });
+        // canvas can change scale on window resize without a ViewChanged → refresh rulers on layout
+        Canvas.LayoutUpdated += (_, _) => UpdateRulers();
+    }
+
+    private void UpdateRulers()
+    {
+        if (RulerH is null || RulerV is null) return;
+        var (ox, oy, scale) = Canvas.ViewportDip;
+        RulerH.SetView(ox, scale);
+        RulerV.SetView(oy, scale);
     }
 
     private readonly Sable.Core.Settings.SableSettings _settings = Sable.Core.Settings.SettingsService.Load();
@@ -212,6 +226,14 @@ public partial class MainWindow : Window
     private void OnZoomActual(object? sender, RoutedEventArgs e) { Canvas.ZoomActualPixels(); UpdateZoomLabel(); }
     private void OnZoomInMenu(object? sender, RoutedEventArgs e) { Canvas.ZoomBy(1.25); UpdateZoomLabel(); }
     private void OnZoomOutMenu(object? sender, RoutedEventArgs e) { Canvas.ZoomBy(0.8); UpdateZoomLabel(); }
+
+    private void OnToggleRulers(object? sender, RoutedEventArgs e)
+    {
+        bool on = RulersMenuItem.IsChecked;
+        CanvasGrid.RowDefinitions[0].Height = new GridLength(on ? 18 : 0);
+        CanvasGrid.ColumnDefinitions[0].Width = new GridLength(on ? 18 : 0);
+        RulerH.IsVisible = on; RulerV.IsVisible = on;
+    }
 
     private void OnToggleGrid(object? sender, RoutedEventArgs e) => Canvas.ShowGrid = GridMenuItem.IsChecked;
     private void OnTogglePixelGrid(object? sender, RoutedEventArgs e) => Canvas.ShowPixelGrid = PixelGridMenuItem.IsChecked;

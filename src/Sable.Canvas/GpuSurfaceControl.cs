@@ -80,7 +80,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         get
         {
             var v = ComputeViewport();
-            double s = RenderScaling <= 0 ? 1.0 : RenderScaling;
+            double s = Avalonia.Controls.TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+            if (s <= 0) s = 1.0;
             return (v.Ox / s, v.Oy / s, v.Scale / s);
         }
     }

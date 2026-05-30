@@ -92,6 +92,7 @@
                 <MenuItem Header="Fit to Window" Click="OnZoomFit" InputGesture="Ctrl+D0" />
                 <MenuItem Header="Actual Pixels (100%)" Click="OnZoomActual" InputGesture="Ctrl+D1" />
                 <Separator />
+                <MenuItem x:Name="RulersMenuItem" Header="Show Rulers" ToggleType="CheckBox" IsChecked="True" Click="OnToggleRulers" />
                 <MenuItem x:Name="GridMenuItem" Header="Show Grid" ToggleType="CheckBox" Click="OnToggleGrid" />
                 <MenuItem x:Name="PixelGridMenuItem" Header="Show Pixel Grid" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
             </MenuItem>
@@ -248,10 +249,15 @@
                     </StackPanel>
                 </Border>
 
-                <!-- canvas viewport: live embedded wgpu swapchain + input overlay -->
-                <Border Grid.Row="1" Margin="24" Background="{DynamicResource ChromeCanvas}"
-                        BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1">
-                    <Panel>
+                <!-- canvas viewport: rulers (top/left) flush with the embedded wgpu surface -->
+                <Grid x:Name="CanvasGrid" Grid.Row="1" Background="{DynamicResource ChromeCanvas}"
+                      RowDefinitions="18,*" ColumnDefinitions="18,*">
+                    <!-- corner box -->
+                    <Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource ChromePanel2}"
+                            BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,1" />
+                    <local:Ruler x:Name="RulerH" Grid.Row="0" Grid.Column="1" Orientation="Horizontal" />
+                    <local:Ruler x:Name="RulerV" Grid.Row="1" Grid.Column="0" Orientation="Vertical" />
+                    <Panel Grid.Row="1" Grid.Column="1">
                         <canvas:GpuSurfaceControl x:Name="Canvas" />
                         <Border x:Name="InputLayer" Background="Transparent"
                                 PointerWheelChanged="OnCanvasWheel"
@@ -267,7 +273,7 @@
                                        Foreground="#FF5A5A5A" FontSize="12" HorizontalAlignment="Center" />
                         </StackPanel>
                     </Panel>
-                </Border>
+                </Grid>
 
                 <!-- status strip: live zoom UI + document info + cursor position -->
                 <Border Grid.Row="2" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0">
