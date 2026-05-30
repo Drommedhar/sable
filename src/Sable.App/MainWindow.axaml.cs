@@ -72,7 +72,11 @@ public partial class MainWindow : Window
 
         // settings: restore window placement + theme + recent menu + last session (PLAN §17.1)
         ApplySettings();
-        Opened += (_, _) => RestoreSession();
+        Opened += (_, _) =>
+        {
+            RestoreSession();
+            if (_settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(manual: false);   // silent launch check
+        };
         Closing += OnWindowClosing;
     }
 
@@ -184,14 +188,41 @@ public partial class MainWindow : Window
         catch { /* ignore */ }
     }
 
+    private const string GpuName = "Default GPU (wgpu)";
+
     private async void OnPreferences(object? sender, RoutedEventArgs e)
     {
-        var dlg = new SettingsWindow(_settings, "Default GPU (wgpu)");
+        var dlg = new SettingsWindow(_settings, GpuName);
         if (await dlg.ShowDialog<bool>(this))
         {
             ApplyTheme(_settings.Theme);
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
             Sable.Core.Settings.SettingsService.Save(_settings);
+        }
+    }
+
+    private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
+
+    private void OnCheckUpdatesMenu(object? sender, RoutedEventArgs e) => _ = CheckForUpdatesAsync(manual: true);
+
+    // Launch + manual update check (PLAN §2.4). On an available update, shows UpdateWindow
+    // (download + install + restart). Non-blocking; failures are silent on the launch check.
+    private async System.Threading.Tasks.Task CheckForUpdatesAsync(bool manual)
+    {
+        var service = new Sable.Core.Services.UpdateService();
+        try
+        {
+            var info = await service.CheckForUpdateAsync();
+            if (info is null)
+            {
+                if (manual) await ConfirmWindow.Ask(this, "Up to date", $"Sable {Sable.Core.VersionInfo.Version} is the latest version.");
+                return;
+            }
+            await new UpdateWindow(info, service).ShowDialog(this);
+        }
+        catch
+        {
+            if (manual) await ConfirmWindow.Ask(this, "Update check failed", "Couldn't reach the update server.");
         }
     }
 

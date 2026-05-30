@@ -697,7 +697,7 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 1. ✅ **Multi-document tabs** — tab strip, per-tab Document+VM, switch/close(unsaved prompt), no-demo start/welcome, New dialog, New from clipboard, drag-drop files → new tab (§15 backlog).
 2. ✅ **Export dialog** — PNG/JPEG/WebP + quality + resize + preview/est-size (`ExportDialog`, `ImageCodec.EncodeScaled`, `DocumentIO.Export`). ⬜ TIFF/GIF (Skia can't encode TIFF) (§16.12).
 3. ✅ **Settings store + Preferences dialog + window/session restore + recent files** (`SableSettings`/`SettingsService`, `PreferencesWindow`, Open-Recent menu). 🔶 light/gray **chrome** theming still TODO (setting wired to Fluent variant; inline chrome colours need tokenising) (§17.1).
-4. **About dialog** + **UpdateService** (GitHub releases, Novalist-style) + **CI/CD workflows** (ci + release, Novalist-port minus SDK) (§15 backlog).
+4. ✅ **About dialog** (Help▸About: version/licence/runtime + manual check) + **UpdateService** (`Sable.Core.Services`, GitHub-releases check + per-OS asset + download + LaunchInstaller; `UpdateWindow` does download-progress→install→shutdown; launch check honours `AutoCheckUpdates`; **points at `Drommedhar/novalist-official` for testing until `sable` is public** — TODO in `UpdateService`) + **CI/CD** (`.github/workflows/ci.yml` build+test; `release.yml` tag→ Win installer (Inno) + macOS DMG + Linux AppImage + GitHub release; `.github/installers/{windows/sable.iss,macos/Info.plist.template}`). `VersionInfo` from assembly; `VersionPrefix` in Directory.Build.props (0.1.0). (§15 backlog).
 5. **Rulers / guides / grid / snapping + smart guides + zoom UI + status-bar live info** (§16.1, §17.2).
 6. **File associations** + autosave/crash-recovery (§17.1).
 

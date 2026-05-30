@@ -91,7 +91,11 @@
                 <MenuItem Header="Adjustments" Click="OnToggleAdjustments" />
                 <MenuItem Header="Layer Effects" Click="OnToggleEffects" />
             </MenuItem>
-            <MenuItem Header="_Help" />
+            <MenuItem Header="_Help">
+                <MenuItem Header="Check for Updates..." Click="OnCheckUpdatesMenu" />
+                <Separator />
+                <MenuItem Header="About Sable" Click="OnAbout" />
+            </MenuItem>
         </Menu>
         </DockPanel>
 

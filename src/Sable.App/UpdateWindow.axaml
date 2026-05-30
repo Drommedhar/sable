@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.UpdateWindow"
+        Width="460" SizeToContent="Height" MaxHeight="560"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="Update Available">
+    <Border Padding="22,18">
+        <StackPanel Spacing="8">
+            <TextBlock Text="Update available" FontSize="18" Foreground="{DynamicResource ChromeText}" />
+            <TextBlock x:Name="VersionText" FontSize="12" Foreground="{DynamicResource ChromeTextDim}" />
+
+            <ScrollViewer x:Name="NotesScroll" MaxHeight="240" IsVisible="False"
+                          Background="{DynamicResource ChromeField}" Padding="10,8" Margin="0,4">
+                <TextBlock x:Name="NotesText" FontSize="11" Foreground="{DynamicResource ChromeTextDim}" TextWrapping="Wrap" />
+            </ScrollViewer>
+
+            <StackPanel x:Name="ProgressPanel" IsVisible="False" Spacing="4" Margin="0,4">
+                <ProgressBar x:Name="DownloadProgress" Minimum="0" Maximum="100" Height="6" />
+                <TextBlock x:Name="ProgressText" FontSize="11" Foreground="{DynamicResource ChromeTextDim}" />
+            </StackPanel>
+
+            <TextBlock x:Name="ErrorText" IsVisible="False" FontSize="11" Foreground="#FFE06C6C" TextWrapping="Wrap" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                <Button x:Name="LaterButton" Content="Later" Classes="opt" Padding="14,0" Click="OnLater" />
+                <Button x:Name="DownloadButton" Content="Download &amp; Install" Classes="opt" Padding="14,0" Click="OnDownload" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

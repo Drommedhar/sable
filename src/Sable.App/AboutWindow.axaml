@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.AboutWindow"
+        Width="420" SizeToContent="Height"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="About Sable">
+    <Border Padding="24,20">
+        <StackPanel Spacing="6" HorizontalAlignment="Center">
+            <Image Source="avares://Sable.App/Assets/logo_only.png" Height="44" HorizontalAlignment="Center" Margin="0,0,0,4" />
+            <TextBlock Text="Sable" FontSize="22" Foreground="{DynamicResource ChromeText}" HorizontalAlignment="Center" />
+            <TextBlock x:Name="VersionLabel" FontSize="12" Foreground="{DynamicResource ChromeTextDim}" HorizontalAlignment="Center" />
+            <TextBlock Text="Cross-platform GPU-first raster image editor."
+                       FontSize="12" Foreground="{DynamicResource ChromeTextDim}" HorizontalAlignment="Center"
+                       TextAlignment="Center" TextWrapping="Wrap" Margin="0,2,0,8" />
+
+            <Border Background="{DynamicResource ChromeField}" CornerRadius="4" Padding="12,8" Margin="0,2">
+                <StackPanel Spacing="3">
+                    <TextBlock x:Name="RuntimeLabel" FontSize="11" Foreground="{DynamicResource ChromeTextDim}" />
+                    <TextBlock x:Name="GpuLabel" FontSize="11" Foreground="{DynamicResource ChromeTextDim}" />
+                    <TextBlock Text="Licence: MIT  ·  Third-party notices in THIRD_PARTY_NOTICES.md"
+                               FontSize="11" Foreground="{DynamicResource ChromeTextFaint}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,10,0,0">
+                <Button x:Name="UpdateBtn" Content="Check for Updates" Classes="opt" Padding="14,0" Click="OnCheckUpdates" />
+                <Button Content="Close" Classes="opt" Padding="14,0" Click="OnClose" />
+            </StackPanel>
+            <TextBlock x:Name="UpdateStatus" FontSize="11" Foreground="{DynamicResource ChromeTextDim}"
+                       HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0" />
+        </StackPanel>
+    </Border>
+</Window>
