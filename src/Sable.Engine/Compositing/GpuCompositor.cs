@@ -1,3 +1,4 @@
+using Sable.Core;
 using Sable.Engine.Layers;
 using Sable.Gpu;
 using Silk.NET.Core.Native;
@@ -45,6 +46,18 @@ public sealed unsafe class GpuCompositor : IDisposable
     private Buffer* _blurParamsBuf;
     private Buffer* _filterTemp;
     private Buffer* _previewBuf;                                // active layer copy + preview dab
+    private ComputePipeline* _fxPipeline;
+    private BindGroupLayout* _fxBgl;
+    private Buffer* _fxParamsBuf;
+    private ComputePipeline* _dirPipeline;      // motion/zoom blur (reuses _blurBgl)
+    private ComputePipeline* _convPipeline;     // sharpen (reuses _blurBgl)
+    private ComputePipeline* _noisePipeline;    // add-noise/denoise (reuses _blurBgl)
+    private ComputePipeline* _combinePipeline;  // unsharp/high-pass/clarity (2 inputs)
+    private BindGroupLayout* _combineBgl;
+    private Buffer* _filterParamsBuf;           // 32B shared filter params
+    private Buffer* _fxLdoc;     // layer rendered in doc space (effect source)
+    private Buffer* _fxTint;     // effect sprite (tint / stroke / blur ping)
+    private Buffer* _fxBlur;     // blur pong
     private readonly List<(nint a, nint b)> _scratch = new();   // ping-pong pair per group depth
     private byte[] _zero = Array.Empty<byte>();
     private Buffer* _whiteMask;
@@ -93,16 +106,60 @@ public sealed unsafe class GpuCompositor : IDisposable
 
         _dimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
         _paramsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _adjParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _adjParamsBuf = NewBuffer(64, BufferUsage.Uniform | BufferUsage.CopyDst);
         _curveLutBuf = NewBuffer(4 * 256 * 4, BufferUsage.Storage | BufferUsage.CopyDst); // 4ch×256×f32
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         _stampParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _fxParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _filterParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         BuildPresentPipeline();
         BuildAdjustPipeline();
         BuildBlurPipeline();
         BuildStampPipeline();
+        BuildFxPipeline();
+        BuildFilterPipelines();
+    }
+
+    // motion/zoom/sharpen/noise reuse the 4-binding blur layout; combine needs 5 bindings.
+    private void BuildFilterPipelines()
+    {
+        var api = _gpu.Api;
+        _dirPipeline = MakeComputePipeline("filter_dir", _blurBgl);
+        _convPipeline = MakeComputePipeline("filter_conv", _blurBgl);
+        _noisePipeline = MakeComputePipeline("filter_noise", _blurBgl);
+
+        var entries = stackalloc BindGroupLayoutEntry[5];
+        entries[0] = Entry(0, BufferBindingType.Uniform);
+        entries[1] = Entry(1, BufferBindingType.Uniform);
+        entries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);   // src
+        entries[3] = Entry(3, BufferBindingType.ReadOnlyStorage);   // blurred
+        entries[4] = Entry(4, BufferBindingType.Storage);           // out
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 5, Entries = entries };
+        _combineBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
+        _combinePipeline = MakeComputePipeline("filter_combine", _combineBgl);
+    }
+
+    // build a compute pipeline from an embedded WGSL module + an existing bind-group layout
+    private ComputePipeline* MakeComputePipeline(string shader, BindGroupLayout* bgl)
+    {
+        var api = _gpu.Api;
+        var local = bgl;
+        var plDesc = new PipelineLayoutDescriptor { BindGroupLayoutCount = 1, BindGroupLayouts = &local };
+        var pipelineLayout = api.DeviceCreatePipelineLayout(_gpu.Device, in plDesc);
+        var module = _gpu.CreateWgslModule(shader);
+        var entry = (byte*)Silk.NET.Core.Native.SilkMarshal.StringToPtr("main");
+        var cpDesc = new ComputePipelineDescriptor
+        {
+            Layout = pipelineLayout,
+            Compute = new ProgrammableStageDescriptor { Module = module, EntryPoint = entry }
+        };
+        var pipe = api.DeviceCreateComputePipeline(_gpu.Device, in cpDesc);
+        Silk.NET.Core.Native.SilkMarshal.Free((nint)entry);
+        api.PipelineLayoutRelease(pipelineLayout);
+        api.ShaderModuleRelease(module);
+        return pipe;
     }
 
     private void BuildStampPipeline()
@@ -155,6 +212,34 @@ public sealed unsafe class GpuCompositor : IDisposable
             Compute = new ProgrammableStageDescriptor { Module = module, EntryPoint = entry }
         };
         _blurPipeline = api.DeviceCreateComputePipeline(_gpu.Device, in cpDesc);
+        Silk.NET.Core.Native.SilkMarshal.Free((nint)entry);
+        api.PipelineLayoutRelease(pipelineLayout);
+        api.ShaderModuleRelease(module);
+    }
+
+    private void BuildFxPipeline()
+    {
+        var api = _gpu.Api;
+        var entries = stackalloc BindGroupLayoutEntry[4];
+        entries[0] = Entry(0, BufferBindingType.Uniform);          // dims
+        entries[1] = Entry(1, BufferBindingType.Uniform);          // fx params
+        entries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);  // src (layer in doc space)
+        entries[3] = Entry(3, BufferBindingType.Storage);          // out (effect sprite)
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 4, Entries = entries };
+        _fxBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
+
+        var bglLocal = _fxBgl;
+        var plDesc = new PipelineLayoutDescriptor { BindGroupLayoutCount = 1, BindGroupLayouts = &bglLocal };
+        var pipelineLayout = api.DeviceCreatePipelineLayout(_gpu.Device, in plDesc);
+
+        var module = _gpu.CreateWgslModule("fx");
+        var entry = (byte*)Silk.NET.Core.Native.SilkMarshal.StringToPtr("main");
+        var cpDesc = new ComputePipelineDescriptor
+        {
+            Layout = pipelineLayout,
+            Compute = new ProgrammableStageDescriptor { Module = module, EntryPoint = entry }
+        };
+        _fxPipeline = api.DeviceCreateComputePipeline(_gpu.Device, in cpDesc);
         Silk.NET.Core.Native.SilkMarshal.Free((nint)entry);
         api.PipelineLayoutRelease(pipelineLayout);
         api.ShaderModuleRelease(module);
@@ -238,6 +323,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         _readback = NewBuffer(_imgBytes, BufferUsage.MapRead | BufferUsage.CopyDst);
         _filterTemp = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _previewBuf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _fxLdoc = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _fxTint = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _fxBlur = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _zero = new byte[_imgBytes];
 
         // shared "fully revealing" white mask for layers without a mask
@@ -347,29 +435,29 @@ public sealed unsafe class GpuCompositor : IDisposable
                     DispatchStamp(_previewBuf, srcBuf, pv);   // srcBuf = original layer = clone source
                     srcBuf = _previewBuf;
                 }
-                BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf);
             }
             else if (layer is ShapeLayer sh)
             {
-                BlendInto(ref current, ref other, GetShapeBuffer(sh), layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, GetShapeBuffer(sh), layer, maskBuf);
             }
             else if (layer is TextLayer txt)
             {
-                BlendInto(ref current, ref other, GetTextBuffer(txt), layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, GetTextBuffer(txt), layer, maskBuf);
             }
             else if (layer is GroupLayer grp)
             {
                 var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
-                BlendInto(ref current, ref other, groupResult, layer, maskBuf);
+                BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf);
             }
             else if (layer is AdjustmentLayer adj)
             {
-                var prm = stackalloc uint[8];
+                var prm = stackalloc uint[16];   // 64B: kind + opacity + p0..p11 + 2 pad
                 prm[0] = (uint)adj.Kind;
                 *(float*)(prm + 1) = adj.Opacity;
-                var p = new Span<float>((float*)(prm + 2), 6);
+                var p = new Span<float>((float*)(prm + 2), 12);
                 adj.PackParams(p);
-                api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 32);
+                api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 64);
                 if (adj.Kind == AdjustmentKind.Curves)
                 {
                     adj.BuildLut(_lutScratch);
@@ -381,31 +469,147 @@ public sealed unsafe class GpuCompositor : IDisposable
             }
             else if (layer is FilterLayer flt)
             {
-                WriteBlurParams(flt.Radius, 1f, 0f);
-                DispatchBlur(current, _filterTemp);
-                WriteBlurParams(flt.Radius, 0f, 1f);
-                DispatchBlur(_filterTemp, other);
-                var t2 = current; current = other; other = t2;
+                RenderFilter(flt, current, _fxTint);   // filtered backdrop → _fxTint
+                // blend the filtered result back over the backdrop with the layer's opacity + mask
+                BlendBufferInto(ref current, ref other, _fxTint, BlendMode.Normal, layer.Opacity, 0f, 0f, maskBuf);
             }
         }
         return current;
     }
 
+    // write the 48B blend params: mode(u32), opacity, clip, inv-affine(6), fill, pad×2
+    private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill)
+    {
+        var prm = stackalloc float[12];
+        ((uint*)prm)[0] = mode;
+        prm[1] = opacity;
+        prm[2] = clip;
+        for (int i = 0; i < 6; i++) prm[3 + i] = inv[i];
+        prm[9] = fill;
+        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 48);
+    }
+
     // blend src (a pixel layer or a group's result) onto the accumulator
     private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf)
     {
-        // layout (48B): mode(u32), opacity(f32), clip(f32), m00,m01,m10,m11,b0,b1 (f32), pad×3
-        var prm = stackalloc float[12];
-        ((uint*)prm)[0] = (uint)layer.BlendMode;
-        prm[1] = layer.Opacity;
-        prm[2] = layer.ClipToBelow ? 1f : 0f;
         var inv = AffineMath.DocToLayer(_width, _height,
             layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
-        for (int i = 0; i < 6; i++) prm[3 + i] = inv[i];
-        prm[9] = layer.FillOpacity;
-        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 48);
+        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity);
         DispatchBlend(current, src, other, maskBuf);
         var tmp = current; current = other; other = tmp;
+    }
+
+    // blend an arbitrary doc-space sprite onto the accumulator with explicit blend/opacity
+    // and a pixel offset (sample sprite at doc-offset). Used for layer-effect sprites.
+    private void BlendBufferInto(ref Buffer* current, ref Buffer* other, Buffer* src,
+        BlendMode mode, float opacity, float offX, float offY, Buffer* maskBuf)
+    {
+        Span<float> inv = stackalloc float[6] { 1, 0, 0, 1, -offX, -offY };
+        WriteBlendParams((uint)mode, opacity, 0f, inv, 1f);
+        DispatchBlend(current, src, other, maskBuf);
+        var tmp = current; current = other; other = tmp;
+    }
+
+    // render a content layer into doc space (offset/transform + mask applied) → _fxLdoc, for FX source
+    private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf)
+    {
+        var inv = AffineMath.DocToLayer(_width, _height,
+            layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
+        ClearBuffer(_fxTint);   // transparent backdrop
+        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f);
+        DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf);
+    }
+
+    private void DispatchFx(Buffer* src, Buffer* outp, uint mode, float r, float g, float b, float size, float pos,
+        float r2 = 0, float g2 = 0, float b2 = 0, float angle = 0, float offX = 0, float offY = 0)
+    {
+        var api = _gpu.Api;
+        var prm = stackalloc float[12];
+        ((uint*)prm)[0] = mode;
+        prm[1] = r; prm[2] = g; prm[3] = b; prm[4] = size; prm[5] = pos;
+        prm[6] = r2; prm[7] = g2; prm[8] = b2; prm[9] = angle; prm[10] = offX; prm[11] = offY;
+        api.QueueWriteBuffer(_gpu.Queue, _fxParamsBuf, 0, prm, 48);
+
+        var bg = stackalloc BindGroupEntry[4];
+        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _fxParamsBuf, Size = 48 };
+        bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = outp, Size = (ulong)_imgBytes };
+        var bgDesc = new BindGroupDescriptor { Layout = _fxBgl, EntryCount = 4, Entries = bg };
+        var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
+
+        var encDesc = new CommandEncoderDescriptor();
+        var encoder = api.DeviceCreateCommandEncoder(_gpu.Device, in encDesc);
+        var passDesc = new ComputePassDescriptor();
+        var pass = api.CommandEncoderBeginComputePass(encoder, in passDesc);
+        api.ComputePassEncoderSetPipeline(pass, _fxPipeline);
+        api.ComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, null);
+        api.ComputePassEncoderDispatchWorkgroups(pass, (uint)((_width + 15) / 16), (uint)((_height + 15) / 16), 1);
+        api.ComputePassEncoderEnd(pass);
+        var cmdDesc = new CommandBufferDescriptor();
+        var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);
+        api.QueueSubmit(_gpu.Queue, 1, &cmd);
+        api.ComputePassEncoderRelease(pass);
+        api.CommandEncoderRelease(encoder);
+        api.CommandBufferRelease(cmd);
+        api.BindGroupRelease(bindGroup);
+    }
+
+    // composite a content layer plus its non-destructive effects (shadow/glow behind, overlay/stroke front)
+    private void BlendContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* srcBuf, Layer layer, Buffer* maskBuf)
+    {
+        if (!layer.HasEffects)
+        {
+            BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+            return;
+        }
+
+        RasterizeLayerToDoc(srcBuf, layer, maskBuf);   // _fxLdoc = layer in doc space
+
+        // behind effects (drop shadow / outer glow), in Effects-list order
+        foreach (var fx in layer.Effects)
+            if (fx.Enabled && fx.Kind is LayerEffectKind.DropShadow or LayerEffectKind.OuterGlow)
+            {
+                DispatchFx(_fxLdoc, _fxTint, 0u, fx.R, fx.G, fx.B, 0f, 0f);   // tint = colour × layer alpha
+                WriteBlurParams(fx.Radius, 1f, 0f); DispatchBlur(_fxTint, _fxBlur);
+                WriteBlurParams(fx.Radius, 0f, 1f); DispatchBlur(_fxBlur, _fxTint);
+                float ox = fx.Kind == LayerEffectKind.DropShadow ? fx.OffsetX : 0f;
+                float oy = fx.Kind == LayerEffectKind.DropShadow ? fx.OffsetY : 0f;
+                BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, ox, oy, _whiteMask);
+            }
+
+        // the layer itself
+        BlendInto(ref current, ref other, srcBuf, layer, maskBuf);
+
+        // front effects, in Effects-list order (so list reordering changes the stacking)
+        foreach (var fx in layer.Effects)
+        {
+            if (!fx.Enabled) continue;
+            switch (fx.Kind)
+            {
+                case LayerEffectKind.ColorOverlay:
+                    DispatchFx(_fxLdoc, _fxTint, 0u, fx.R, fx.G, fx.B, 0f, 0f);
+                    break;
+                case LayerEffectKind.GradientOverlay:
+                    DispatchFx(_fxLdoc, _fxTint, 4u, fx.R, fx.G, fx.B, 0f, 0f, fx.R2, fx.G2, fx.B2, fx.Angle);
+                    break;
+                case LayerEffectKind.InnerShadow:
+                    DispatchFx(_fxLdoc, _fxTint, 2u, fx.R, fx.G, fx.B, fx.Radius, 0f, 0, 0, 0, 0, fx.OffsetX, fx.OffsetY);
+                    break;
+                case LayerEffectKind.InnerGlow:
+                    DispatchFx(_fxLdoc, _fxTint, 3u, fx.R, fx.G, fx.B, fx.Radius, 0f);
+                    break;
+                case LayerEffectKind.Bevel:
+                    DispatchFx(_fxLdoc, _fxTint, 5u, fx.R, fx.G, fx.B, fx.Size, 0f, fx.R2, fx.G2, fx.B2, fx.Angle, fx.Depth);
+                    break;
+                case LayerEffectKind.Stroke:
+                    DispatchFx(_fxLdoc, _fxTint, 1u, fx.R, fx.G, fx.B, fx.Size, (float)fx.StrokePos);
+                    break;
+                default:
+                    continue;   // behind effects already handled
+            }
+            BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, 0f, 0f, _whiteMask);
+        }
     }
 
     /// <summary>Composite and read the flattened RGBA8 result back to the CPU (for export).</summary>
@@ -445,7 +649,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         var api = _gpu.Api;
         var bg = stackalloc BindGroupEntry[6];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
-        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _adjParamsBuf, Size = 32 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _adjParamsBuf, Size = 64 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = outp, Size = (ulong)_imgBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = mask, Size = (ulong)_imgBytes };
@@ -520,10 +724,93 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.BindGroupRelease(bindGroup);
     }
 
-    private void WriteBlurParams(float radius, float dirX, float dirY)
+    private void WriteBlurParams(float radius, float dirX, float dirY, float box = 0f)
     {
-        var prm = stackalloc float[4] { radius, dirX, dirY, 0f };
+        var prm = stackalloc float[4] { radius, dirX, dirY, box };
         _gpu.Api.QueueWriteBuffer(_gpu.Queue, _blurParamsBuf, 0, prm, 16);
+    }
+
+    // 32B shared filter params: mode(u32) + p0..p6
+    private void WriteFilterParams(uint mode, float p0 = 0, float p1 = 0, float p2 = 0)
+    {
+        var prm = stackalloc float[8];
+        ((uint*)prm)[0] = mode;
+        prm[1] = p0; prm[2] = p1; prm[3] = p2;
+        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _filterParamsBuf, 0, prm, 32);
+    }
+
+    // single src→out filter pass (motion/zoom/sharpen/noise) on the 4-binding blur layout
+    private void DispatchFilterPass(ComputePipeline* pipeline, Buffer* src, Buffer* outp)
+    {
+        var api = _gpu.Api;
+        var bg = stackalloc BindGroupEntry[4];
+        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _filterParamsBuf, Size = 32 };
+        bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = outp, Size = (ulong)_imgBytes };
+        var bgDesc = new BindGroupDescriptor { Layout = _blurBgl, EntryCount = 4, Entries = bg };
+        DispatchPass(pipeline, api.DeviceCreateBindGroup(_gpu.Device, in bgDesc));
+    }
+
+    // unsharp/high-pass/clarity: combine src + blurred → out (5-binding layout)
+    private void DispatchCombine(Buffer* src, Buffer* blurred, Buffer* outp)
+    {
+        var api = _gpu.Api;
+        var bg = stackalloc BindGroupEntry[5];
+        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _filterParamsBuf, Size = 32 };
+        bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = blurred, Size = (ulong)_imgBytes };
+        bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
+        var bgDesc = new BindGroupDescriptor { Layout = _combineBgl, EntryCount = 5, Entries = bg };
+        DispatchPass(_combinePipeline, api.DeviceCreateBindGroup(_gpu.Device, in bgDesc));
+    }
+
+    // run one compute pass over the whole image with a prepared bind group, then release it
+    private void DispatchPass(ComputePipeline* pipeline, BindGroup* bindGroup)
+    {
+        var api = _gpu.Api;
+        var encDesc = new CommandEncoderDescriptor();
+        var encoder = api.DeviceCreateCommandEncoder(_gpu.Device, in encDesc);
+        var passDesc = new ComputePassDescriptor();
+        var pass = api.CommandEncoderBeginComputePass(encoder, in passDesc);
+        api.ComputePassEncoderSetPipeline(pass, pipeline);
+        api.ComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, null);
+        api.ComputePassEncoderDispatchWorkgroups(pass, (uint)((_width + 15) / 16), (uint)((_height + 15) / 16), 1);
+        api.ComputePassEncoderEnd(pass);
+        var cmdDesc = new CommandBufferDescriptor();
+        var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);
+        api.QueueSubmit(_gpu.Queue, 1, &cmd);
+        api.ComputePassEncoderRelease(pass);
+        api.CommandEncoderRelease(encoder);
+        api.CommandBufferRelease(cmd);
+        api.BindGroupRelease(bindGroup);
+    }
+
+    // separable gaussian/box blur src→dst (via _filterTemp), box=1 for uniform weights
+    private void BlurInto(Buffer* src, Buffer* dst, float radius, float box)
+    {
+        WriteBlurParams(radius, 1f, 0f, box); DispatchBlur(src, _filterTemp);
+        WriteBlurParams(radius, 0f, 1f, box); DispatchBlur(_filterTemp, dst);
+    }
+
+    // produce the filtered backdrop into dst (dst must differ from src)
+    private void RenderFilter(FilterLayer flt, Buffer* src, Buffer* dst)
+    {
+        switch (flt.Kind)
+        {
+            case FilterKind.GaussianBlur: BlurInto(src, dst, flt.Radius, 0f); break;
+            case FilterKind.BoxBlur:      BlurInto(src, dst, flt.Radius, 1f); break;
+            case FilterKind.MotionBlur:   WriteFilterParams(0u, flt.Radius, flt.Angle); DispatchFilterPass(_dirPipeline, src, dst); break;
+            case FilterKind.ZoomBlur:     WriteFilterParams(1u, Math.Clamp(flt.Amount, 0f, 1f)); DispatchFilterPass(_dirPipeline, src, dst); break;
+            case FilterKind.Sharpen:      WriteFilterParams(0u, flt.Amount); DispatchFilterPass(_convPipeline, src, dst); break;
+            case FilterKind.UnsharpMask:  BlurInto(src, _fxBlur, flt.Radius, 0f); WriteFilterParams(0u, flt.Amount); DispatchCombine(src, _fxBlur, dst); break;
+            case FilterKind.HighPass:     BlurInto(src, _fxBlur, flt.Radius, 0f); WriteFilterParams(1u); DispatchCombine(src, _fxBlur, dst); break;
+            case FilterKind.Clarity:      BlurInto(src, _fxBlur, Math.Max(8f, flt.Radius), 0f); WriteFilterParams(2u, flt.Amount); DispatchCombine(src, _fxBlur, dst); break;
+            case FilterKind.AddNoise:     WriteFilterParams(0u, flt.Amount, 1.7f); DispatchFilterPass(_noisePipeline, src, dst); break;
+            case FilterKind.Denoise:      WriteFilterParams(1u, Math.Max(0.02f, flt.Amount)); DispatchFilterPass(_noisePipeline, src, dst); break;
+            default:                      BlurInto(src, dst, flt.Radius, 0f); break;
+        }
     }
 
     private void DispatchBlur(Buffer* src, Buffer* outp)
@@ -736,6 +1023,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_readback is not null) { api.BufferRelease(_readback); _readback = null; }
         if (_filterTemp is not null) { api.BufferRelease(_filterTemp); _filterTemp = null; }
         if (_previewBuf is not null) { api.BufferRelease(_previewBuf); _previewBuf = null; }
+        if (_fxLdoc is not null) { api.BufferRelease(_fxLdoc); _fxLdoc = null; }
+        if (_fxTint is not null) { api.BufferRelease(_fxTint); _fxTint = null; }
+        if (_fxBlur is not null) { api.BufferRelease(_fxBlur); _fxBlur = null; }
         _lastResult = null;
     }
 
@@ -763,5 +1053,14 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_stampPipeline is not null) api.ComputePipelineRelease(_stampPipeline);
         if (_stampBgl is not null) api.BindGroupLayoutRelease(_stampBgl);
         if (_stampParamsBuf is not null) api.BufferRelease(_stampParamsBuf);
+        if (_fxPipeline is not null) api.ComputePipelineRelease(_fxPipeline);
+        if (_fxBgl is not null) api.BindGroupLayoutRelease(_fxBgl);
+        if (_fxParamsBuf is not null) api.BufferRelease(_fxParamsBuf);
+        if (_dirPipeline is not null) api.ComputePipelineRelease(_dirPipeline);
+        if (_convPipeline is not null) api.ComputePipelineRelease(_convPipeline);
+        if (_noisePipeline is not null) api.ComputePipelineRelease(_noisePipeline);
+        if (_combinePipeline is not null) api.ComputePipelineRelease(_combinePipeline);
+        if (_combineBgl is not null) api.BindGroupLayoutRelease(_combineBgl);
+        if (_filterParamsBuf is not null) api.BufferRelease(_filterParamsBuf);
     }
 }

@@ -23,6 +23,8 @@
     <x:Double x:Key="IconButtonSize">24</x:Double>  <!-- footer / eye icon buttons -->
     <x:Double x:Key="LayerRowHeight">28</x:Double>
     <x:Double x:Key="ColorWheelMaxSize">190</x:Double>
+    <x:Double x:Key="CheckBoxBoxSize">15</x:Double>
+    <x:Double x:Key="CheckBoxGlyphSize">9</x:Double>
 
     <!-- slider geometry (Fluent resource keys — keep these exact names) -->
     <x:Double x:Key="SliderHorizontalHeight">18</x:Double>

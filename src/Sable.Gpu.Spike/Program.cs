@@ -182,7 +182,18 @@ unsafe
     var doc = Sable.Engine.Document.CreateDemo(643, 360);   // non-256-aligned width on purpose
     doc.Layers[1].OffsetX = 40; doc.Layers[1].OffsetY = 20;   // translate
     doc.Layers[1].Rotation = 20f; doc.Layers[1].ScaleX = 1.3f; doc.Layers[1].ScaleY = 1.3f;   // rotate+scale (affine)
-    doc.Layers.Add(new Sable.Engine.Layers.FilterLayer(Sable.Engine.Layers.FilterKind.GaussianBlur) { Radius = 6f });
+    // layer-effects GPU smoke: exercise the full BlendContentWithFx path (shadow/glow/stroke/overlay)
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.DropShadow));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.OuterGlow));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.Stroke));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.ColorOverlay));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.InnerShadow));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.InnerGlow));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.GradientOverlay));
+    doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.Bevel));
+    // live-filter GPU smoke: one of every FilterKind (exercises all filter pipelines + mask/opacity blend)
+    foreach (Sable.Engine.Layers.FilterKind fk in System.Enum.GetValues<Sable.Engine.Layers.FilterKind>())
+        doc.Layers.Add(new Sable.Engine.Layers.FilterLayer(fk) { Radius = 6f, Amount = 1f, Angle = 30f, Opacity = 0.7f });
     // nested group smoke: wrap a pixel layer in a group so the recursive compositor runs
     var grp = new Sable.Engine.Layers.GroupLayer("grp") { Opacity = 0.6f };
     grp.Children.Add(new Sable.Engine.Layers.PixelLayer(doc.Width, doc.Height, "in-group"));

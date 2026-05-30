@@ -25,6 +25,13 @@ internal sealed class WindowsInputSource : IInputSource
     [DllImport("user32.dll")] private static extern nint SetCapture(nint hWnd);
     [DllImport("user32.dll", EntryPoint = "ReleaseCapture")] private static extern bool ReleaseCaptureNative();
     [DllImport("user32.dll")] private static extern short GetKeyState(int vKey);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern int ShowCursor(bool show);
+
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+    private POINT _savedCursor;
+    private bool _cursorHidden;
 
     private WndProcDelegate? _wndProc;
     private nint _orig, _hwnd;
@@ -42,6 +49,22 @@ internal sealed class WindowsInputSource : IInputSource
 
     public void Capture() { if (_hwnd != 0) SetCapture(_hwnd); }
     public void ReleaseCapture() => ReleaseCaptureNative();
+
+    public void HideCursor()
+    {
+        if (_cursorHidden) return;
+        GetCursorPos(out _savedCursor);
+        ShowCursor(false);
+        _cursorHidden = true;
+    }
+
+    public void RestoreCursor()
+    {
+        if (!_cursorHidden) return;
+        SetCursorPos(_savedCursor.X, _savedCursor.Y);   // warp back to where the drag began
+        ShowCursor(true);
+        _cursorHidden = false;
+    }
 
     public void Dispose()
     {

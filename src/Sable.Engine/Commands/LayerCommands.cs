@@ -1,3 +1,4 @@
+using System.Linq;
 using Sable.Core.Undo;
 using Sable.Engine.Layers;
 
@@ -23,6 +24,49 @@ public sealed class AddLayerCommand : IUndoableCommand
 
     public void Do() { _parent.Insert(_index, _layer); _doc.MarkStructureChanged(); }
     public void Undo() { _parent.Remove(_layer); _doc.MarkStructureChanged(); }
+}
+
+/// <summary>
+/// Replace a set of layers in one parent list with a single new layer (merge-down /
+/// flatten / merge-visible / rasterise). Undo restores the removed layers at their
+/// original positions and removes the new one. Stamp uses this with no removals.
+/// </summary>
+public sealed class ReplaceLayersCommand : IUndoableCommand
+{
+    private readonly Document _doc;
+    private readonly List<Layer> _parent;
+    private readonly Layer _newLayer;
+    private readonly int _insertIndex;
+    private readonly List<(Layer layer, int index)> _removed;
+
+    public ReplaceLayersCommand(Document doc, List<Layer> parent, IEnumerable<Layer> remove, int insertIndex, Layer newLayer, string name = "Merge Layers")
+    {
+        _doc = doc;
+        _parent = parent;
+        _newLayer = newLayer;
+        _insertIndex = insertIndex;
+        Name = name;
+        // capture original positions, low→high, so undo can re-insert exactly
+        _removed = remove.Select(l => (l, parent.IndexOf(l))).Where(t => t.Item2 >= 0)
+                         .OrderBy(t => t.Item2).ToList();
+    }
+
+    public string Name { get; }
+
+    public void Do()
+    {
+        foreach (var (layer, _) in _removed) _parent.Remove(layer);
+        _parent.Insert(Math.Clamp(_insertIndex, 0, _parent.Count), _newLayer);
+        _doc.MarkStructureChanged();
+    }
+
+    public void Undo()
+    {
+        _parent.Remove(_newLayer);
+        foreach (var (layer, index) in _removed)   // already low→high
+            _parent.Insert(Math.Clamp(index, 0, _parent.Count), layer);
+        _doc.MarkStructureChanged();
+    }
 }
 
 /// <summary>Remove a layer from wherever it lives. Undo re-inserts at its original spot.</summary>

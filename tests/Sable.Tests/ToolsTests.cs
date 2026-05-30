@@ -23,6 +23,24 @@ public class BrushToolTests
     }
 
     [Fact]
+    public void Pencil_HasHardBinaryEdge()
+    {
+        // soft brush: edge pixels are partially covered; pencil: every painted pixel is fully opaque
+        var soft = new PixelLayer(32, 32);
+        new BrushTool { Radius = 8, Hardness = 0.3f, Flow = 1f }.Stamp(soft.Pixels, 32, 32, 16, 16);
+        var pencil = new PixelLayer(32, 32);
+        new BrushTool { Radius = 8, Hardness = 0.3f, Flow = 1f, Pencil = true }.Stamp(pencil.Pixels, 32, 32, 16, 16);
+
+        bool softHasPartial = false;
+        for (int i = 3; i < soft.Pixels.Length; i += 4)
+            if (soft.Pixels[i] is > 0 and < 255) { softHasPartial = true; break; }
+        Assert.True(softHasPartial);                       // soft brush feathers
+
+        for (int i = 3; i < pencil.Pixels.Length; i += 4)
+            Assert.True(pencil.Pixels[i] is 0 or 255);     // pencil is all-or-nothing
+    }
+
+    [Fact]
     public void Erase_ReducesAlpha()
     {
         var layer = new PixelLayer(64, 64);

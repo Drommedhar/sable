@@ -33,6 +33,10 @@ public static class SableFile
         public float FillOpacity { get; set; } = 1f;
         public bool Visible { get; set; } = true;
         public bool Clip { get; set; }
+        public bool LockPosition { get; set; }
+        public bool LockPixels { get; set; }
+        public bool LockAlpha { get; set; }
+        public int ColorTag { get; set; }
         public int OffsetX { get; set; }
         public int OffsetY { get; set; }
         public float ScaleX { get; set; } = 1f;
@@ -59,9 +63,15 @@ public static class SableFile
         public float BwB { get; set; } = 0.11f;
         public float Temperature { get; set; }
         public float Tint { get; set; }
+        public float Shadows { get; set; }
+        public float Highlights { get; set; }
+        public float[]? ColorBalance { get; set; }
+        public float[]? ChannelMix { get; set; }
         public float[][]? Curves { get; set; }   // [channel][x0,y0,x1,y1,...]
         public int FilterKind { get; set; }
         public float Radius { get; set; } = 8f;
+        public float FilterAmount { get; set; } = 1f;
+        public float FilterAngle { get; set; }
         public int ShapeKind { get; set; }
         public float ShX { get; set; }
         public float ShY { get; set; }
@@ -87,7 +97,29 @@ public static class SableFile
         public int TxAlign { get; set; }
         public float TxLineSpacing { get; set; } = 1f;
         public string? Mask { get; set; }   // zip entry name, if the layer has a mask
+        public List<EffectDto> Effects { get; set; } = new();
         public List<LayerDto> Children { get; set; } = new();   // for groups
+    }
+
+    private sealed class EffectDto
+    {
+        public int Kind { get; set; }
+        public bool Enabled { get; set; } = true;
+        public float R { get; set; }
+        public float G { get; set; }
+        public float B { get; set; }
+        public float Opacity { get; set; } = 1f;
+        public int BlendMode { get; set; }
+        public float Radius { get; set; } = 6f;
+        public float OffsetX { get; set; }
+        public float OffsetY { get; set; }
+        public float Size { get; set; } = 3f;
+        public int StrokePos { get; set; }
+        public float R2 { get; set; } = 1f;
+        public float G2 { get; set; } = 1f;
+        public float B2 { get; set; } = 1f;
+        public float Angle { get; set; }
+        public float Depth { get; set; } = 1f;
     }
 
     public static void Save(Document doc, string path)
@@ -116,12 +148,24 @@ public static class SableFile
             FillOpacity = layer.FillOpacity,
             Visible = layer.Visible,
             Clip = layer.ClipToBelow,
+            LockPosition = layer.LockPosition,
+            LockPixels = layer.LockPixels,
+            LockAlpha = layer.LockAlpha,
+            ColorTag = layer.ColorTag,
             OffsetX = layer.OffsetX,
             OffsetY = layer.OffsetY,
             ScaleX = layer.ScaleX,
             ScaleY = layer.ScaleY,
             Rotation = layer.Rotation
         };
+        foreach (var fx in layer.Effects)
+            ld.Effects.Add(new EffectDto
+            {
+                Kind = (int)fx.Kind, Enabled = fx.Enabled, R = fx.R, G = fx.G, B = fx.B,
+                Opacity = fx.Opacity, BlendMode = (int)fx.BlendMode, Radius = fx.Radius,
+                OffsetX = fx.OffsetX, OffsetY = fx.OffsetY, Size = fx.Size, StrokePos = (int)fx.StrokePos,
+                R2 = fx.R2, G2 = fx.G2, B2 = fx.B2, Angle = fx.Angle, Depth = fx.Depth
+            });
         switch (layer)
         {
             case PixelLayer px:
@@ -138,12 +182,16 @@ public static class SableFile
                 ld.HueShift = adj.HueShift; ld.Saturation = adj.Saturation; ld.Lightness = adj.Lightness;
                 ld.Exposure = adj.Exposure; ld.Vibrance = adj.Vibrance; ld.Threshold = adj.Threshold; ld.Posterize = adj.Posterize;
                 ld.BwR = adj.BwR; ld.BwG = adj.BwG; ld.BwB = adj.BwB; ld.Temperature = adj.Temperature; ld.Tint = adj.Tint;
+                ld.Shadows = adj.Shadows; ld.Highlights = adj.Highlights;
+                ld.ColorBalance = (float[])adj.ColorBalance.Clone(); ld.ChannelMix = (float[])adj.ChannelMix.Clone();
                 ld.Curves = adj.Curves.Select(ch => ch.SelectMany(p => new[] { p.x, p.y }).ToArray()).ToArray();
                 break;
             case FilterLayer flt:
                 ld.Type = "filter";
                 ld.FilterKind = (int)flt.Kind;
                 ld.Radius = flt.Radius;
+                ld.FilterAmount = flt.Amount;
+                ld.FilterAngle = flt.Angle;
                 break;
             case ShapeLayer sh:
                 ld.Type = "shape";
@@ -198,7 +246,7 @@ public static class SableFile
         {
             "pixel" => LoadPixel(ld, zip, w, h),
             "adjustment" => BuildAdjustment(ld),
-            "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius },
+            "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius, Amount = ld.FilterAmount, Angle = ld.FilterAngle },
             "shape" => new ShapeLayer((ShapeKind)ld.ShapeKind, ld.ShX, ld.ShY, ld.ShW, ld.ShH, ld.ShR, ld.ShG, ld.ShB)
             {
                 A = ld.ShA, StrokeWidth = ld.ShStroke
@@ -220,11 +268,23 @@ public static class SableFile
         created.FillOpacity = ld.FillOpacity;
         created.Visible = ld.Visible;
         created.ClipToBelow = ld.Clip;
+        created.LockPosition = ld.LockPosition;
+        created.LockPixels = ld.LockPixels;
+        created.LockAlpha = ld.LockAlpha;
+        created.ColorTag = ld.ColorTag;
         created.OffsetX = ld.OffsetX;
         created.OffsetY = ld.OffsetY;
         created.ScaleX = ld.ScaleX;
         created.ScaleY = ld.ScaleY;
         created.Rotation = ld.Rotation;
+        foreach (var fd in ld.Effects)
+            created.Effects.Add(new LayerEffect
+            {
+                Kind = (LayerEffectKind)fd.Kind, Enabled = fd.Enabled, R = fd.R, G = fd.G, B = fd.B,
+                Opacity = fd.Opacity, BlendMode = (BlendMode)fd.BlendMode, Radius = fd.Radius,
+                OffsetX = fd.OffsetX, OffsetY = fd.OffsetY, Size = fd.Size, StrokePos = (StrokePosition)fd.StrokePos,
+                R2 = fd.R2, G2 = fd.G2, B2 = fd.B2, Angle = fd.Angle, Depth = fd.Depth
+            });
         if (ld.Mask is not null && zip.GetEntry(ld.Mask) is { } maskEntry)
         {
             created.AddWhiteMask(w, h);
@@ -243,8 +303,11 @@ public static class SableFile
             OutBlack = ld.OutBlack, OutWhite = ld.OutWhite,
             HueShift = ld.HueShift, Saturation = ld.Saturation, Lightness = ld.Lightness,
             Exposure = ld.Exposure, Vibrance = ld.Vibrance, Threshold = ld.Threshold, Posterize = ld.Posterize,
-            BwR = ld.BwR, BwG = ld.BwG, BwB = ld.BwB, Temperature = ld.Temperature, Tint = ld.Tint
+            BwR = ld.BwR, BwG = ld.BwG, BwB = ld.BwB, Temperature = ld.Temperature, Tint = ld.Tint,
+            Shadows = ld.Shadows, Highlights = ld.Highlights
         };
+        if (ld.ColorBalance is { Length: 9 }) ld.ColorBalance.CopyTo(a.ColorBalance, 0);
+        if (ld.ChannelMix is { Length: 9 }) ld.ChannelMix.CopyTo(a.ChannelMix, 0);
         if (ld.Curves is { } cs)
         {
             for (int ch = 0; ch < a.Curves.Length && ch < cs.Length; ch++)

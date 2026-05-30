@@ -38,6 +38,12 @@ public sealed class TextLayer : Layer
         Name = text;
     }
 
+    protected override Layer CreateClone() => new TextLayer(Text, X, Y, FontSize, R, G, B)
+    {
+        FontFamily = FontFamily, Bold = Bold, Italic = Italic, Underline = Underline,
+        Strikethrough = Strikethrough, Align = Align, LineSpacing = LineSpacing,
+    };
+
     public override (int x, int y, int w, int h) ContentBounds(int docW, int docH)
         => ((int)X, (int)Y, System.Math.Max(1, _rw), System.Math.Max(1, _rh));
 

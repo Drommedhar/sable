@@ -14,4 +14,11 @@ public sealed class GroupLayer : Layer
     {
         Name = name;
     }
+
+    protected override Layer CreateClone()
+    {
+        var c = new GroupLayer(Name);
+        foreach (var child in Children) c.Children.Add(child.Clone());
+        return c;
+    }
 }

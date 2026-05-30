@@ -1,12 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Sable.Engine;
+using Sable.Engine.Clipboard;
 using Sable.Engine.IO;
+using Sable.Engine.Layers;
 using Sable.Format;
+using Sable.Imaging;
 using Sable.Tools;
 using Sable.UI.ViewModels;
 
@@ -18,10 +22,14 @@ public partial class MainWindow : Window
     private Point _lastPointer;
     private string? _currentPath;
     private AdjustmentWindow? _adjWindow;
+    private EffectsWindow? _fxWindow;
 
     private LayerViewModel? _dragSource;
     private Point _dragStart;
     private bool _dragging;
+    private LayerViewModel? _dropTarget;
+    private bool _dropAbove;
+    private bool _dropIntoGroup;
 
     private static FilePickerFileType SableType => new("Sable document") { Patterns = new[] { "*.sable" } };
 
@@ -84,6 +92,22 @@ public partial class MainWindow : Window
             }
             return;
         }
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            switch (e.Key)
+            {
+                case Key.C when shift: OnCopyMerged(null, null!); e.Handled = true; return;
+                case Key.C: OnCopy(null, null!); e.Handled = true; return;
+                case Key.X: OnCut(null, null!); e.Handled = true; return;
+                case Key.V when shift: OnPasteInto(null, null!); e.Handled = true; return;
+                case Key.V: OnPaste(null, null!); e.Handled = true; return;
+                case Key.J: OnDuplicate(null, null!); e.Handled = true; return;
+                case Key.E when shift && e.KeyModifiers.HasFlag(KeyModifiers.Alt): OnStamp(null, null!); e.Handled = true; return;
+                case Key.E when shift: OnMergeVisible(null, null!); e.Handled = true; return;
+                case Key.E: OnMergeDown(null, null!); e.Handled = true; return;
+            }
+        }
         switch (e.Key)
         {
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
@@ -124,17 +148,32 @@ public partial class MainWindow : Window
         var g = e.GetPosition(DragLayer);
         Avalonia.Controls.Canvas.SetLeft(DragGhost, g.X + 12);
         Avalonia.Controls.Canvas.SetTop(DragGhost, g.Y + 4);
+
+        // resolve the row under the cursor → drop position (above/below, or into a group) + indicator
+        var hitRow = FindLayerRow(LayerList.InputHitTest(e.GetPosition(LayerList)) as Visual);
+        if (hitRow is { DataContext: LayerViewModel vm } && !ReferenceEquals(vm, _dragSource))
+        {
+            double rh = hitRow.Bounds.Height;
+            double cy = e.GetPosition(hitRow).Y;
+            _dropTarget = vm;
+            _dropAbove = cy < rh * 0.5;
+            _dropIntoGroup = vm.IsGroup && cy > rh * 0.3 && cy < rh * 0.7;
+            var top = hitRow.TranslatePoint(new Point(0, 0), DragLayer) ?? default;
+            double iy = _dropAbove ? top.Y : top.Y + rh;
+            Avalonia.Controls.Canvas.SetLeft(DropIndicator, top.X);
+            Avalonia.Controls.Canvas.SetTop(DropIndicator, iy - 1);
+            DropIndicator.Width = hitRow.Bounds.Width;
+            DropIndicator.IsVisible = !_dropIntoGroup;   // line for reorder; group-drop has no line
+        }
+        else { _dropTarget = null; DropIndicator.IsVisible = false; }
     }
 
     private void OnLayerPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        // the list captures the pointer on press, so e.Source is the source row;
-        // hit-test the row actually under the cursor at release instead
-        if (_dragging && _dragSource is { } src && Doc is not null)
+        if (_dragging && _dragSource is { } src && Doc is { } doc && _dropTarget is { } t)
         {
-            var hit = LayerList.InputHitTest(e.GetPosition(LayerList)) as Visual;
-            var target = FindLayerVm(hit);
-            if (target is not null) Doc.DropLayer(src.Model, target.Model);
+            if (_dropIntoGroup) doc.DropLayer(src.Model, t.Model);                 // into the group
+            else doc.DropLayerRelative(src.Model, t.Model, _dropAbove);            // between-row reorder
         }
         EndDrag();
     }
@@ -143,7 +182,20 @@ public partial class MainWindow : Window
     {
         _dragging = false;
         _dragSource = null;
+        _dropTarget = null;
         DragGhost.IsVisible = false;
+        DropIndicator.IsVisible = false;
+    }
+
+    /// <summary>Walk up to the row container (Control whose DataContext is a LayerViewModel).</summary>
+    private static Control? FindLayerRow(Visual? v)
+    {
+        while (v is not null)
+        {
+            if (v is Control { DataContext: LayerViewModel } c) return c;
+            v = v.GetVisualParent();
+        }
+        return null;
     }
 
     private static LayerViewModel? FindLayerVm(Visual? v)
@@ -200,6 +252,36 @@ public partial class MainWindow : Window
     {
         Canvas.Brush.Strength = (float)(e.NewValue / 100.0);
         if (StrengthLabel is not null) StrengthLabel.Text = $"{e.NewValue:0}%";
+    }
+
+    private void OnBrushHardnessChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        Canvas.Brush.Hardness = (float)(e.NewValue / 100.0);
+        if (BrushHardnessLabel is not null) BrushHardnessLabel.Text = $"{e.NewValue:0}%";
+    }
+
+    private void OnBrushFlowChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        Canvas.Brush.Flow = (float)(e.NewValue / 100.0);
+        if (BrushFlowLabel is not null) BrushFlowLabel.Text = $"{e.NewValue:0}%";
+    }
+
+    /// <summary>Reflect brush size/hardness back into the options-bar sliders (after HUD adjust).</summary>
+    public void SyncBrushSliders()
+    {
+        if (BrushSizeSlider is null) return;
+        BrushSizeSlider.Value = Canvas.Brush.Radius * 2.0;
+        BrushHardnessSlider.Value = Canvas.Brush.Hardness * 100.0;
+    }
+
+    private void OnEyedropperSampleChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (EyedropperSampleCombo is not null) Canvas.EyedropperRadius = EyedropperSampleCombo.SelectedIndex; // 0/1/2 → point/3×3/5×5
+    }
+
+    private void OnEyedropperAllLayersChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox cb) Canvas.EyedropperAllLayers = cb.IsChecked == true;
     }
 
     private void OnFeatherChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -351,6 +433,7 @@ public partial class MainWindow : Window
         const string wand   = "M15 4V2 M15 16v-2 M8 9h2 M20 9h2 M17.8 11.8 19 13 M17.8 6.2 19 5 M3 21l9-9 M12.2 6.2 11 5";
         const string brush  = "M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08 M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z";
         const string eraser = "M7 21l-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21 M22 21H7 M5 11l9 9";
+        const string pencil = "M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z";
         const string fill   = "M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z M5 2l5 5 M2 13h15 M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4z";
         const string grad   = "M4 4h16v16H4z M21 3 3 21";
         const string crop   = "M6 2v14a2 2 0 0 0 2 2h14 M18 22V8a2 2 0 0 0-2-2H2";
@@ -378,6 +461,7 @@ public partial class MainWindow : Window
             ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso) }),
             ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand) }),
             ("B", new[] { new ToolDef(brush, "Brush", Sable.Tools.ToolKind.Brush),
+                          new ToolDef(pencil, "Pencil", Sable.Tools.ToolKind.Pencil),
                           new ToolDef(eraser, "Eraser", Sable.Tools.ToolKind.Eraser) }),
             ("G", new[] { new ToolDef(fill, "Fill", Sable.Tools.ToolKind.Fill),
                           new ToolDef(grad, "Gradient", Sable.Tools.ToolKind.Gradient) }),
@@ -515,14 +599,15 @@ public partial class MainWindow : Window
     private void UpdateOptionsBar(Sable.Tools.ToolKind k)
     {
         if (SizeOpts is null) return;   // not initialized yet
-        SizeOpts.IsVisible = k is ToolKind.Brush or ToolKind.Eraser or ToolKind.CloneStamp or ToolKind.ShapeLine
+        SizeOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.CloneStamp or ToolKind.ShapeLine
                               or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                               or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         StrengthOpts.IsVisible = k is ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                                   or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.MagicWand;
         TypeOpts.IsVisible = k == ToolKind.Type;
-        MaskHint.IsVisible = k is ToolKind.Brush or ToolKind.Eraser;
+        EyedropperOpts.IsVisible = k == ToolKind.Eyedropper;
+        MaskHint.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -576,6 +661,7 @@ public partial class MainWindow : Window
             else _adjWindow?.Close();
         };
         if (_adjWindow is not null) _adjWindow.DataContext = vm;
+        if (_fxWindow is not null) _fxWindow.DataContext = vm;
         // brush strokes become undoable commands on the same stack as layer ops
         Canvas.CommandProduced = cmd =>
         {
@@ -586,6 +672,8 @@ public partial class MainWindow : Window
         Canvas.LayerProduced = layer => vm.AddAndSelect(layer);
         // eyedropper (Alt+click) updates the color picker
         Canvas.ColorPicked = (r, g, b) => SetWheel(Avalonia.Media.Color.FromRgb(r, g, b));
+        // Ctrl+Alt HUD brush adjust → resync the options-bar sliders
+        Canvas.BrushAdjusted = SyncBrushSliders;
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)
@@ -642,6 +730,185 @@ public partial class MainWindow : Window
             center.Y - (int)(win.Height * scale / 2));
     }
 
+    // ===== clipboard (PLAN §16.2 / Phase 1 #5) =====
+
+    private void OnCopy(object? sender, RoutedEventArgs e) => DoCopy(false);
+    private void OnCopyMerged(object? sender, RoutedEventArgs e) => DoCopy(true);
+
+    private void DoCopy(bool merged)
+    {
+        var r = merged ? Canvas.CopyMerged() : Canvas.CopyRegion();
+        if (r is { } reg)
+        {
+            SableClipboard.SetRegion(reg.px, reg.w, reg.h);
+            _ = WriteOsImage(reg.px, reg.w, reg.h);
+        }
+        else if (Doc?.SelectedLayer is { } vm)
+        {
+            SableClipboard.SetLayer(vm.Model.Clone());   // whole-layer copy (no pixel region)
+        }
+    }
+
+    private void OnCut(object? sender, RoutedEventArgs e)
+    {
+        var r = Canvas.CopyRegion();
+        if (r is { } reg)
+        {
+            SableClipboard.SetRegion(reg.px, reg.w, reg.h);
+            _ = WriteOsImage(reg.px, reg.w, reg.h);
+            Canvas.DeleteSelection();   // undoable clear of the copied region
+        }
+        else if (Doc is { } vm && vm.SelectedLayer is not null)
+        {
+            SableClipboard.SetLayer(vm.SelectedLayer.Model.Clone());
+            vm.DeleteLayerCommand.Execute(null);
+        }
+    }
+
+    private async void OnPaste(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is null) return;
+        if (SableClipboard.Layer is { } l) { vm.PasteLayer(l.Clone()); return; }
+        if (SableClipboard.Pixels is { } px) { vm.PasteLayer(LayerFromRegion(px, SableClipboard.Width, SableClipboard.Height, null)); return; }
+        var img = await ReadOsImage();
+        if (img is { } i) vm.PasteLayer(LayerFromRegion(i.rgba, i.width, i.height, null));
+    }
+
+    private void OnPasteInto(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc) return;
+        if (SableClipboard.Pixels is not { } px) return;
+        var mask = doc.SnapshotSelectionMask();   // paste clipped to the current selection
+        vm.PasteLayer(LayerFromRegion(px, SableClipboard.Width, SableClipboard.Height, mask));
+    }
+
+    private void OnDuplicate(object? sender, RoutedEventArgs e) => Doc?.DuplicateLayerCommand.Execute(null);
+
+    private void OnSetTag(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control c && c.Tag is int tag && Doc?.SelectedLayer is { } vm)
+            vm.ColorTag = tag;
+    }
+
+    // ===== layer collapse ops (PLAN §16.3 / Phase 1 #6): GPU-render to a flat pixel layer =====
+
+    /// <summary>Composite a set of layers into a new doc-sized pixel layer.</summary>
+    private PixelLayer? Collapse(System.Collections.Generic.List<Layer> layers, string name)
+    {
+        if (Canvas.Document is not { } doc || Canvas.RenderLayersToPixels(layers) is not { } bytes) return null;
+        var pl = new PixelLayer(doc.Width, doc.Height, name);
+        pl.SetBuffer(doc.Width, doc.Height, bytes);
+        return pl;
+    }
+
+    private void OnMergeDown(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer is null) return;
+        var sel = vm.SelectedLayer.Model;
+        var parent = doc.FindParent(sel) ?? doc.Layers;
+        int i = parent.IndexOf(sel);
+        if (i <= 0) return;                          // nothing below to merge with
+        var below = parent[i - 1];
+        var set = new System.Collections.Generic.List<Layer> { below, sel };
+        if (Collapse(set, below.Name) is not { } merged) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i - 1, merged, "Merge Down"));
+        vm.SelectModel(merged);
+    }
+
+    private void OnMergeVisible(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc) return;
+        var vis = doc.Layers.Where(l => l.Visible).ToList();
+        if (vis.Count < 2) return;
+        if (Collapse(vis, "Merged") is not { } merged) return;
+        int idx = doc.Layers.IndexOf(vis[0]);
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, vis, idx, merged, "Merge Visible"));
+        vm.SelectModel(merged);
+    }
+
+    private void OnStamp(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc) return;
+        var vis = doc.Layers.Where(l => l.Visible).ToList();
+        if (vis.Count == 0 || Collapse(vis, "Stamp") is not { } stamp) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.AddLayerCommand(doc, doc.Layers, stamp, doc.Layers.Count));
+        vm.SelectModel(stamp);
+    }
+
+    private void OnFlatten(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || doc.Layers.Count == 0) return;
+        var all = doc.Layers.ToList();
+        if (Collapse(all, "Flattened") is not { } flat) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, all, 0, flat, "Flatten Image"));
+        vm.SelectModel(flat);
+    }
+
+    private void OnRasterise(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer is null) return;
+        var sel = vm.SelectedLayer.Model;
+        if (sel is PixelLayer) return;               // already raster
+        var parent = doc.FindParent(sel) ?? doc.Layers;
+        int i = parent.IndexOf(sel);
+        var set = new System.Collections.Generic.List<Layer> { sel };
+        if (Collapse(set, sel.Name) is not { } px) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i, px, "Rasterise"));
+        vm.SelectModel(px);
+    }
+
+    /// <summary>Build a doc-sized pixel layer holding the region (at the selection / centered), optional mask = paste-into.</summary>
+    private PixelLayer LayerFromRegion(byte[] px, int w, int h, byte[]? maskFull)
+    {
+        var doc = Canvas.Document!;
+        var layer = new PixelLayer(doc.Width, doc.Height, "Pasted");
+        int ox, oy;
+        if (maskFull is not null && doc.Selection is { } sel) { ox = sel.X; oy = sel.Y; }
+        else { ox = (doc.Width - w) / 2; oy = (doc.Height - h) / 2; }
+        var dst = layer.Pixels;
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            int tx = ox + x, ty = oy + y;
+            if (tx < 0 || ty < 0 || tx >= doc.Width || ty >= doc.Height) continue;
+            int si = (y * w + x) * 4, di = (ty * doc.Width + tx) * 4;
+            dst[di] = px[si]; dst[di + 1] = px[si + 1]; dst[di + 2] = px[si + 2]; dst[di + 3] = px[si + 3];
+        }
+        if (maskFull is not null) { layer.Mask = maskFull; layer.MaskDirty = true; }
+        layer.Dirty = true;
+        return layer;
+    }
+
+    // OS clipboard image interop (Avalonia 12 ClipboardExtensions.Set/TryGetBitmapAsync).
+    private async System.Threading.Tasks.Task WriteOsImage(byte[] px, int w, int h)
+    {
+        if (Clipboard is null) return;
+        try
+        {
+            var png = ImageCodec.EncodePngBytes(w, h, px);
+            using var ms = new System.IO.MemoryStream(png);
+            var bmp = new Avalonia.Media.Imaging.Bitmap(ms);
+            await Clipboard.SetBitmapAsync(bmp);
+        }
+        catch { /* image clipboard is best-effort; internal SableClipboard still holds the copy */ }
+    }
+
+    private async System.Threading.Tasks.Task<(int width, int height, byte[] rgba)?> ReadOsImage()
+    {
+        if (Clipboard is null) return null;
+        try
+        {
+            if (await Clipboard.TryGetBitmapAsync() is { } bmp)
+            {
+                using var ms = new System.IO.MemoryStream();
+                bmp.Save(ms);   // PNG
+                return ImageCodec.DecodeRgbaBytes(ms.ToArray());
+            }
+        }
+        catch { /* unsupported on this platform */ }
+        return null;
+    }
+
     private async void OnResizeDocument(object? sender, RoutedEventArgs e)
     {
         if (Canvas.Document is not { } doc || Doc is not { } vm) return;
@@ -671,6 +938,28 @@ public partial class MainWindow : Window
     {
         if (_adjWindow is not null) _adjWindow.Close();
         else ShowAdjustmentWindow();
+    }
+
+    private void OnToggleEffects(object? sender, RoutedEventArgs e)
+    {
+        if (_fxWindow is not null) { _fxWindow.Close(); return; }
+        ShowEffectsWindow();
+    }
+
+    // footer "fx" button: open + focus the dialog (don't toggle it closed)
+    private void OnFxButton(object? sender, RoutedEventArgs e)
+    {
+        if (_fxWindow is not null) { _fxWindow.Activate(); return; }
+        ShowEffectsWindow();
+    }
+
+    private void ShowEffectsWindow()
+    {
+        var win = new EffectsWindow { DataContext = DataContext };
+        win.Closed += (_, _) => _fxWindow = null;
+        _fxWindow = win;
+        win.Show(this);
+        CenterOverCanvas(win);
     }
 
     private async void OnOpenImage(object? sender, RoutedEventArgs e)

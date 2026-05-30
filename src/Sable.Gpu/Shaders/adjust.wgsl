@@ -8,9 +8,18 @@
 //   kind 4 Exposure:           p0=stops              kind 5 Vibrance: p0=amount(-1..1)
 //   kind 6 Threshold:          p0=cut(0..1)          kind 7 Posterise: p0=levels  kind 8 Invert: (none)
 //   kind 9 Black&White:        p0/p1/p2=R/G/B weights   kind 10 WhiteBalance: p0=temp, p1=tint
+//   kind 11 ColourBalance:     p0..p8 = shadow.rgb, mid.rgb, highlight.rgb shifts (-1..1)
+//   kind 12 ChannelMixer:      p0..p8 = 3x3 row-major (outR=row0·rgb, etc.)
+//   kind 13 ShadowsHighlights: p0=shadows lift, p1=highlights recover
 
 struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
-struct Adj { kind: u32, opacity: f32, p0: f32, p1: f32, p2: f32, p3: f32, p4: f32, p5: f32 };
+// 64B uniform: kind + opacity + p0..p11 (+2 pad). >6-param adjustments use p6..p11.
+struct Adj {
+    kind: u32, opacity: f32,
+    p0: f32, p1: f32, p2: f32, p3: f32, p4: f32, p5: f32,
+    p6: f32, p7: f32, p8: f32, p9: f32, p10: f32, p11: f32,
+    _pad0: f32, _pad1: f32,
+};
 
 @group(0) @binding(0) var<uniform> dims: Dims;
 @group(0) @binding(1) var<uniform> adj: Adj;
@@ -134,6 +143,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             rgb.x = clamp(rgb.x * (1.0 + adj.p0 * 0.5), 0.0, 1.0);
             rgb.z = clamp(rgb.z * (1.0 - adj.p0 * 0.5), 0.0, 1.0);
             rgb.y = clamp(rgb.y * (1.0 + adj.p1 * 0.5), 0.0, 1.0);
+        }
+        case 11u: { // Colour Balance (shadow/mid/highlight RGB shifts)
+            let l = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
+            let sW = clamp(1.0 - l * 2.0, 0.0, 1.0);
+            let hW = clamp((l - 0.5) * 2.0, 0.0, 1.0);
+            let mW = 1.0 - abs(l - 0.5) * 2.0;
+            let shadow = vec3<f32>(adj.p0, adj.p1, adj.p2);
+            let mid    = vec3<f32>(adj.p3, adj.p4, adj.p5);
+            let high   = vec3<f32>(adj.p6, adj.p7, adj.p8);
+            rgb = clamp(rgb + (shadow * sW + mid * mW + high * hW) * 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        case 12u: { // Channel Mixer (3x3 matrix; p0..p8 row-major)
+            rgb = vec3<f32>(dot(rgb, vec3<f32>(adj.p0, adj.p1, adj.p2)),
+                            dot(rgb, vec3<f32>(adj.p3, adj.p4, adj.p5)),
+                            dot(rgb, vec3<f32>(adj.p6, adj.p7, adj.p8)));
+            rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        case 13u: { // Shadows / Highlights (tonal lift/recover, p0=shadows, p1=highlights)
+            let l = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
+            let sMask = (1.0 - l) * (1.0 - l);   // strong in shadows
+            let hMask = l * l;                   // strong in highlights
+            rgb = clamp(rgb + adj.p0 * sMask - adj.p1 * hMask, vec3<f32>(0.0), vec3<f32>(1.0));
         }
         default: { // BrightnessContrast
             rgb = (rgb - vec3<f32>(0.5)) * adj.p1 + vec3<f32>(0.5) + vec3<f32>(adj.p0);

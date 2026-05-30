@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Media.Imaging;
@@ -181,6 +182,152 @@ public sealed partial class LayerViewModel : ObservableObject
     /// <summary>Notify the UI a mask was added/removed (footer Mask button).</summary>
     public void RaiseMaskChanged() => OnPropertyChanged(nameof(HasMask));
 
+    // ---- layer effects (drop shadow / outer glow / stroke / colour overlay) ----
+    private LayerEffect? Fx(LayerEffectKind k) => Model.Effects.FirstOrDefault(e => e.Kind == k);
+
+    private void ToggleFx(LayerEffectKind k, bool on)
+    {
+        var e = Fx(k);
+        if (on && e is null) Model.Effects.Add(LayerEffect.Create(k));
+        else if (!on && e is not null) Model.Effects.Remove(e);
+        else return;
+        Model.Dirty = true;
+        OnPropertyChanged(string.Empty);   // refresh enable flags + the kind's param rows
+    }
+
+    // editing a param creates the effect if absent (Affinity-style: tweak = enable), so the
+    // dialog controls stay live instead of greyed-out.
+    private LayerEffect EnsureFx(LayerEffectKind k)
+    {
+        var e = Fx(k);
+        if (e is null)
+        {
+            e = LayerEffect.Create(k);
+            Model.Effects.Add(e);
+            OnPropertyChanged(k switch
+            {
+                LayerEffectKind.DropShadow => nameof(HasDropShadow),
+                LayerEffectKind.OuterGlow => nameof(HasOuterGlow),
+                LayerEffectKind.Stroke => nameof(HasStroke),
+                LayerEffectKind.InnerShadow => nameof(HasInnerShadow),
+                LayerEffectKind.InnerGlow => nameof(HasInnerGlow),
+                LayerEffectKind.GradientOverlay => nameof(HasGradientOverlay),
+                _ => nameof(HasColorOverlay),
+            });
+        }
+        return e;
+    }
+
+    private void SetFx(LayerEffectKind k, Action<LayerEffect> set, string name)
+    {
+        set(EnsureFx(k)); Model.Dirty = true; OnPropertyChanged(name);
+    }
+
+    private static string FxHex(LayerEffect? e)
+        => e is null ? "000000" : $"{(int)Math.Round(e.R * 255):X2}{(int)Math.Round(e.G * 255):X2}{(int)Math.Round(e.B * 255):X2}";
+
+    private void SetFxHex(LayerEffectKind k, string s, string name)
+    {
+        s = s.TrimStart('#');
+        if (s.Length != 6 || !int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out int rgb)) return;
+        SetFx(k, e => { e.R = ((rgb >> 16) & 0xff) / 255f; e.G = ((rgb >> 8) & 0xff) / 255f; e.B = (rgb & 0xff) / 255f; }, name);
+    }
+
+    public bool HasDropShadow { get => Fx(LayerEffectKind.DropShadow) is not null; set => ToggleFx(LayerEffectKind.DropShadow, value); }
+    public string DsColorHex { get => FxHex(Fx(LayerEffectKind.DropShadow)); set => SetFxHex(LayerEffectKind.DropShadow, value, nameof(DsColorHex)); }
+    public double DsOpacityPct { get => (Fx(LayerEffectKind.DropShadow)?.Opacity ?? 0.6f) * 100; set => SetFx(LayerEffectKind.DropShadow, e => e.Opacity = (float)(value / 100.0), nameof(DsOpacityPct)); }
+    public double DsRadius { get => Fx(LayerEffectKind.DropShadow)?.Radius ?? 6; set => SetFx(LayerEffectKind.DropShadow, e => e.Radius = (float)value, nameof(DsRadius)); }
+    public double DsOffsetX { get => Fx(LayerEffectKind.DropShadow)?.OffsetX ?? 4; set => SetFx(LayerEffectKind.DropShadow, e => e.OffsetX = (float)value, nameof(DsOffsetX)); }
+    public double DsOffsetY { get => Fx(LayerEffectKind.DropShadow)?.OffsetY ?? 4; set => SetFx(LayerEffectKind.DropShadow, e => e.OffsetY = (float)value, nameof(DsOffsetY)); }
+
+    public bool HasOuterGlow { get => Fx(LayerEffectKind.OuterGlow) is not null; set => ToggleFx(LayerEffectKind.OuterGlow, value); }
+    public string GlowColorHex { get => FxHex(Fx(LayerEffectKind.OuterGlow)); set => SetFxHex(LayerEffectKind.OuterGlow, value, nameof(GlowColorHex)); }
+    public double GlowOpacityPct { get => (Fx(LayerEffectKind.OuterGlow)?.Opacity ?? 0.7f) * 100; set => SetFx(LayerEffectKind.OuterGlow, e => e.Opacity = (float)(value / 100.0), nameof(GlowOpacityPct)); }
+    public double GlowRadius { get => Fx(LayerEffectKind.OuterGlow)?.Radius ?? 8; set => SetFx(LayerEffectKind.OuterGlow, e => e.Radius = (float)value, nameof(GlowRadius)); }
+
+    public bool HasStroke { get => Fx(LayerEffectKind.Stroke) is not null; set => ToggleFx(LayerEffectKind.Stroke, value); }
+    public string StrokeColorHex { get => FxHex(Fx(LayerEffectKind.Stroke)); set => SetFxHex(LayerEffectKind.Stroke, value, nameof(StrokeColorHex)); }
+    public double StrokeOpacityPct { get => (Fx(LayerEffectKind.Stroke)?.Opacity ?? 1f) * 100; set => SetFx(LayerEffectKind.Stroke, e => e.Opacity = (float)(value / 100.0), nameof(StrokeOpacityPct)); }
+    public double StrokeSizeVal { get => Fx(LayerEffectKind.Stroke)?.Size ?? 3; set => SetFx(LayerEffectKind.Stroke, e => e.Size = (float)value, nameof(StrokeSizeVal)); }
+    public int StrokePosIndex { get => (int)(Fx(LayerEffectKind.Stroke)?.StrokePos ?? StrokePosition.Outside); set => SetFx(LayerEffectKind.Stroke, e => e.StrokePos = (StrokePosition)value, nameof(StrokePosIndex)); }
+
+    public bool HasColorOverlay { get => Fx(LayerEffectKind.ColorOverlay) is not null; set => ToggleFx(LayerEffectKind.ColorOverlay, value); }
+    public string OverlayColorHex { get => FxHex(Fx(LayerEffectKind.ColorOverlay)); set => SetFxHex(LayerEffectKind.ColorOverlay, value, nameof(OverlayColorHex)); }
+    public double OverlayOpacityPct { get => (Fx(LayerEffectKind.ColorOverlay)?.Opacity ?? 1f) * 100; set => SetFx(LayerEffectKind.ColorOverlay, e => e.Opacity = (float)(value / 100.0), nameof(OverlayOpacityPct)); }
+
+    public bool HasInnerShadow { get => Fx(LayerEffectKind.InnerShadow) is not null; set => ToggleFx(LayerEffectKind.InnerShadow, value); }
+    public string InShColorHex { get => FxHex(Fx(LayerEffectKind.InnerShadow)); set => SetFxHex(LayerEffectKind.InnerShadow, value, nameof(InShColorHex)); }
+    public double InShOpacityPct { get => (Fx(LayerEffectKind.InnerShadow)?.Opacity ?? 0.6f) * 100; set => SetFx(LayerEffectKind.InnerShadow, e => e.Opacity = (float)(value / 100.0), nameof(InShOpacityPct)); }
+    public double InShRadius { get => Fx(LayerEffectKind.InnerShadow)?.Radius ?? 6; set => SetFx(LayerEffectKind.InnerShadow, e => e.Radius = (float)value, nameof(InShRadius)); }
+    public double InShOffsetX { get => Fx(LayerEffectKind.InnerShadow)?.OffsetX ?? 4; set => SetFx(LayerEffectKind.InnerShadow, e => e.OffsetX = (float)value, nameof(InShOffsetX)); }
+    public double InShOffsetY { get => Fx(LayerEffectKind.InnerShadow)?.OffsetY ?? 4; set => SetFx(LayerEffectKind.InnerShadow, e => e.OffsetY = (float)value, nameof(InShOffsetY)); }
+
+    public bool HasInnerGlow { get => Fx(LayerEffectKind.InnerGlow) is not null; set => ToggleFx(LayerEffectKind.InnerGlow, value); }
+    public string InGlColorHex { get => FxHex(Fx(LayerEffectKind.InnerGlow)); set => SetFxHex(LayerEffectKind.InnerGlow, value, nameof(InGlColorHex)); }
+    public double InGlOpacityPct { get => (Fx(LayerEffectKind.InnerGlow)?.Opacity ?? 0.7f) * 100; set => SetFx(LayerEffectKind.InnerGlow, e => e.Opacity = (float)(value / 100.0), nameof(InGlOpacityPct)); }
+    public double InGlRadius { get => Fx(LayerEffectKind.InnerGlow)?.Radius ?? 6; set => SetFx(LayerEffectKind.InnerGlow, e => e.Radius = (float)value, nameof(InGlRadius)); }
+
+    public bool HasGradientOverlay { get => Fx(LayerEffectKind.GradientOverlay) is not null; set => ToggleFx(LayerEffectKind.GradientOverlay, value); }
+    public string GradColor1Hex { get => FxHex(Fx(LayerEffectKind.GradientOverlay)); set => SetFxHex(LayerEffectKind.GradientOverlay, value, nameof(GradColor1Hex)); }
+    public string GradColor2Hex
+    {
+        get { var e = Fx(LayerEffectKind.GradientOverlay); return e is null ? "FFFFFF" : $"{(int)Math.Round(e.R2 * 255):X2}{(int)Math.Round(e.G2 * 255):X2}{(int)Math.Round(e.B2 * 255):X2}"; }
+        set
+        {
+            var s = value.TrimStart('#');
+            if (s.Length != 6 || !int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out int rgb)) return;
+            SetFx(LayerEffectKind.GradientOverlay, e => { e.R2 = ((rgb >> 16) & 0xff) / 255f; e.G2 = ((rgb >> 8) & 0xff) / 255f; e.B2 = (rgb & 0xff) / 255f; }, nameof(GradColor2Hex));
+        }
+    }
+    public double GradOpacityPct { get => (Fx(LayerEffectKind.GradientOverlay)?.Opacity ?? 1f) * 100; set => SetFx(LayerEffectKind.GradientOverlay, e => e.Opacity = (float)(value / 100.0), nameof(GradOpacityPct)); }
+    public double GradAngle { get => Fx(LayerEffectKind.GradientOverlay)?.Angle ?? 90; set => SetFx(LayerEffectKind.GradientOverlay, e => e.Angle = (float)value, nameof(GradAngle)); }
+
+    public bool HasBevel { get => Fx(LayerEffectKind.Bevel) is not null; set => ToggleFx(LayerEffectKind.Bevel, value); }
+    public string BevHighlightHex { get => FxHex(Fx(LayerEffectKind.Bevel)); set => SetFxHex(LayerEffectKind.Bevel, value, nameof(BevHighlightHex)); }
+    public string BevShadowHex
+    {
+        get { var e = Fx(LayerEffectKind.Bevel); return e is null ? "000000" : $"{(int)Math.Round(e.R2 * 255):X2}{(int)Math.Round(e.G2 * 255):X2}{(int)Math.Round(e.B2 * 255):X2}"; }
+        set
+        {
+            var s = value.TrimStart('#');
+            if (s.Length != 6 || !int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out int rgb)) return;
+            SetFx(LayerEffectKind.Bevel, e => { e.R2 = ((rgb >> 16) & 0xff) / 255f; e.G2 = ((rgb >> 8) & 0xff) / 255f; e.B2 = (rgb & 0xff) / 255f; }, nameof(BevShadowHex));
+        }
+    }
+    public double BevOpacityPct { get => (Fx(LayerEffectKind.Bevel)?.Opacity ?? 0.75f) * 100; set => SetFx(LayerEffectKind.Bevel, e => e.Opacity = (float)(value / 100.0), nameof(BevOpacityPct)); }
+    public double BevSize { get => Fx(LayerEffectKind.Bevel)?.Size ?? 4; set => SetFx(LayerEffectKind.Bevel, e => e.Size = (float)value, nameof(BevSize)); }
+    public double BevAngle { get => Fx(LayerEffectKind.Bevel)?.Angle ?? 135; set => SetFx(LayerEffectKind.Bevel, e => e.Angle = (float)value, nameof(BevAngle)); }
+    public double BevDepth { get => Fx(LayerEffectKind.Bevel)?.Depth ?? 1; set => SetFx(LayerEffectKind.Bevel, e => e.Depth = (float)value, nameof(BevDepth)); }
+
+    /// <summary>Reorder the effect of the given kind within its render group (front/behind). dir = -1 up, +1 down.</summary>
+    public void MoveEffect(LayerEffectKind k, int dir)
+    {
+        var list = Model.Effects;
+        int i = list.FindIndex(e => e.Kind == k);
+        if (i < 0) return;
+        bool behind = k is LayerEffectKind.DropShadow or LayerEffectKind.OuterGlow;
+        int j = i + dir;
+        while (j >= 0 && j < list.Count)
+        {
+            bool jb = list[j].Kind is LayerEffectKind.DropShadow or LayerEffectKind.OuterGlow;
+            if (jb == behind) break;       // nearest sibling in the same render group
+            j += dir;
+        }
+        if (j < 0 || j >= list.Count) return;
+        (list[i], list[j]) = (list[j], list[i]);
+        Model.Dirty = true;
+    }
+
+    // per-effect blend mode (Affinity blend dropdown)
+    public Sable.Core.BlendMode DsBlend { get => Fx(LayerEffectKind.DropShadow)?.BlendMode ?? Sable.Core.BlendMode.Multiply; set => SetFx(LayerEffectKind.DropShadow, e => e.BlendMode = value, nameof(DsBlend)); }
+    public Sable.Core.BlendMode GlowBlend { get => Fx(LayerEffectKind.OuterGlow)?.BlendMode ?? Sable.Core.BlendMode.Screen; set => SetFx(LayerEffectKind.OuterGlow, e => e.BlendMode = value, nameof(GlowBlend)); }
+    public Sable.Core.BlendMode StrokeBlend { get => Fx(LayerEffectKind.Stroke)?.BlendMode ?? Sable.Core.BlendMode.Normal; set => SetFx(LayerEffectKind.Stroke, e => e.BlendMode = value, nameof(StrokeBlend)); }
+    public Sable.Core.BlendMode OverlayBlend { get => Fx(LayerEffectKind.ColorOverlay)?.BlendMode ?? Sable.Core.BlendMode.Normal; set => SetFx(LayerEffectKind.ColorOverlay, e => e.BlendMode = value, nameof(OverlayBlend)); }
+    public Sable.Core.BlendMode InShBlend { get => Fx(LayerEffectKind.InnerShadow)?.BlendMode ?? Sable.Core.BlendMode.Multiply; set => SetFx(LayerEffectKind.InnerShadow, e => e.BlendMode = value, nameof(InShBlend)); }
+    public Sable.Core.BlendMode InGlBlend { get => Fx(LayerEffectKind.InnerGlow)?.BlendMode ?? Sable.Core.BlendMode.Screen; set => SetFx(LayerEffectKind.InnerGlow, e => e.BlendMode = value, nameof(InGlBlend)); }
+    public Sable.Core.BlendMode GradBlend { get => Fx(LayerEffectKind.GradientOverlay)?.BlendMode ?? Sable.Core.BlendMode.Normal; set => SetFx(LayerEffectKind.GradientOverlay, e => e.BlendMode = value, nameof(GradBlend)); }
+    public Sable.Core.BlendMode BevBlend { get => Fx(LayerEffectKind.Bevel)?.BlendMode ?? Sable.Core.BlendMode.Normal; set => SetFx(LayerEffectKind.Bevel, e => e.BlendMode = value, nameof(BevBlend)); }
+
     public bool ClipToBelow
     {
         get => Model.ClipToBelow;
@@ -191,6 +338,46 @@ public sealed partial class LayerViewModel : ObservableObject
             Model.Dirty = true;
             OnPropertyChanged();
         }
+    }
+
+    // --- locks (behaviour only; no recomposite) ---
+    public bool LockPosition { get => Model.LockPosition; set { if (Model.LockPosition != value) { Model.LockPosition = value; OnPropertyChanged(); } } }
+    public bool LockPixels { get => Model.LockPixels; set { if (Model.LockPixels != value) { Model.LockPixels = value; OnPropertyChanged(); } } }
+    public bool LockAlpha { get => Model.LockAlpha; set { if (Model.LockAlpha != value) { Model.LockAlpha = value; OnPropertyChanged(); } } }
+
+    // --- colour tag (Affinity row strip) ---
+    private static readonly Avalonia.Media.Color[] TagColors =
+    {
+        Avalonia.Media.Colors.Transparent,
+        Avalonia.Media.Color.FromRgb(0xD0, 0x4A, 0x4A), Avalonia.Media.Color.FromRgb(0xD8, 0x8A, 0x3A),
+        Avalonia.Media.Color.FromRgb(0xD8, 0xC0, 0x3A), Avalonia.Media.Color.FromRgb(0x5A, 0xB0, 0x5A),
+        Avalonia.Media.Color.FromRgb(0x4A, 0x80, 0xD0), Avalonia.Media.Color.FromRgb(0x9A, 0x5A, 0xC0),
+        Avalonia.Media.Color.FromRgb(0x88, 0x88, 0x88),
+    };
+
+    public int ColorTag
+    {
+        get => Model.ColorTag;
+        set
+        {
+            int v = Math.Clamp(value, 0, TagColors.Length - 1);
+            if (Model.ColorTag == v) return;
+            Model.ColorTag = v;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TagBrush));
+            OnPropertyChanged(nameof(HasTag));
+        }
+    }
+    public bool HasTag => Model.ColorTag > 0;
+    public Avalonia.Media.IBrush TagBrush => TagBrushFor(Model.ColorTag);
+
+    /// <summary>Brush for a colour-tag index (shared by the row strip + the panel swatches).</summary>
+    public static Avalonia.Media.IBrush TagBrushFor(int tag)
+    {
+        int i = Math.Clamp(tag, 0, TagColors.Length - 1);
+        return i == 0
+            ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(0x3A, 0x3A, 0x3A))   // "none" = dark swatch
+            : new Avalonia.Media.SolidColorBrush(TagColors[i]);
     }
 
     // --- adjustment-layer params (only meaningful when Model is AdjustmentLayer) ---
@@ -211,21 +398,32 @@ public sealed partial class LayerViewModel : ObservableObject
     public bool IsInvert => Model is AdjustmentLayer { Kind: AdjustmentKind.Invert };
     public bool IsBlackWhite => Model is AdjustmentLayer { Kind: AdjustmentKind.BlackWhite };
     public bool IsWhiteBalance => Model is AdjustmentLayer { Kind: AdjustmentKind.WhiteBalance };
+    public bool IsColorBalance => Model is AdjustmentLayer { Kind: AdjustmentKind.ColorBalance };
+    public bool IsChannelMixer => Model is AdjustmentLayer { Kind: AdjustmentKind.ChannelMixer };
+    public bool IsShadowsHighlights => Model is AdjustmentLayer { Kind: AdjustmentKind.ShadowsHighlights };
     /// <summary>The adjustment model when this is a Curves layer (for the curve editor), else null.</summary>
     public AdjustmentLayer? CurvesAdjustment => Model is AdjustmentLayer { Kind: AdjustmentKind.Curves } a ? a : null;
 
-    /// <summary>Gaussian blur radius (only when Model is a FilterLayer).</summary>
+    /// <summary>Blur radius / spread (FilterLayer).</summary>
     public double BlurRadius
     {
         get => (Model as FilterLayer)?.Radius ?? 8;
-        set
-        {
-            if (Model is not FilterLayer f) return;
-            f.Radius = (float)value;
-            f.Dirty = true;
-            OnPropertyChanged();
-        }
+        set { if (Model is FilterLayer f) { f.Radius = (float)value; f.Dirty = true; OnPropertyChanged(); } }
     }
+    public double FilterAmount
+    {
+        get => (Model as FilterLayer)?.Amount ?? 1;
+        set { if (Model is FilterLayer f) { f.Amount = (float)value; f.Dirty = true; OnPropertyChanged(); } }
+    }
+    public double FilterAngle
+    {
+        get => (Model as FilterLayer)?.Angle ?? 0;
+        set { if (Model is FilterLayer f) { f.Angle = (float)value; f.Dirty = true; OnPropertyChanged(); } }
+    }
+    private FilterKind FilterKindOf => (Model as FilterLayer)?.Kind ?? FilterKind.GaussianBlur;
+    public bool FilterUsesRadius => Model is FilterLayer { Kind: FilterKind.GaussianBlur or FilterKind.BoxBlur or FilterKind.MotionBlur or FilterKind.UnsharpMask or FilterKind.HighPass or FilterKind.Clarity };
+    public bool FilterUsesAmount => Model is FilterLayer { Kind: FilterKind.Sharpen or FilterKind.UnsharpMask or FilterKind.Clarity or FilterKind.ZoomBlur or FilterKind.AddNoise or FilterKind.Denoise };
+    public bool FilterUsesAngle => Model is FilterLayer { Kind: FilterKind.MotionBlur };
 
     private void SetAdj(Action<AdjustmentLayer> set, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
     {
@@ -257,6 +455,36 @@ public sealed partial class LayerViewModel : ObservableObject
     public double TemperaturePct { get => (Model as AdjustmentLayer)?.Temperature * 100 ?? 0; set => SetAdj(a => a.Temperature = (float)(value / 100.0)); }
     public double TintPct { get => (Model as AdjustmentLayer)?.Tint * 100 ?? 0; set => SetAdj(a => a.Tint = (float)(value / 100.0)); }
 
+    // Shadows / Highlights (-100..100)
+    public double ShadowsPct { get => (Model as AdjustmentLayer)?.Shadows * 100 ?? 0; set => SetAdj(a => a.Shadows = (float)(value / 100.0)); }
+    public double HighlightsPct { get => (Model as AdjustmentLayer)?.Highlights * 100 ?? 0; set => SetAdj(a => a.Highlights = (float)(value / 100.0)); }
+
+    // Colour Balance — 9 shifts as -100..100 (display)
+    private double Cb(int i) => (Model as AdjustmentLayer)?.ColorBalance[i] * 100 ?? 0;
+    private void SetCb(int i, double v, string name) { if (Model is AdjustmentLayer a) { a.ColorBalance[i] = (float)(v / 100.0); a.Dirty = true; OnPropertyChanged(name); } }
+    public double CbShadowR { get => Cb(0); set => SetCb(0, value, nameof(CbShadowR)); }
+    public double CbShadowG { get => Cb(1); set => SetCb(1, value, nameof(CbShadowG)); }
+    public double CbShadowB { get => Cb(2); set => SetCb(2, value, nameof(CbShadowB)); }
+    public double CbMidR { get => Cb(3); set => SetCb(3, value, nameof(CbMidR)); }
+    public double CbMidG { get => Cb(4); set => SetCb(4, value, nameof(CbMidG)); }
+    public double CbMidB { get => Cb(5); set => SetCb(5, value, nameof(CbMidB)); }
+    public double CbHighR { get => Cb(6); set => SetCb(6, value, nameof(CbHighR)); }
+    public double CbHighG { get => Cb(7); set => SetCb(7, value, nameof(CbHighG)); }
+    public double CbHighB { get => Cb(8); set => SetCb(8, value, nameof(CbHighB)); }
+
+    // Channel Mixer — 3x3 as -200..200 (display)
+    private double Cm(int i) => (Model as AdjustmentLayer)?.ChannelMix[i] * 100 ?? 0;
+    private void SetCm(int i, double v, string name) { if (Model is AdjustmentLayer a) { a.ChannelMix[i] = (float)(v / 100.0); a.Dirty = true; OnPropertyChanged(name); } }
+    public double CmRR { get => Cm(0); set => SetCm(0, value, nameof(CmRR)); }
+    public double CmRG { get => Cm(1); set => SetCm(1, value, nameof(CmRG)); }
+    public double CmRB { get => Cm(2); set => SetCm(2, value, nameof(CmRB)); }
+    public double CmGR { get => Cm(3); set => SetCm(3, value, nameof(CmGR)); }
+    public double CmGG { get => Cm(4); set => SetCm(4, value, nameof(CmGG)); }
+    public double CmGB { get => Cm(5); set => SetCm(5, value, nameof(CmGB)); }
+    public double CmBR { get => Cm(6); set => SetCm(6, value, nameof(CmBR)); }
+    public double CmBG { get => Cm(7); set => SetCm(7, value, nameof(CmBG)); }
+    public double CmBB { get => Cm(8); set => SetCm(8, value, nameof(CmBB)); }
+
     /// <summary>Reset all this adjustment's params to defaults (header Reset button).</summary>
     public void ResetAdjustment()
     {
@@ -266,6 +494,10 @@ public sealed partial class LayerViewModel : ObservableObject
         a.HueShift = 0; a.Saturation = 1f; a.Lightness = 0;
         a.Exposure = 0; a.Vibrance = 0; a.Threshold = 0.5f; a.Posterize = 6f;
         a.BwR = 0.3f; a.BwG = 0.59f; a.BwB = 0.11f; a.Temperature = 0; a.Tint = 0;
+        a.Shadows = 0; a.Highlights = 0;
+        Array.Clear(a.ColorBalance);
+        float[] identity = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+        identity.CopyTo(a.ChannelMix, 0);
         for (int ch = 0; ch < a.Curves.Length; ch++)
         { a.Curves[ch].Clear(); a.Curves[ch].Add((0f, 0f)); a.Curves[ch].Add((1f, 1f)); }
         a.Dirty = true;
@@ -278,6 +510,7 @@ public sealed partial class LayerViewModel : ObservableObject
         OnPropertyChanged(nameof(ThresholdPct)); OnPropertyChanged(nameof(PosterizeLevels));
         OnPropertyChanged(nameof(BwRPct)); OnPropertyChanged(nameof(BwGPct)); OnPropertyChanged(nameof(BwBPct));
         OnPropertyChanged(nameof(TemperaturePct)); OnPropertyChanged(nameof(TintPct));
+        OnPropertyChanged(string.Empty);   // refresh the 9+9 colour-balance / channel-mixer sliders
     }
 
     // HSL (hue -180..180 deg, sat 0..200, light -100..100)

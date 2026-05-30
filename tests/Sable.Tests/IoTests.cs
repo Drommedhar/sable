@@ -107,6 +107,25 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesLocksAndColorTag()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "A")
+        { LockPosition = true, LockPixels = true, LockAlpha = true, ColorTag = 5 });
+        var path = Path.Combine(Path.GetTempPath(), $"lock_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = SableFile.Load(path).Layers[0];
+            Assert.True(l.LockPosition);
+            Assert.True(l.LockPixels);
+            Assert.True(l.LockAlpha);
+            Assert.Equal(5, l.ColorTag);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesClipFlag()
     {
         var doc = Document.CreateDemo(32, 32);
@@ -157,6 +176,101 @@ public class SableFileTests
             Assert.Equal(0.4f, ((AdjustmentLayer)loaded.Layers[3]).Threshold, 4);
             Assert.Equal(8f, ((AdjustmentLayer)loaded.Layers[4]).Posterize, 4);
             Assert.Equal(AdjustmentKind.Invert, ((AdjustmentLayer)loaded.Layers[5]).Kind);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesLayerEffects()
+    {
+        var doc = new Document(16, 16);
+        var px = new PixelLayer(16, 16, "fx");
+        px.Effects.Add(new LayerEffect { Kind = LayerEffectKind.DropShadow, R = 0.1f, G = 0.2f, B = 0.3f, Opacity = 0.5f, Radius = 9, OffsetX = 5, OffsetY = -3 });
+        px.Effects.Add(new LayerEffect { Kind = LayerEffectKind.Stroke, R = 1, Size = 4, StrokePos = StrokePosition.Inside });
+        doc.Layers.Add(px);
+        var path = Path.Combine(Path.GetTempPath(), $"fx_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var l = loaded.Layers[0];
+            Assert.Equal(2, l.Effects.Count);
+            var ds = l.Effects[0];
+            Assert.Equal(LayerEffectKind.DropShadow, ds.Kind);
+            Assert.Equal(0.5f, ds.Opacity, 4);
+            Assert.Equal(9f, ds.Radius, 4);
+            Assert.Equal(5f, ds.OffsetX, 4);
+            Assert.Equal(-3f, ds.OffsetY, 4);
+            var st = l.Effects[1];
+            Assert.Equal(LayerEffectKind.Stroke, st.Kind);
+            Assert.Equal(StrokePosition.Inside, st.StrokePos);
+            Assert.Equal(4f, st.Size, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesGradientAndBevelEffects()
+    {
+        var doc = new Document(16, 16);
+        var px = new PixelLayer(16, 16, "fx");
+        px.Effects.Add(new LayerEffect { Kind = LayerEffectKind.GradientOverlay, R = 0.1f, G = 0.2f, B = 0.3f, R2 = 0.4f, G2 = 0.5f, B2 = 0.6f, Angle = 45 });
+        px.Effects.Add(new LayerEffect { Kind = LayerEffectKind.Bevel, R = 1, G = 1, B = 1, R2 = 0, G2 = 0, B2 = 0, Size = 5, Angle = 120, Depth = 2.5f });
+        doc.Layers.Add(px);
+        var path = Path.Combine(Path.GetTempPath(), $"fxgb_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = SableFile.Load(path).Layers[0];
+            var g = l.Effects[0];
+            Assert.Equal(LayerEffectKind.GradientOverlay, g.Kind);
+            Assert.Equal(0.4f, g.R2, 4); Assert.Equal(0.6f, g.B2, 4); Assert.Equal(45f, g.Angle, 4);
+            var b = l.Effects[1];
+            Assert.Equal(LayerEffectKind.Bevel, b.Kind);
+            Assert.Equal(5f, b.Size, 4); Assert.Equal(120f, b.Angle, 4); Assert.Equal(2.5f, b.Depth, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesShadowsHighlights()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        doc.Layers.Add(new AdjustmentLayer(AdjustmentKind.ShadowsHighlights) { Shadows = 0.4f, Highlights = -0.25f });
+        var path = Path.Combine(Path.GetTempPath(), $"sh_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var la = (AdjustmentLayer)loaded.Layers[1];
+            Assert.Equal(0.4f, la.Shadows, 4);
+            Assert.Equal(-0.25f, la.Highlights, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesColorBalanceAndChannelMixer()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        var cb = new AdjustmentLayer(AdjustmentKind.ColorBalance);
+        for (int i = 0; i < 9; i++) cb.ColorBalance[i] = (i - 4) * 0.1f;
+        var cm = new AdjustmentLayer(AdjustmentKind.ChannelMixer);
+        cm.ChannelMix[1] = 0.25f; cm.ChannelMix[8] = 1.5f;
+        doc.Layers.Add(cb);
+        doc.Layers.Add(cm);
+        var path = Path.Combine(Path.GetTempPath(), $"cbcm_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var lcb = (AdjustmentLayer)loaded.Layers[1];
+            for (int i = 0; i < 9; i++) Assert.Equal((i - 4) * 0.1f, lcb.ColorBalance[i], 4);
+            var lcm = (AdjustmentLayer)loaded.Layers[2];
+            Assert.Equal(0.25f, lcm.ChannelMix[1], 4);
+            Assert.Equal(1.5f, lcm.ChannelMix[8], 4);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
@@ -220,6 +334,27 @@ public class SableFileTests
             Assert.Equal(0.7f, la.Curves[0][1].y, 4);
             Assert.Equal(0.25f, la.Curves[1][1].x, 4);
             Assert.Equal(0.1f, la.Curves[1][1].y, 4);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesFilterParams()
+    {
+        var doc = new Document(16, 16);
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        doc.Layers.Add(new FilterLayer(FilterKind.MotionBlur) { Radius = 14f, Amount = 2.5f, Angle = 33f, Opacity = 0.6f });
+        var path = Path.Combine(Path.GetTempPath(), $"flt2_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = SableFile.Load(path).Layers[1];
+            var flt = Assert.IsType<FilterLayer>(l);
+            Assert.Equal(FilterKind.MotionBlur, flt.Kind);
+            Assert.Equal(14f, flt.Radius, 4);
+            Assert.Equal(2.5f, flt.Amount, 4);
+            Assert.Equal(33f, flt.Angle, 4);
+            Assert.Equal(0.6f, flt.Opacity, 4);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }

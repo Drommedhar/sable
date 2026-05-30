@@ -30,12 +30,33 @@ public static class ImageCodec
     /// <summary>Encode RGBA8 pixels to a PNG file.</summary>
     public static void EncodePng(string path, int width, int height, byte[] rgba)
     {
+        using var fs = File.Create(path);
+        fs.Write(EncodePngBytes(width, height, rgba));
+    }
+
+    /// <summary>Encode RGBA8 pixels to PNG bytes (for the OS clipboard).</summary>
+    public static byte[] EncodePngBytes(int width, int height, byte[] rgba)
+    {
         var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using var bmp = new SKBitmap(info);
         Marshal.Copy(rgba, 0, bmp.GetPixels(), Math.Min(rgba.Length, width * height * 4));
         using var img = SKImage.FromBitmap(bmp);
         using var data = img.Encode(SKEncodedImageFormat.Png, 100);
-        using var fs = File.Create(path);
-        data.SaveTo(fs);
+        return data.ToArray();
+    }
+
+    /// <summary>Decode image bytes (PNG/JPEG/…) to RGBA8, or null if undecodable (OS clipboard paste).</summary>
+    public static (int width, int height, byte[] rgba)? DecodeRgbaBytes(byte[] bytes)
+    {
+        using var input = SKBitmap.Decode(bytes);
+        if (input is null) return null;
+        var info = new SKImageInfo(input.Width, input.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var bmp = new SKBitmap(info);
+        using (var canvas = new SKCanvas(bmp))
+        {
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawBitmap(input, 0, 0);
+        }
+        return (input.Width, input.Height, bmp.Bytes);
     }
 }

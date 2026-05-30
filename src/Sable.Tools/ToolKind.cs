@@ -13,6 +13,7 @@ public enum ToolKind
     Lasso,        // freehand selection
     MagicWand,    // contiguous-color selection
     Brush,
+    Pencil,       // hard-edged aliased brush
     Eraser,
     Fill,         // bucket / flood
     Gradient,     // linear gradient fill (foreground → transparent)

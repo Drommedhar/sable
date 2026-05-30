@@ -45,6 +45,16 @@ public sealed class AdjustmentLayer : Layer
     public float Temperature { get; set; }      // -1..1 (cool..warm)
     public float Tint { get; set; }             // -1..1 (green..magenta)
 
+    // Shadows / Highlights
+    public float Shadows { get; set; }          // -1..1 (+ lifts shadows)
+    public float Highlights { get; set; }       // -1..1 (+ recovers highlights)
+
+    // Colour Balance — shadow/mid/highlight RGB shifts (-1..1), 9 values
+    public float[] ColorBalance { get; } = new float[9];
+
+    // Channel Mixer — 3x3 row-major (outR=row0·rgb, ...), default identity
+    public float[] ChannelMix { get; } = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+
     // Curves — 4 channels (0=composite/RGB, 1=R, 2=G, 3=B); each a sorted point list (x,y in 0..1).
     public const int CurveChannels = 4;
     public const int LutSize = 256;
@@ -68,8 +78,28 @@ public sealed class AdjustmentLayer : Layer
             AdjustmentKind.Invert => "Invert",
             AdjustmentKind.BlackWhite => "Black & White",
             AdjustmentKind.WhiteBalance => "White Balance",
+            AdjustmentKind.ColorBalance => "Colour Balance",
+            AdjustmentKind.ChannelMixer => "Channel Mixer",
+            AdjustmentKind.ShadowsHighlights => "Shadows / Highlights",
             _ => "Adjustment"
         };
+    }
+
+    protected override Layer CreateClone()
+    {
+        var c = new AdjustmentLayer(Kind)
+        {
+            Brightness = Brightness, Contrast = Contrast,
+            InBlack = InBlack, InWhite = InWhite, Gamma = Gamma, OutBlack = OutBlack, OutWhite = OutWhite,
+            HueShift = HueShift, Saturation = Saturation, Lightness = Lightness,
+            Exposure = Exposure, Vibrance = Vibrance, Threshold = Threshold, Posterize = Posterize,
+            BwR = BwR, BwG = BwG, BwB = BwB, Temperature = Temperature, Tint = Tint,
+            Shadows = Shadows, Highlights = Highlights,
+        };
+        ColorBalance.CopyTo(c.ColorBalance, 0);
+        ChannelMix.CopyTo(c.ChannelMix, 0);
+        for (int ch = 0; ch < CurveChannels; ch++) { c.Curves[ch].Clear(); c.Curves[ch].AddRange(Curves[ch]); }
+        return c;
     }
 
     /// <summary>Fill a 4×256 LUT (channel-major, values 0..1) from the curve control points.</summary>
@@ -144,6 +174,9 @@ public sealed class AdjustmentLayer : Layer
             case AdjustmentKind.Invert:    break;
             case AdjustmentKind.BlackWhite: p[0] = BwR; p[1] = BwG; p[2] = BwB; break;
             case AdjustmentKind.WhiteBalance: p[0] = Temperature; p[1] = Tint; break;
+            case AdjustmentKind.ColorBalance: ColorBalance.AsSpan(0, 9).CopyTo(p); break;
+            case AdjustmentKind.ChannelMixer: ChannelMix.AsSpan(0, 9).CopyTo(p); break;
+            case AdjustmentKind.ShadowsHighlights: p[0] = Shadows; p[1] = Highlights; break;
             default: // BrightnessContrast
                 p[0] = Brightness; p[1] = Contrast;
                 break;
@@ -164,4 +197,7 @@ public enum AdjustmentKind
     Invert = 8,
     BlackWhite = 9,
     WhiteBalance = 10,
+    ColorBalance = 11,
+    ChannelMixer = 12,
+    ShadowsHighlights = 13,
 }

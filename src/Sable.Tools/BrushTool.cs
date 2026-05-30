@@ -31,6 +31,12 @@ public sealed class BrushTool
     /// <summary>When true the brush erases (destination-out) instead of painting.</summary>
     public bool Erase { get; set; }
 
+    /// <summary>Transparency lock: paint colour but preserve each pixel's existing alpha (PLAN §16.3).</summary>
+    public bool LockAlpha { get; set; }
+
+    /// <summary>Pencil: hard aliased edge (no soft falloff / antialiasing).</summary>
+    public bool Pencil { get; set; }
+
     /// <summary>Optional clip rect (doc px) — stamps only inside it (selection). Null = unclipped.</summary>
     public (int X, int Y, int W, int H)? Clip { get; set; }
 
@@ -83,10 +89,15 @@ public sealed class BrushTool
             float dist = MathF.Sqrt(dx * dx + dy * dy);
             if (dist > r) continue;
 
-            // coverage: 1 inside `inner`, smooth falloff to 0 at `r`
-            float t = dist <= inner ? 1f : 1f - (dist - inner) / MathF.Max(1e-3f, r - inner);
-            float cov = Math.Clamp(t, 0f, 1f);
-            cov = cov * cov * (3f - 2f * cov);     // smoothstep
+            // coverage: 1 inside `inner`, smooth falloff to 0 at `r` (pencil = hard binary edge)
+            float cov;
+            if (Pencil) cov = dist <= r ? 1f : 0f;
+            else
+            {
+                float t = dist <= inner ? 1f : 1f - (dist - inner) / MathF.Max(1e-3f, r - inner);
+                cov = Math.Clamp(t, 0f, 1f);
+                cov = cov * cov * (3f - 2f * cov);     // smoothstep
+            }
 
             // retouch modes: transform the existing pixel under the dab
             if (Mode != BrushMode.Paint)
@@ -113,6 +124,16 @@ public sealed class BrushTool
 
             int i = (y * w + x) * 4;
             float dr = px[i] / 255f, dg = px[i + 1] / 255f, db = px[i + 2] / 255f, da = px[i + 3] / 255f;
+
+            if (LockAlpha)
+            {
+                // transparency lock: tint colour toward the brush, keep alpha (no paint on empty pixels)
+                if (da <= 0f) continue;
+                px[i]     = (byte)(Math.Clamp(dr + (csr - dr) * sa, 0f, 1f) * 255f + 0.5f);
+                px[i + 1] = (byte)(Math.Clamp(dg + (csg - dg) * sa, 0f, 1f) * 255f + 0.5f);
+                px[i + 2] = (byte)(Math.Clamp(db + (csb - db) * sa, 0f, 1f) * 255f + 0.5f);
+                continue;
+            }
 
             if (Erase)
             {

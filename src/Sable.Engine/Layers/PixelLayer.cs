@@ -31,6 +31,13 @@ public sealed class PixelLayer : Layer
         DirtyTiles.Clear();
     }
 
+    protected override Layer CreateClone()
+    {
+        var c = new PixelLayer(Width, Height, Name);
+        Pixels.CopyTo(c.Pixels.AsSpan());
+        return c;
+    }
+
     // 256² tile access (PLAN §4) delegates to RasterTiles (shared with masks).
     public byte[] GetTile(int tx, int ty) => RasterTiles.GetTile(Pixels, Width, Height, tx, ty);
     public void SetTile(int tx, int ty, byte[] data) => RasterTiles.SetTile(Pixels, Width, Height, tx, ty, data);

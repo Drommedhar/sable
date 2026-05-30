@@ -83,4 +83,6 @@ public sealed class ShapeLayer : Layer
         double dist = System.Math.Sqrt((x - px) * (x - px) + (y - py) * (y - py));
         return (float)System.Math.Clamp(halfW - dist + 0.5, 0, 1);
     }
+
+    protected override Layer CreateClone() => new ShapeLayer(Kind, X, Y, W, H, R, G, B) { A = A, StrokeWidth = StrokeWidth };
 }

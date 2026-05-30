@@ -302,6 +302,85 @@ public class LayerCommandTests
     }
 }
 
+public class ReplaceLayersCommandTests
+{
+    [Fact]
+    public void Replace_CollapsesAndUndoRestores()
+    {
+        var doc = new Document(8, 8);
+        var a = new PixelLayer(8, 8, "a");
+        var b = new PixelLayer(8, 8, "b");
+        var c = new PixelLayer(8, 8, "c");
+        doc.Layers.Add(a); doc.Layers.Add(b); doc.Layers.Add(c);   // [a,b,c]
+        var merged = new PixelLayer(8, 8, "merged");
+        var stack = new UndoStack();
+
+        stack.Execute(new ReplaceLayersCommand(doc, doc.Layers, new[] { a, b }, 0, merged, "Merge Down"));
+        Assert.Equal(2, doc.Layers.Count);
+        Assert.Same(merged, doc.Layers[0]);
+        Assert.Same(c, doc.Layers[1]);
+
+        stack.Undo();
+        Assert.Equal(3, doc.Layers.Count);
+        Assert.Same(a, doc.Layers[0]);
+        Assert.Same(b, doc.Layers[1]);
+        Assert.Same(c, doc.Layers[2]);
+
+        stack.Redo();
+        Assert.Equal(2, doc.Layers.Count);
+        Assert.Same(merged, doc.Layers[0]);
+    }
+}
+
+public class LayerCloneTests
+{
+    [Fact]
+    public void Clone_PixelLayer_DeepCopiesPixelsMaskEffects()
+    {
+        var p = new PixelLayer(8, 8, "A") { Opacity = 0.5f, BlendMode = BlendMode.Multiply, OffsetX = 3 };
+        p.Pixels[0] = 200;
+        p.AddWhiteMask(8, 8);
+        p.Effects.Add(new LayerEffect { Kind = LayerEffectKind.DropShadow, Radius = 9 });
+
+        var c = (PixelLayer)p.Clone();
+        Assert.NotSame(p.Pixels, c.Pixels);
+        Assert.Equal(200, c.Pixels[0]);
+        Assert.Equal(0.5f, c.Opacity, 4);
+        Assert.Equal(BlendMode.Multiply, c.BlendMode);
+        Assert.Equal(3, c.OffsetX);
+        Assert.NotSame(p.Mask, c.Mask);
+        Assert.Single(c.Effects);
+        Assert.NotSame(p.Effects[0], c.Effects[0]);
+        Assert.Equal(9f, c.Effects[0].Radius, 4);
+
+        c.Pixels[0] = 1;                 // mutating the clone must not touch the original
+        Assert.Equal(200, p.Pixels[0]);
+    }
+
+    [Fact]
+    public void Clone_Adjustment_CopiesParamsAndCurves()
+    {
+        var a = new AdjustmentLayer(AdjustmentKind.Curves) { Brightness = 0.3f };
+        a.Curves[0].Insert(1, (0.4f, 0.7f));
+        var c = (AdjustmentLayer)a.Clone();
+        Assert.Equal(AdjustmentKind.Curves, c.Kind);
+        Assert.Equal(0.3f, c.Brightness, 4);
+        Assert.Equal(3, c.Curves[0].Count);
+        Assert.NotSame(a.Curves[0], c.Curves[0]);
+    }
+
+    [Fact]
+    public void Clone_Group_DeepCopiesChildren()
+    {
+        var g = new GroupLayer("G");
+        g.Children.Add(new PixelLayer(4, 4, "child"));
+        var c = (GroupLayer)g.Clone();
+        Assert.Single(c.Children);
+        Assert.NotSame(g.Children[0], c.Children[0]);
+        Assert.IsType<PixelLayer>(c.Children[0]);
+    }
+}
+
 public class AdjustmentLayerTests
 {
     [Fact]
@@ -358,6 +437,27 @@ public class AdjustmentLayerTests
             _ => 5f,
         };
         Assert.Equal(expected, p[0], 4);
+    }
+
+    [Fact]
+    public void PackParams_ColorBalance_NineValues()
+    {
+        var a = new AdjustmentLayer(AdjustmentKind.ColorBalance);
+        for (int i = 0; i < 9; i++) a.ColorBalance[i] = (i + 1) * 0.1f;
+        Span<float> p = stackalloc float[12];
+        a.PackParams(p);
+        for (int i = 0; i < 9; i++) Assert.Equal((i + 1) * 0.1f, p[i], 4);
+    }
+
+    [Fact]
+    public void PackParams_ChannelMixer_DefaultIdentity()
+    {
+        var a = new AdjustmentLayer(AdjustmentKind.ChannelMixer);
+        Span<float> p = stackalloc float[12];
+        a.PackParams(p);
+        // identity 3x3 row-major
+        Assert.Equal(1f, p[0], 4); Assert.Equal(1f, p[4], 4); Assert.Equal(1f, p[8], 4);
+        Assert.Equal(0f, p[1], 4); Assert.Equal(0f, p[5], 4);
     }
 
     [Fact]

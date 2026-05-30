@@ -10,6 +10,56 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Sable.App/Theme.axaml" />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Compact dark checkbox (Affinity-size box). Bespoke template so the box size
+                 is driven by CheckBoxBoxSize and doesn't depend on Fluent's part names. -->
+            <ControlTheme x:Key="{x:Type CheckBox}" TargetType="CheckBox">
+                <Setter Property="Foreground" Value="#FFDDDDDD" />
+                <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Border x:Name="box" Grid.Column="0"
+                                    Width="{StaticResource CheckBoxBoxSize}" Height="{StaticResource CheckBoxBoxSize}"
+                                    CornerRadius="3" Background="#FF2B2B2B"
+                                    BorderBrush="#FF5A5A5A" BorderThickness="1" VerticalAlignment="Center">
+                                <Path x:Name="tick" Stretch="Uniform" Margin="2.5"
+                                      Stroke="White" StrokeThickness="1.7"
+                                      StrokeLineCap="Round" StrokeJoin="Round"
+                                      Data="M2 6 L5 9 L10 2" IsVisible="False" />
+                            </Border>
+                            <ContentPresenter x:Name="PART_ContentPresenter" Grid.Column="1"
+                                              Margin="6,0,0,0" VerticalAlignment="Center"
+                                              Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter>
+
+                <Style Selector="^:checked /template/ Path#tick">
+                    <Setter Property="IsVisible" Value="True" />
+                </Style>
+                <Style Selector="^:checked /template/ Border#box">
+                    <Setter Property="Background" Value="#FF3A6EA5" />
+                    <Setter Property="BorderBrush" Value="#FF3A6EA5" />
+                </Style>
+                <Style Selector="^:indeterminate /template/ Path#tick">
+                    <Setter Property="IsVisible" Value="True" />
+                    <Setter Property="Data" Value="M2 6 H10" />
+                </Style>
+                <Style Selector="^:indeterminate /template/ Border#box">
+                    <Setter Property="Background" Value="#FF3A6EA5" />
+                    <Setter Property="BorderBrush" Value="#FF3A6EA5" />
+                </Style>
+                <Style Selector="^:pointerover /template/ Border#box">
+                    <Setter Property="BorderBrush" Value="#FF7A7A7A" />
+                </Style>
+                <Style Selector="^:disabled">
+                    <Setter Property="Opacity" Value="0.5" />
+                </Style>
+            </ControlTheme>
         </ResourceDictionary>
     </Application.Resources>
 
@@ -197,8 +247,22 @@
             <Setter Property="Foreground" Value="#FFAAAAAA" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
         </Style>
+        <!-- dense rows for the Layer Effects master list -->
+        <Style Selector="ListBox#FxList > ListBoxItem">
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
 
-        <!-- compact checkbox -->
+        <!-- right-aligned form label (Layer Effects dialog) -->
+        <Style Selector="TextBlock.fxLabel">
+            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- compact checkbox: a bespoke ControlTheme drives the box size (Theme.axaml token),
+             version-proof vs Fluent's internal template part names. -->
         <Style Selector="CheckBox">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />

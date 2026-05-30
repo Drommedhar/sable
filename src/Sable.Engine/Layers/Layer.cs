@@ -24,6 +24,14 @@ public abstract class Layer
     /// <summary>Clip to the layer(s) below (clipping mask): only show where the backdrop is opaque (PLAN §5A.5).</summary>
     public bool ClipToBelow { get; set; }
 
+    /// <summary>Lock position/transform (Move blocked), lock pixels (paint blocked), lock alpha (paint preserves alpha). PLAN §16.3.</summary>
+    public bool LockPosition { get; set; }
+    public bool LockPixels { get; set; }
+    public bool LockAlpha { get; set; }
+
+    /// <summary>Colour tag index 0=none, 1..7 = red/orange/yellow/green/blue/purple/grey (Affinity row strip).</summary>
+    public int ColorTag { get; set; }
+
     /// <summary>Non-destructive position offset in document pixels (Move tool).</summary>
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
@@ -66,6 +74,11 @@ public abstract class Layer
 
     public bool HasMask => Mask is not null;
 
+    /// <summary>Non-destructive layer effects (drop shadow, glow, stroke, overlay) — PLAN §5/§16.6.</summary>
+    public List<LayerEffect> Effects { get; } = new();
+
+    public bool HasEffects => Effects.Count > 0;
+
     /// <summary>Attach a white (fully-revealing) mask sized to the document.</summary>
     public void AddWhiteMask(int width, int height)
     {
@@ -82,4 +95,27 @@ public abstract class Layer
         MaskDirty = true;
         Dirty = true;
     }
+
+    /// <summary>Deep copy (pixels/params/mask/effects/children) — for Duplicate + clipboard.</summary>
+    public Layer Clone()
+    {
+        var c = CreateClone();
+        c.Name = Name;
+        c.Opacity = Opacity;
+        c.FillOpacity = FillOpacity;
+        c.BlendMode = BlendMode;
+        c.Visible = Visible;
+        c.ClipToBelow = ClipToBelow;
+        c.LockPosition = LockPosition; c.LockPixels = LockPixels; c.LockAlpha = LockAlpha;
+        c.ColorTag = ColorTag;
+        c.OffsetX = OffsetX; c.OffsetY = OffsetY;
+        c.ScaleX = ScaleX; c.ScaleY = ScaleY; c.Rotation = Rotation;
+        if (Mask is not null) { c.Mask = (byte[])Mask.Clone(); c.MaskDirty = true; }
+        foreach (var fx in Effects) c.Effects.Add(fx.Clone());
+        c.Dirty = true;
+        return c;
+    }
+
+    /// <summary>Create a typed copy with type-specific data (pixels/params/children); base props copied by <see cref="Clone"/>.</summary>
+    protected abstract Layer CreateClone();
 }

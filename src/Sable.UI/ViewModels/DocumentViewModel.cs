@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Sable.Core;
@@ -8,6 +9,9 @@ using Sable.Engine.Commands;
 using Sable.Engine.Layers;
 
 namespace Sable.UI.ViewModels;
+
+/// <summary>A colour-tag swatch (index + brush) for the layer panel picker.</summary>
+public sealed record TagSwatch(int Index, Avalonia.Media.IBrush Brush);
 
 /// <summary>
 /// MVVM wrapper over a <see cref="Document"/>. Structural edits (add/delete/reorder)
@@ -24,6 +28,10 @@ public sealed partial class DocumentViewModel : ObservableObject
 
     public IReadOnlyList<BlendMode> BlendModes { get; } =
         (BlendMode[])Enum.GetValues(typeof(BlendMode));
+
+    /// <summary>Colour-tag swatches for the layer panel (index 0 = none/clear).</summary>
+    public IReadOnlyList<TagSwatch> TagSwatches { get; } = Enumerable.Range(0, 8)
+        .Select(i => new TagSwatch(i, LayerViewModel.TagBrushFor(i))).ToList();
 
     [ObservableProperty]
     private LayerViewModel? _selectedLayer;
@@ -98,6 +106,25 @@ public sealed partial class DocumentViewModel : ObservableObject
 
     /// <summary>Add a pre-built layer (e.g. a drawn shape) at the top and select it. Undoable.</summary>
     public void AddAndSelect(Layer layer)
+    {
+        Undo.Execute(new AddLayerCommand(Model, Model.Layers, layer, Model.Layers.Count));
+        SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == layer);
+    }
+
+    /// <summary>Duplicate the selected layer (Ctrl+J): a deep clone inserted just above it. Undoable.</summary>
+    [RelayCommand]
+    private void DuplicateLayer()
+    {
+        if (SelectedLayer is null) return;
+        var clone = SelectedLayer.Model.Clone();
+        clone.Name = SelectedLayer.Model.Name + " copy";
+        var parent = TargetParent();
+        Undo.Execute(new AddLayerCommand(Model, parent, clone, InsertIndex(parent)));
+        SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == clone);
+    }
+
+    /// <summary>Add a pre-built layer at the top of the document and select it. Undoable (used by Paste).</summary>
+    public void PasteLayer(Layer layer)
     {
         Undo.Execute(new AddLayerCommand(Model, Model.Layers, layer, Model.Layers.Count));
         SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == layer);
@@ -203,6 +230,25 @@ public sealed partial class DocumentViewModel : ObservableObject
             Undo.Execute(new MoveLayerToCommand(Model, dragged, pT, pT.IndexOf(target)));
             SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == dragged);
         }
+    }
+
+    /// <summary>Drop <paramref name="dragged"/> just above/below <paramref name="target"/> (between-row reorder).
+    /// UI is top→bottom; "above" = toward the top = a higher index in the bottom→top model list.</summary>
+    public void DropLayerRelative(Layer dragged, Layer target, bool above)
+    {
+        if (dragged == target) return;
+        if (dragged is GroupLayer dg && Contains(dg, target)) return;   // no cycles
+        var parent = Model.FindParent(target) ?? Model.Layers;
+        int ti = parent.IndexOf(target);
+        int insert = above ? ti + 1 : ti;
+        if (ReferenceEquals(Model.FindParent(dragged), parent))
+        {
+            int di = parent.IndexOf(dragged);
+            if (di < insert) insert--;       // MoveLayerToCommand removes first → shift insert down
+            if (di == insert) return;        // no-op (already there)
+        }
+        Undo.Execute(new MoveLayerToCommand(Model, dragged, parent, insert));
+        SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == dragged);
     }
 
     private static bool Contains(GroupLayer group, Layer layer)

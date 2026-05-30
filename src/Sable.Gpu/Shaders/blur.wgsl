@@ -2,7 +2,8 @@
 // vertical. Reads the backdrop, writes the blurred result. Edge pixels clamp.
 
 struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
-struct Blur { radius: f32, dirX: f32, dirY: f32, _p: f32 };
+// box: 1 = uniform weights (box blur) instead of Gaussian
+struct Blur { radius: f32, dirX: f32, dirY: f32, box: f32 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
 @group(0) @binding(1) var<uniform> blur: Blur;
@@ -38,7 +39,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let sx = clamp(i32(gid.x) + dx * k, 0, i32(dims.width) - 1);
         let sy = clamp(i32(gid.y) + dy * k, 0, i32(dims.height) - 1);
         let c = unpack(src[u32(sy) * dims.width + u32(sx)]);
-        let w = exp(-f32(k * k) / twoSigma2);
+        let w = select(exp(-f32(k * k) / twoSigma2), 1.0, blur.box > 0.5);
         sum = sum + vec4<f32>(c.xyz * c.w, c.w) * w;   // premultiplied
         wsum = wsum + w;
     }

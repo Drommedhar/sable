@@ -33,6 +33,8 @@ internal sealed unsafe class UnsupportedBackend(string os) : IPlatformBackend
         public void Attach(nint windowHandle, ICanvasInputSink sink) { }
         public void Capture() { }
         public void ReleaseCapture() { }
+        public void HideCursor() { }
+        public void RestoreCursor() { }
         public void Dispose() { }
     }
 }

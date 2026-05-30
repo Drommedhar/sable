@@ -19,6 +19,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private IInputSource? _input;
 
     private bool _painting;
+    private bool _hudAdjust;                       // Ctrl+Alt brush size/hardness HUD
+    private double _hudStartSx, _hudStartSy;
+    private float _hudStartRadius, _hudStartHardness;
     private double _lastDocX, _lastDocY;
     private StrokeSession? _session;
     private bool _panningMouse;
@@ -92,6 +95,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     /// <summary>Raised (R,G,B) when the eyedropper (Alt+click) samples a color.</summary>
     public Action<byte, byte, byte>? ColorPicked { get; set; }
+
+    /// <summary>Raised after a Ctrl+Alt HUD brush adjust so the options-bar sliders can resync.</summary>
+    public Action? BrushAdjusted { get; set; }
 
     /// <summary>Raised with the undoable command when a brush gesture completes.</summary>
     public Action<IUndoableCommand>? CommandProduced { get; set; }
@@ -175,6 +181,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     void ICanvasInputSink.PointerMove(double sx, double sy, CanvasMods mods)
     {
         _lastMouseX = sx; _lastMouseY = sy;
+
+        if (_hudAdjust)
+        {
+            // Affinity HUD: horizontal drag = size, vertical = hardness. Ring stays anchored
+            // at the drag-start point (don't let the cursor move the brush position).
+            Brush.Radius = Math.Clamp(_hudStartRadius + (float)(sx - _hudStartSx) * 0.5f, 1f, 500f);
+            Brush.Hardness = Math.Clamp(_hudStartHardness - (float)(sy - _hudStartSy) * 0.005f, 0f, 1f);
+            _lastMouseX = _hudStartSx; _lastMouseY = _hudStartSy;   // anchor the preview ring
+            UpdatePreviewDab();
+            return;
+        }
 
         if (_painting)
         {
@@ -341,12 +358,16 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         if (PaintMask)
         {
             Brush.Erase = false;
+            Brush.LockAlpha = false;
             if (!layer.HasMask) layer.AddWhiteMask(layer.Width, layer.Height);
             // mask upload is full-buffer for now (partial mask upload later)
             return new StrokeSession(layer.Mask!, layer.Width, layer.Height, Brush,
                 _ => { layer.MaskDirty = true; layer.Dirty = true; });
         }
+        if (layer.LockPixels) return null;   // locked pixels: no painting
         Brush.Erase = ActiveTool == ToolKind.Eraser;
+        Brush.Pencil = ActiveTool == ToolKind.Pencil;   // hard aliased edge
+        Brush.LockAlpha = layer.LockAlpha;   // preserve existing alpha (transparency lock)
         return new StrokeSession(layer.Pixels, layer.Width, layer.Height, Brush,
             tiles => layer.MarkTilesDirty(tiles));
     }
@@ -355,7 +376,21 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     {
         var (dx, dy) = MapToDoc(sx, sy);
         bool alt = mods.HasFlag(CanvasMods.Alt);
-        bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Eraser or ToolKind.Fill;
+        bool brushy = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
+            or ToolKind.CloneStamp or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
+            or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
+
+        // Affinity HUD: Ctrl+Alt + drag adjusts brush size/hardness (intercept before painting)
+        if (mods.HasFlag(CanvasMods.Ctrl) && alt && brushy)
+        {
+            _hudAdjust = true; _input?.Capture();
+            _input?.HideCursor();   // Affinity: hide the OS cursor; restore at start pos on release
+            _hudStartSx = sx; _hudStartSy = sy;
+            _hudStartRadius = Brush.Radius; _hudStartHardness = Brush.Hardness;
+            return;
+        }
+
+        bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill;
         if (alt && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
         // clone stamp: Alt+click sets the source point
         if (ActiveTool == ToolKind.CloneStamp && alt)
@@ -486,7 +521,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
             case ToolKind.Move:
-                if (SelLayer is { } ml)
+                if (SelLayer is { } ml && !ml.LockPosition)
                 {
                     _moving = true; _input?.Capture();
                     _moveStartX = dx; _moveStartY = dy;
@@ -517,6 +552,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void OnLeftUp()
     {
+        if (_hudAdjust)
+        {
+            _hudAdjust = false;
+            _input?.RestoreCursor();   // warp the OS cursor back to where the drag began
+            _input?.ReleaseCapture();
+            BrushAdjusted?.Invoke();   // resync the options-bar sliders
+            return;
+        }
         if (_painting)
         {
             _painting = false;
@@ -668,6 +711,59 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         CommandProduced?.Invoke(new PaintRasterCommand(target, w, h, before, after, t => layer.MarkTilesDirty(t)));
     }
 
+    /// <summary>Copy the selected region of the active layer (or the whole layer if no selection) → RGBA8 region.</summary>
+    public (byte[] px, int w, int h)? CopyRegion()
+    {
+        if (_doc is null || ActiveLayer is not { } layer) return null;
+        if (_doc.Selection is { } sel && sel.W > 0 && sel.H > 0)
+        {
+            var mask = _doc.SelectionMask; int mw = _doc.Width;
+            int x0 = Math.Max(0, sel.X), y0 = Math.Max(0, sel.Y);
+            int x1 = Math.Min(layer.Width, sel.Right), y1 = Math.Min(layer.Height, sel.Bottom);
+            int w = x1 - x0, h = y1 - y0;
+            if (w <= 0 || h <= 0) return null;
+            var src = layer.Pixels; var outp = new byte[w * h * 4];
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int si = ((y0 + y) * layer.Width + (x0 + x)) * 4;
+                int di = (y * w + x) * 4;
+                byte cov = mask is not null ? mask[(y0 + y) * mw + (x0 + x)] : (byte)255;
+                outp[di] = src[si]; outp[di + 1] = src[si + 1]; outp[di + 2] = src[si + 2];
+                outp[di + 3] = (byte)(src[si + 3] * cov / 255);
+            }
+            return (outp, w, h);
+        }
+        return ((byte[])layer.Pixels.Clone(), layer.Width, layer.Height);
+    }
+
+    /// <summary>Copy-merged: the flattened composite, cropped to the selection (or whole doc) → RGBA8 region.</summary>
+    public (byte[] px, int w, int h)? CopyMerged()
+    {
+        var comp = ReadComposite();
+        if (comp is null || _doc is null) return null;
+        if (_doc.Selection is { } sel && sel.W > 0 && sel.H > 0)
+        {
+            var mask = _doc.SelectionMask; int mw = _doc.Width;
+            int x0 = Math.Max(0, sel.X), y0 = Math.Max(0, sel.Y);
+            int x1 = Math.Min(_doc.Width, sel.Right), y1 = Math.Min(_doc.Height, sel.Bottom);
+            int w = x1 - x0, h = y1 - y0;
+            if (w <= 0 || h <= 0) return null;
+            var outp = new byte[w * h * 4];
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int si = ((y0 + y) * _doc.Width + (x0 + x)) * 4;
+                int di = (y * w + x) * 4;
+                byte cov = mask is not null ? mask[(y0 + y) * mw + (x0 + x)] : (byte)255;
+                outp[di] = comp[si]; outp[di + 1] = comp[si + 1]; outp[di + 2] = comp[si + 2];
+                outp[di + 3] = (byte)(comp[si + 3] * cov / 255);
+            }
+            return (outp, w, h);
+        }
+        return (comp, _doc.Width, _doc.Height);
+    }
+
     /// <summary>Active layer's 4 transformed corners (TL,TR,BR,BL) in surface pixels.</summary>
     public float[] CornersSurface(PixelLayer l)
     {
@@ -801,7 +897,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void DoFill(double dx, double dy)
     {
-        if (ActiveLayer is not { } layer) return;
+        if (ActiveLayer is not { } layer || layer.LockPixels) return;   // locked pixels: no fill
         var target = layer.Pixels;
         int w = layer.Width, h = layer.Height;
         var before = SnapshotAllTiles(target, w, h);
@@ -823,13 +919,32 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         return snap;
     }
 
+    /// <summary>Eyedropper sample radius: 0 = point, 1 = 3×3 avg, 2 = 5×5 avg.</summary>
+    public int EyedropperRadius { get; set; }
+    /// <summary>Eyedropper samples the merged composite instead of the active layer.</summary>
+    public bool EyedropperAllLayers { get; set; }
+
     private void SampleColor(double dx, double dy)
     {
-        if (ActiveLayer is not { } layer) return;
-        int x = (int)Math.Clamp(dx, 0, layer.Width - 1);
-        int y = (int)Math.Clamp(dy, 0, layer.Height - 1);
-        int i = (y * layer.Width + x) * 4;
-        byte r = layer.Pixels[i], g = layer.Pixels[i + 1], b = layer.Pixels[i + 2];
+        byte[]? src; int sw, sh;
+        if (EyedropperAllLayers && ReadComposite() is { } comp && _doc is not null)
+        { src = comp; sw = _doc.Width; sh = _doc.Height; }
+        else if (ActiveLayer is { } layer)
+        { src = layer.Pixels; sw = layer.Width; sh = layer.Height; }
+        else return;
+
+        int cx = (int)Math.Clamp(dx, 0, sw - 1), cy = (int)Math.Clamp(dy, 0, sh - 1);
+        int rad = Math.Clamp(EyedropperRadius, 0, 4);
+        long rr = 0, gg = 0, bb = 0; int n = 0;
+        for (int yy = cy - rad; yy <= cy + rad; yy++)
+        for (int xx = cx - rad; xx <= cx + rad; xx++)
+        {
+            if (xx < 0 || yy < 0 || xx >= sw || yy >= sh) continue;
+            int i = (yy * sw + xx) * 4;
+            rr += src[i]; gg += src[i + 1]; bb += src[i + 2]; n++;
+        }
+        if (n == 0) return;
+        byte r = (byte)(rr / n), g = (byte)(gg / n), b = (byte)(bb / n);
         Brush.R = r; Brush.G = g; Brush.B = b;
         ColorPicked?.Invoke(r, g, b);
     }

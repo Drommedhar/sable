@@ -33,4 +33,9 @@ public interface IInputSource : IDisposable
     /// <summary>Capture/release the pointer for the duration of a drag gesture.</summary>
     void Capture();
     void ReleaseCapture();
+
+    /// <summary>Hide the OS cursor + remember its position (HUD brush adjust).</summary>
+    void HideCursor();
+    /// <summary>Restore the OS cursor and warp it back to where <see cref="HideCursor"/> hid it.</summary>
+    void RestoreCursor();
 }

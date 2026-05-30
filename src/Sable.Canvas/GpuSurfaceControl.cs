@@ -106,6 +106,16 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         return _compositor.CompositeToBytes(_doc);
     }
 
+    /// <summary>Composite an arbitrary set of layers (doc-sized) to RGBA8 — for merge/flatten/rasterise.</summary>
+    public byte[]? RenderLayersToPixels(System.Collections.Generic.List<Sable.Engine.Layers.Layer> layers)
+    {
+        if (_compositor is null || _doc is null || layers.Count == 0) return null;
+        _compositor.Preview = null;
+        var tmp = new Document(_doc.Width, _doc.Height);
+        tmp.Layers.AddRange(layers);
+        return _compositor.CompositeToBytes(tmp);
+    }
+
     private ViewportTransform ComputeViewport()
         => ViewportTransform.Fit(_width, _height, _doc?.Width ?? 1, _doc?.Height ?? 1, _zoom, _panX, _panY);
 
