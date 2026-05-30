@@ -71,6 +71,20 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     /// <summary>Effective on-screen scale (screen pixels per document pixel); 1.0 = 100%.</summary>
     public double EffectiveScale => ComputeViewport().Scale;
 
+    /// <summary>
+    /// Viewport mapping in the control's own DIP space (device px ÷ RenderScaling): document
+    /// top-left offset + scale. The rulers use this to place ticks flush with the GPU surface.
+    /// </summary>
+    public (double ox, double oy, double scale) ViewportDip
+    {
+        get
+        {
+            var v = ComputeViewport();
+            double s = RenderScaling <= 0 ? 1.0 : RenderScaling;
+            return (v.Ox / s, v.Oy / s, v.Scale / s);
+        }
+    }
+
     /// <summary>Zoom about the surface center (keyboard).</summary>
     public void ZoomBy(double factor) => ZoomAt(factor, _width / 2.0, _height / 2.0);
 
