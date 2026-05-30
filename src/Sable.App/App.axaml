@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Sable.App"
              x:Class="Sable.App.App"
              RequestedThemeVariant="Dark">
 
@@ -11,10 +12,53 @@
                 <ResourceInclude Source="avares://Sable.App/Theme.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
+            <!-- reusable SettingRow: label left, supplied content right -->
+            <ControlTheme x:Key="{x:Type local:SettingRow}" TargetType="local:SettingRow">
+                <Setter Property="Margin" Value="0,4" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Classes="settingLabel" Text="{TemplateBinding Label}" />
+                            <ContentPresenter Grid.Column="1" VerticalAlignment="Center"
+                                              Content="{TemplateBinding Content}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <!-- Affinity-style pill toggle switch (bespoke template; Avalonia slides PART_MovingKnobs). -->
+            <ControlTheme x:Key="{x:Type ToggleSwitch}" TargetType="ToggleSwitch">
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border x:Name="track" Width="38" Height="20" CornerRadius="10"
+                                Background="{DynamicResource ChromeField}" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1">
+                            <Canvas Margin="3,0">
+                                <Panel x:Name="PART_MovingKnobs" Canvas.Left="0" Canvas.Top="3" Width="14" Height="14">
+                                    <Panel x:Name="PART_SwitchKnob" Width="14" Height="14">
+                                        <Ellipse x:Name="knob" Width="14" Height="14" Fill="#FFE6E6E6" />
+                                    </Panel>
+                                </Panel>
+                            </Canvas>
+                        </Border>
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:checked /template/ Border#track">
+                    <Setter Property="Background" Value="#FF3A6EA5" />
+                    <Setter Property="BorderBrush" Value="#FF3A6EA5" />
+                </Style>
+                <Style Selector="^:checked /template/ Ellipse#knob">
+                    <Setter Property="Fill" Value="White" />
+                </Style>
+                <Style Selector="^:pointerover /template/ Border#track">
+                    <Setter Property="BorderBrush" Value="#FF7A7A7A" />
+                </Style>
+            </ControlTheme>
+
             <!-- Compact dark checkbox (Affinity-size box). Bespoke template so the box size
                  is driven by CheckBoxBoxSize and doesn't depend on Fluent's part names. -->
             <ControlTheme x:Key="{x:Type CheckBox}" TargetType="CheckBox">
-                <Setter Property="Foreground" Value="#FFDDDDDD" />
+                <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
                 <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="Template">
@@ -22,8 +66,8 @@
                         <Grid ColumnDefinitions="Auto,*">
                             <Border x:Name="box" Grid.Column="0"
                                     Width="{StaticResource CheckBoxBoxSize}" Height="{StaticResource CheckBoxBoxSize}"
-                                    CornerRadius="3" Background="#FF2B2B2B"
-                                    BorderBrush="#FF5A5A5A" BorderThickness="1" VerticalAlignment="Center">
+                                    CornerRadius="3" Background="{DynamicResource ChromeField}"
+                                    BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" VerticalAlignment="Center">
                                 <Path x:Name="tick" Stretch="Uniform" Margin="2.5"
                                       Stroke="White" StrokeThickness="1.7"
                                       StrokeLineCap="Round" StrokeJoin="Round"
@@ -69,16 +113,16 @@
 
         <!-- Sable dark chrome: dense, pro-tool styling (PLAN §13.3). -->
         <Style Selector="Menu">
-            <Setter Property="Background" Value="#FF2D2D2D" />
+            <Setter Property="Background" Value="{DynamicResource ChromeMenuBg}" />
             <Setter Property="Height" Value="{StaticResource MenuBarHeight}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         </Style>
         <Style Selector="MenuItem">
-            <Setter Property="Foreground" Value="#FFCCCCCC" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         </Style>
         <Style Selector="TextBlock.panelHeader">
-            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeTextDim}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="8,4" />
@@ -89,7 +133,7 @@
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#FFCFCFCF" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FontSize" Value="14" />
@@ -100,7 +144,7 @@
 
         <!-- Lucide-style monochrome line icons (project icon system, PLAN §13.3 / no-emoji rule) -->
         <Style Selector="Path.icon">
-            <Setter Property="Stroke" Value="#FFCFCFCF" />
+            <Setter Property="Stroke" Value="{DynamicResource ChromeText}" />
             <Setter Property="StrokeThickness" Value="1.6" />
             <Setter Property="Fill" Value="Transparent" />
             <Setter Property="StrokeLineCap" Value="Round" />
@@ -182,14 +226,14 @@
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="Padding" Value="8,0" />
             <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="Background" Value="#FF2B2B2B" />
-            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
-            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="ComboBox /template/ Border#Background">
-            <Setter Property="Background" Value="#FF2B2B2B" />
-            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
         </Style>
 
         <!-- compact dark text box + numeric up/down (share the same field look) -->
@@ -199,9 +243,9 @@
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="Padding" Value="6,0" />
             <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="Background" Value="#FF2B2B2B" />
-            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
-            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="NumericUpDown">
@@ -209,9 +253,9 @@
             <Setter Property="Height" Value="{StaticResource ControlHeight}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="Background" Value="#FF2B2B2B" />
-            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
-            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="ShowButtonSpinner" Value="False" />
         </Style>
@@ -228,10 +272,10 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
-            <Setter Property="Background" Value="#FF2F2F2F" />
-            <Setter Property="BorderBrush" Value="#FF3C3C3C" />
+            <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#FFDDDDDD" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -244,9 +288,35 @@
 
         <!-- adjustment-panel slider label (Affinity) -->
         <Style Selector="TextBlock.adjLabel">
-            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeTextDim}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
         </Style>
+        <!-- Settings dialog: section header + setting-row label -->
+        <Style Selector="TextBlock.settingHeader">
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,10,0,2" />
+        </Style>
+        <Style Selector="TextBlock.settingLabel">
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TextBlock.settingHint">
+            <Setter Property="Foreground" Value="{DynamicResource ChromeTextFaint}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="ListBox.settingsCats > ListBoxItem">
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="ListBox.settingsCats > ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF2D5A88" />
+        </Style>
+
         <!-- dense rows for the Layer Effects master list -->
         <Style Selector="ListBox#FxList > ListBoxItem">
             <Setter Property="Padding" Value="8,4" />
@@ -255,7 +325,7 @@
 
         <!-- right-aligned form label (Layer Effects dialog) -->
         <Style Selector="TextBlock.fxLabel">
-            <Setter Property="Foreground" Value="#FFAAAAAA" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeTextDim}" />
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />

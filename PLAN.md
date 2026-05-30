@@ -524,13 +524,13 @@ Flyout grouping + options bar + Shift-cycle land alongside as the strip matures.
 - **Feather (DONE)**: `Selections.Feather` (separable box blur of the coverage mask); options-bar Feather slider → `GpuSurfaceControl.SelectionFeather`, applied on commit in `ApplyMask`. `BrushTool` now multiplies by clip-mask coverage (soft edges). 68 tests. NOTE: fill/delete still treat the selection as binary (feathered fill/delete edge = follow-up).
 - ⬜ Real Linux (Xlib/Wayland) + macOS (CAMetalLayer) backends: implement `IPlatformBackend.CreateSurface` (build the OS wgpu descriptor from Avalonia's handle) + an `IInputSource` for that OS. The shared canvas/tool code is ready.
 
-### Requested backlog (user-prioritised, ⬜ not started)
-- **Multi-document tabs**: a tab strip over the canvas (region §13.1 ①) — switch / close / "new" / "open in new tab". Today is single-doc (`LoadDocument` replaces). Needs: a list of open docs (each `Document` + its `DocumentViewModel`), active-tab switching (swap `Canvas.Document` + `DataContext`), per-tab dirty/title/`_currentPath`, close (with unsaved-changes prompt), File▸New, and Open/Open-Image creating a new tab instead of replacing. Tab UI + lifecycle is the bulk. **Sub-requirements (do together):**
-  - **Start with NO active image** — remove `Document.CreateDemo()` on launch; show an empty/welcome state (no tabs, or a start screen) until New/Open/paste/drop. (`MainWindow` ctor currently `LoadDocument(CreateDemo())`.)
-  - **Proper New dialog** (ties to §16.1) — size/units/DPI/colour-space/background (white/transparent), presets → creates an empty `Document` in a new tab.
-  - **New from clipboard** — Ctrl+N-from-clipboard / File▸New from Clipboard / paste when no doc → decode the clipboard image (`IClipboard`/`DataObject` bitmap) into a new tab sized to it.
-  - **Drag-and-drop image files** from the OS → drop onto the **canvas** = open as a new tab (or place into the active doc as a new layer — decide modifier: plain drop = new tab, modifier = add-as-layer), drop onto the **tab strip** = new tab. Handle multi-file drop (one tab each). Avalonia `DragDrop` on the window/canvas (mind the native-surface airspace — may need the drop handler on the Avalonia chrome around the canvas).
-- **Export dialog**: File▸Export… modal — pick format (PNG / JPEG / TIFF / WebP), per-format options (JPEG/WebP **quality**, PNG compression), optional resize/scale, preview/est-size. Encode via SkiaSharp (`ImageCodec` extend with quality + formats). Replaces the current direct "Export PNG". (`DocumentIO.ExportPng` → generalize to `Export(path, format, opts, rgba)`.)
+### Requested backlog (user-prioritised)
+- ✅ **Multi-document tabs (DONE, Phase 2 #1)**: `DocumentTab` (Document + own `DocumentViewModel`/undo + path/title/dirty/active); `MainWindow` `_tabs` `ObservableCollection` + tab strip (`TabStrip` ItemsControl, click-switch, × close, + new); `ActivateTab` swaps `Canvas.Document` + `DataContext` + rewires canvas callbacks (`WireCanvas`); `OpenInNewTab` for New/Open/OpenImage/drop. Close prompts on dirty (`ConfirmWindow`). Ctrl+N/Ctrl+W. Done with all sub-requirements:
+  - ✅ **Start with NO active image** — demo removed; `EmptyState` welcome overlay until New/Open/paste/drop.
+  - ✅ **New dialog** (`NewDocumentWindow`) — size + DPI + presets (Square/HD/4K/A4/IG).
+  - ✅ **New from clipboard** — File▸New from Clipboard → `ReadOsImage` (`TryGetBitmapAsync`) → new tab sized to it.
+  - ✅ **Drag-and-drop image / `.sable` files** → window-chrome `DragDrop` (Avalonia 12 `e.DataTransfer.TryGetFiles()` / `DataFormat.File`) → one new tab per file.
+- ✅ **Export dialog (DONE, Phase 2 #2)**: File▸Export… (`ExportDialog`) — format **PNG / JPEG / WebP** + quality (lossy) + scale% with live **preview** + **estimated size**; `ImageCodec.EncodeScaled(fmt, src, rgba, outW, outH, quality)` (SkiaSharp resize; JPEG flattened over white) + `ImageCodec.ImageFormat`/`Extension`; `DocumentIO.Export`. MainWindow composites (`ReadComposite`) → dialog → save picker (per-format extension). Replaced the direct Export-PNG. (TIFF not offered — SkiaSharp can't encode it.)
 - ✅ **Brush hardness + flow UI** — Hardness + Flow sliders in the brush options bar (`OnBrushHardnessChanged`/`OnBrushFlowChanged` → `Brush.Hardness`/`Flow`).
 - ✅ **Affinity HUD brush adjust** — **Ctrl+Alt + left-drag** on canvas: horizontal = size, vertical = hardness (`_hudAdjust` branch in `GpuSurfaceControl` input, intercepts before painting; live preview ring; `BrushAdjusted` event → `SyncBrushSliders`).
 - ✅ **Pencil** (B group) — `Brush.Pencil` → hard binary coverage (no antialias/falloff). ✅ **Eyedropper options** — sample size Point/3×3/5×5 (`EyedropperRadius`) + All-layers (`EyedropperAllLayers` samples the composite); options-bar panel.
@@ -647,9 +647,10 @@ Sources: [Affinity tools (Edits101)](https://edits101.com/affinity-photo-tools-a
 Not in the §16 feature comparison but needed. ⬜ all not started.
 
 ### 17.1 App lifecycle / infra
-- **Settings/preferences store** (persisted to `%AppData%/Sable` or platform-equiv) + **Preferences dialog**.
-- **Themes**: light + gray-level variants (§13.3 promised; only dark exists), switchable in prefs.
-- **Window/session state** persistence (size/pos/maximized) + **restore last session** (reopen tabs/docs) + **recent files** list.
+- ✅ **Settings store + Settings dialog (DONE, Phase 2 #3)**: `Sable.Core.Settings.SableSettings` + `SettingsService` (JSON at `%AppData%/Sable/settings.json`, pure/tested). **Affinity-style `SettingsWindow`** — search + category sidebar (General · User Interface · Performance · Colour · Machine Learning · Updates · About) + grouped right pane with **pill `ToggleSwitch`es** (bespoke ControlTheme), sliders, dropdowns. Settings: reopen-on-startup, limit-initial-zoom, save-thumbnails, default DPI, theme, UI density, tooltips, undo limit, view quality, file-recovery interval, renderer (read-only), dither gradients, auto-update, version/about. Wired now: reopen-on-startup (gates restore), default DPI (New dialog), theme; the rest are stored for their features to consume.
+- ✅ **Window/session restore + recent files (DONE)**: window size/pos/maximized saved on close + applied on launch; `OpenTabs` (saved-file paths) reopened on `Opened`; `RecentFiles` (deduped, capped 12) → **File▸Open Recent** submenu, recorded on every open/save.
+- ✅ **Theming engine (DONE)**: `Theme.axaml` `ThemeDictionaries` (Dark / Gray / Light) define `Chrome*` brush tokens; Gray = custom `Themes.Gray` `ThemeVariant` (inherits Dark). `MainWindow.ApplyTheme` sets `RequestedThemeVariant` from the setting; **MainWindow chrome surfaces bound via `{DynamicResource Chrome…}`** so Dark/Gray/Light re-theme live. 🔶 remaining: the **dialog windows + many inline text colours aren't tokenised yet** (Light theme has text-readability gaps until text tokens are added) — finish by tokenising the rest opportunistically.
+- ✅ **Reusable controls (DONE)**: `src/Sable.App/Controls/` — `LabeledSlider`, `HexColorField`, `SettingRow`; new panels compose these instead of re-rolling Grid+Slider+TextBox (CLAUDE UI conventions). Existing dialogs migrate opportunistically.
 - **File associations**: double-click `.sable` opens app, "Open with", OS file-type registration via installer.
 - **Telemetry / crash reporting** (opt-in) + **logging/diagnostics** framework.
 - **Autosave / crash recovery** (periodic snapshot of open docs; recover on next launch).
@@ -693,9 +694,9 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 7. ✅ **Brush** — hardness + flow UI, **HUD adjust** (Ctrl+Alt-drag), pencil, eyedropper options (sample size + all-layers). ⬜ gradient radial/conical/reflected = deferred (gradient flagged incorrect) (§16.7, §17.2).
 
 ### Phase 2 — Document & workflow infrastructure  *(App track, can parallel Phase 1)*
-1. **Multi-document tabs** (after Phase-0 leak fix): tab strip, per-tab Document+VM, switch/close(unsaved prompt), **no-demo start / welcome**, **New dialog**, **New from clipboard**, **drag-drop files** → tab/layer (§15 backlog).
-2. **Export dialog** — PNG/JPEG/TIFF/WebP/GIF + quality/compression/resize/preview; generalize `DocumentIO.Export` (§16.12).
-3. **Settings store + Preferences dialog** + **light/gray themes** + **window/session restore** + **recent files** (§17.1).
+1. ✅ **Multi-document tabs** — tab strip, per-tab Document+VM, switch/close(unsaved prompt), no-demo start/welcome, New dialog, New from clipboard, drag-drop files → new tab (§15 backlog).
+2. ✅ **Export dialog** — PNG/JPEG/WebP + quality + resize + preview/est-size (`ExportDialog`, `ImageCodec.EncodeScaled`, `DocumentIO.Export`). ⬜ TIFF/GIF (Skia can't encode TIFF) (§16.12).
+3. ✅ **Settings store + Preferences dialog + window/session restore + recent files** (`SableSettings`/`SettingsService`, `PreferencesWindow`, Open-Recent menu). 🔶 light/gray **chrome** theming still TODO (setting wired to Fluent variant; inline chrome colours need tokenising) (§17.1).
 4. **About dialog** + **UpdateService** (GitHub releases, Novalist-style) + **CI/CD workflows** (ci + release, Novalist-port minus SDK) (§15 backlog).
 5. **Rulers / guides / grid / snapping + smart guides + zoom UI + status-bar live info** (§16.1, §17.2).
 6. **File associations** + autosave/crash-recovery (§17.1).

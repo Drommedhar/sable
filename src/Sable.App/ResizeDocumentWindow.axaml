@@ -3,12 +3,12 @@
         x:Class="Sable.App.ResizeDocumentWindow"
         Width="380" Height="270" CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Background="#FF2A2A2A"
+        Background="{DynamicResource ChromePanel}"
         Title="Resize Document">
     <StackPanel Margin="16" Spacing="12">
 
         <Grid ColumnDefinitions="64,*,30,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Size:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="Size:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <NumericUpDown Grid.Column="1" x:Name="WBox" Minimum="1" Maximum="32768" Increment="1"
                            FormatString="0" ValueChanged="OnWidthChanged" />
             <ToggleButton Grid.Column="2" x:Name="LinkBtn" IsChecked="True" Margin="3,0"
@@ -21,19 +21,19 @@
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Units:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="Units:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" SelectedIndex="0">
                 <ComboBoxItem>Pixels</ComboBoxItem>
             </ComboBox>
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="DPI:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="DPI:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <NumericUpDown Grid.Column="1" x:Name="DpiBox" Minimum="1" Maximum="2400" Increment="1" FormatString="0" />
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Resample:" Foreground="#FFCCCCCC" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="Resample:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" x:Name="ResampleCombo" SelectedIndex="0">
                 <ComboBoxItem>Bilinear</ComboBoxItem>
                 <ComboBoxItem>Nearest</ComboBoxItem>
@@ -41,9 +41,9 @@
         </Grid>
 
         <CheckBox x:Name="ResampleCheck" Content="Resample" IsChecked="True"
-                  Foreground="#FFCCCCCC" IsCheckedChanged="OnResampleToggled" />
+                  Foreground="{DynamicResource ChromeText}" IsCheckedChanged="OnResampleToggled" />
 
-        <TextBlock x:Name="DescText" Foreground="#FF9A9A9A" FontSize="11" />
+        <TextBlock x:Name="DescText" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button Content="Resize" Click="OnResize" Width="80" />

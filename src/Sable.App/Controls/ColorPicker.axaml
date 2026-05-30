@@ -6,9 +6,9 @@
         <local:ColorWheel x:Name="Wheel" HorizontalAlignment="Center"
                           MaxWidth="{StaticResource ColorWheelMaxSize}" />
         <StackPanel Orientation="Horizontal" Spacing="6">
-            <TextBlock Text="#" Foreground="#FF9A9A9A" VerticalAlignment="Center" FontSize="12" />
+            <TextBlock Text="#" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="12" />
             <TextBox x:Name="HexBox" Width="92" Text="FFFFFF" TextChanged="OnHexChanged" />
-            <TextBlock x:Name="Readout" Foreground="#FF9A9A9A" FontSize="11" VerticalAlignment="Center" />
+            <TextBlock x:Name="Readout" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
         </StackPanel>
     </StackPanel>
 </UserControl>

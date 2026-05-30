@@ -5,7 +5,7 @@
         x:Class="Sable.App.AdjustmentWindow"
         x:DataType="vm:DocumentViewModel"
         Width="300" Height="440"
-        Background="#FF2A2A2A"
+        Background="{DynamicResource ChromePanel}"
         CanResize="True"
         ShowInTaskbar="False"
         Title="Adjustment">
@@ -54,7 +54,7 @@
     <DockPanel LastChildFill="True">
 
         <!-- header: title + Reset -->
-        <Border DockPanel.Dock="Top" Background="#FF313131" Padding="10,6">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="10,6">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding SelectedLayer.Name}" Classes="panelHeader" Padding="0"
                            VerticalAlignment="Center" />
@@ -64,10 +64,10 @@
         </Border>
 
         <!-- footer: opacity + blend mode (adjustments + filters) -->
-        <Border DockPanel.Dock="Bottom" Background="#FF313131" Padding="10,6"
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeHeaderBg}" Padding="10,6"
                 IsVisible="{Binding SelectedLayer.IsEffect}">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
-                <TextBlock Grid.Column="0" Text="Opacity" Foreground="#FFAAAAAA" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="0" Text="Opacity" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
                 <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.OpacityPercent, Mode=TwoWay}" />
                 <TextBox Grid.Column="2" Width="46" Text="{Binding SelectedLayer.OpacityPercent, Mode=TwoWay, StringFormat={}{0:0}}" />
                 <ComboBox Grid.Column="3" Width="96" ItemsSource="{Binding BlendModes}"
@@ -79,90 +79,30 @@
             <StackPanel Spacing="8" Margin="10">
 
                 <TextBlock Text="Select an adjustment or filter layer to edit its parameters."
-                           Foreground="#FF777777" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" TextWrapping="Wrap"
                            IsVisible="{Binding !SelectedLayer.IsEffect}" />
 
                 <!-- Brightness/Contrast -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsBrightnessContrast}">
-                    <TextBlock Text="Brightness" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.Brightness, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.Brightness, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Contrast" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="200"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.Contrast, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.Contrast, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Brightness" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.Brightness, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Contrast" Minimum="0" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.Contrast, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Levels -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsLevels}">
                     <local:HistogramView x:Name="LevelsHist" Height="70" />
-                    <TextBlock Text="Black Level" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.InBlackPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.InBlackPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="White Level" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.InWhitePct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.InWhitePct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Gamma" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="10" Maximum="300"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.GammaPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.GammaPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Output Black Level" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.OutBlackPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.OutBlackPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Output White Level" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.OutWhitePct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.OutWhitePct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Black Level" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InBlackPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="White Level" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InWhitePct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Gamma" Minimum="10" Maximum="300" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GammaPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Output Black Level" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.OutBlackPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Output White Level" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.OutWhitePct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- HSL -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsHsl}">
-                    <TextBlock Text="Hue Shift" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-180" Maximum="180"
-                                              TrackBrush="{StaticResource HueBrush}"
-                                              Value="{Binding SelectedLayer.HueDeg, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.HueDeg, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Saturation Shift" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="200"
-                                              TrackBrush="{StaticResource SatBrush}"
-                                              Value="{Binding SelectedLayer.SatPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.SatPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Luminosity Shift" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.LightPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.LightPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Hue Shift" Minimum="-180" Maximum="180" TrackBrush="{StaticResource HueBrush}" Value="{Binding SelectedLayer.HueDeg, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Saturation Shift" Minimum="0" Maximum="200" TrackBrush="{StaticResource SatBrush}" Value="{Binding SelectedLayer.SatPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Luminosity Shift" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.LightPct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Curves -->
@@ -175,7 +115,7 @@
                     </StackPanel>
                     <local:CurveEditor x:Name="Curve" Height="240" />
                     <TextBlock Text="Click to add a point. Drag to shape. Right-click a point to delete."
-                               Foreground="#FF777777" FontSize="10" TextWrapping="Wrap" />
+                               Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <!-- Exposure -->
@@ -191,78 +131,30 @@
 
                 <!-- Vibrance -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsVibrance}">
-                    <TextBlock Text="Vibrance" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource SatBrush}"
-                                              Value="{Binding SelectedLayer.VibrancePct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.VibrancePct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Vibrance" Minimum="-100" Maximum="100" TrackBrush="{StaticResource SatBrush}" Value="{Binding SelectedLayer.VibrancePct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Threshold -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsThreshold}">
-                    <TextBlock Text="Threshold" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.ThresholdPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.ThresholdPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Threshold" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.ThresholdPct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Posterise -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsPosterize}">
-                    <TextBlock Text="Levels" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="2" Maximum="32"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.PosterizeLevels, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.PosterizeLevels, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Levels" Minimum="2" Maximum="32" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.PosterizeLevels, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Black & White -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsBlackWhite}">
-                    <TextBlock Text="Red" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="200"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.BwRPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.BwRPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Green" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="200"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.BwGPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.BwGPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Blue" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="200"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.BwBPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.BwBPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Red" Minimum="0" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BwRPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Green" Minimum="0" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BwGPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Blue" Minimum="0" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BwBPct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- White Balance -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsWhiteBalance}">
-                    <TextBlock Text="Temperature" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource TempBrush}"
-                                              Value="{Binding SelectedLayer.TemperaturePct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.TemperaturePct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Tint" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource TintBrush}"
-                                              Value="{Binding SelectedLayer.TintPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.TintPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Temperature" Minimum="-100" Maximum="100" TrackBrush="{StaticResource TempBrush}" Value="{Binding SelectedLayer.TemperaturePct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Tint" Minimum="-100" Maximum="100" TrackBrush="{StaticResource TintBrush}" Value="{Binding SelectedLayer.TintPct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Colour Balance -->
@@ -299,20 +191,8 @@
 
                 <!-- Shadows / Highlights -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsShadowsHighlights}">
-                    <TextBlock Text="Shadows" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.ShadowsPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.ShadowsPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
-                    <TextBlock Text="Highlights" Classes="adjLabel" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <local:GradientSlider Grid.Column="0" Minimum="-100" Maximum="100"
-                                              TrackBrush="{StaticResource GrayBrush}"
-                                              Value="{Binding SelectedLayer.HighlightsPct, Mode=TwoWay}" />
-                        <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.HighlightsPct, Mode=TwoWay, StringFormat={}{0:0}}" />
-                    </Grid>
+                    <local:LabeledSlider Label="Shadows" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.ShadowsPct, Mode=TwoWay}" />
+                    <local:LabeledSlider Label="Highlights" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.HighlightsPct, Mode=TwoWay}" />
                 </StackPanel>
 
                 <!-- Invert (no options) -->
@@ -322,11 +202,7 @@
                 <!-- Live filters (Radius / Amount / Angle shown per filter kind) -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsFilter}">
                     <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.FilterUsesRadius}">
-                        <TextBlock Text="Radius" Classes="adjLabel" />
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BlurRadius, Mode=TwoWay}" />
-                            <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.BlurRadius, Mode=TwoWay, StringFormat={}{0:0}}" />
-                        </Grid>
+                        <local:LabeledSlider Label="Radius" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BlurRadius, Mode=TwoWay}" />
                     </StackPanel>
                     <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.FilterUsesAmount}">
                         <TextBlock Text="Amount" Classes="adjLabel" />
@@ -336,11 +212,7 @@
                         </Grid>
                     </StackPanel>
                     <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.FilterUsesAngle}">
-                        <TextBlock Text="Angle" Classes="adjLabel" />
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.FilterAngle, Mode=TwoWay}" />
-                            <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.FilterAngle, Mode=TwoWay, StringFormat={}{0:0}}" />
-                        </Grid>
+                        <local:LabeledSlider Label="Angle" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.FilterAngle, Mode=TwoWay}" />
                     </StackPanel>
                 </StackPanel>
 

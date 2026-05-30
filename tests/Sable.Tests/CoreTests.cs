@@ -1,8 +1,44 @@
+using System.Linq;
 using Sable.Core;
+using Sable.Core.Settings;
 using Sable.Core.Undo;
 using Xunit;
 
 namespace Sable.Tests;
+
+public class SettingsTests
+{
+    [Fact]
+    public void SaveLoad_RoundTrips()
+    {
+        var s = new SableSettings { Theme = AppTheme.Gray, DefaultDpi = 144, AutoCheckUpdates = false, WinW = 1000, WinMaximized = true };
+        s.OpenTabs.Add(@"C:\a.sable");
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"set_{System.Guid.NewGuid():N}.json");
+        try
+        {
+            SettingsService.Save(s, path);
+            var l = SettingsService.Load(path);
+            Assert.Equal(AppTheme.Gray, l.Theme);
+            Assert.Equal(144, l.DefaultDpi);
+            Assert.False(l.AutoCheckUpdates);
+            Assert.Equal(1000, l.WinW);
+            Assert.True(l.WinMaximized);
+            Assert.Single(l.OpenTabs);
+        }
+        finally { if (System.IO.File.Exists(path)) System.IO.File.Delete(path); }
+    }
+
+    [Fact]
+    public void AddRecent_DedupesNewestFirstAndCaps()
+    {
+        var s = new SableSettings();
+        for (int i = 0; i < SableSettings.MaxRecent + 5; i++) s.AddRecent($"f{i}.sable");
+        s.AddRecent("f3.sable");   // re-add an existing → moves to front, no dup
+        Assert.Equal("f3.sable", s.RecentFiles[0]);
+        Assert.Equal(SableSettings.MaxRecent, s.RecentFiles.Count);
+        Assert.Equal(s.RecentFiles.Count, s.RecentFiles.Distinct().Count());
+    }
+}
 
 public class BlendModeTests
 {

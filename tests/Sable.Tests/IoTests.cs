@@ -450,4 +450,22 @@ public class ImageCodecTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Theory]
+    [InlineData(ImageCodec.ImageFormat.Png)]
+    [InlineData(ImageCodec.ImageFormat.Jpeg)]
+    [InlineData(ImageCodec.ImageFormat.Webp)]
+    public void EncodeScaled_ProducesDecodableImageAtTargetSize(ImageCodec.ImageFormat fmt)
+    {
+        int w = 40, h = 30;
+        var rgba = new byte[w * h * 4];
+        for (int i = 0; i < rgba.Length; i += 4) { rgba[i] = 180; rgba[i + 1] = 60; rgba[i + 2] = 220; rgba[i + 3] = 255; }
+
+        var bytes = ImageCodec.EncodeScaled(fmt, w, h, rgba, w / 2, h / 2, 85);   // export at 50%
+        Assert.True(bytes.Length > 0);
+        var decoded = ImageCodec.DecodeRgbaBytes(bytes);
+        Assert.NotNull(decoded);
+        Assert.Equal(w / 2, decoded!.Value.width);
+        Assert.Equal(h / 2, decoded.Value.height);
+    }
 }

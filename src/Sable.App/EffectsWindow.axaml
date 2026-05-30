@@ -5,7 +5,7 @@
         x:Class="Sable.App.EffectsWindow"
         x:DataType="vm:DocumentViewModel"
         Width="600" Height="430"
-        Background="#FF2A2A2A"
+        Background="{DynamicResource ChromePanel}"
         CanResize="True"
         ShowInTaskbar="False"
         Title="Layer Effects">
@@ -20,9 +20,9 @@
     <DockPanel LastChildFill="True">
 
         <!-- bottom bar: fill opacity + close -->
-        <Border DockPanel.Dock="Bottom" Background="#FF262626" BorderBrush="#FF1E1E1E" BorderThickness="0,1,0,0" Padding="10,7">
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="10,7">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
-                <TextBlock Grid.Column="1" Text="Fill Opacity:" Foreground="#FFAAAAAA" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="Fill Opacity:" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
                 <TextBox Grid.Column="2" Width="60" VerticalAlignment="Center"
                          Text="{Binding SelectedLayer.FillOpacityPercent, Mode=TwoWay, StringFormat={}{0:0} %}" />
                 <Button Grid.Column="3" Content="Close" Classes="opt" Padding="14,0" Click="OnClose" />
@@ -30,9 +30,9 @@
         </Border>
 
         <!-- master: effect list + reorder -->
-        <Border DockPanel.Dock="Left" Width="190" Background="#FF232323" BorderBrush="#FF1E1E1E" BorderThickness="0,0,1,0">
+        <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource ChromeFooter}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,0">
             <DockPanel LastChildFill="True">
-                <Border DockPanel.Dock="Bottom" Background="#FF262626" BorderBrush="#FF1E1E1E" BorderThickness="0,1,0,0" Padding="6,4">
+                <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="6,4">
                     <StackPanel Orientation="Horizontal" Spacing="2">
                         <Button Classes="iconbtn" Click="OnMoveUp" ToolTip.Tip="Move effect up (stacking order)">
                             <Path Classes="icon" Width="14" Height="14" Data="M18 15l-6-6-6 6" />
@@ -75,7 +75,7 @@
         <Border Padding="16,14">
             <Panel>
                 <TextBlock Text="Select an effect on the left, tick it to enable, then adjust."
-                           Foreground="#FF777777" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Top"
+                           Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Top"
                            IsVisible="{Binding SelectedLayer, Converter={x:Static ObjectConverters.IsNull}}" />
 
                 <!-- Outer Shadow -->
@@ -92,11 +92,7 @@
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Offset Y:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.DsOffsetY, Mode=TwoWay}" />
                     <TextBlock Grid.Row="5" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.DsColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.DsColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.DsColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Outer Glow -->
@@ -109,11 +105,7 @@
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Radius:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GlowRadius, Mode=TwoWay}" />
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.GlowColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.GlowColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.GlowColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Outline / Stroke -->
@@ -132,11 +124,7 @@
                         <ComboBoxItem>Centre</ComboBoxItem>
                     </ComboBox>
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.StrokeColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.StrokeColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="4" Grid.Column="1" Hex="{Binding SelectedLayer.StrokeColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Colour Overlay -->
@@ -147,11 +135,7 @@
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Opacity:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.OverlayOpacityPct, Mode=TwoWay}" />
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.OverlayColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.OverlayColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="2" Grid.Column="1" Hex="{Binding SelectedLayer.OverlayColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Inner Shadow -->
@@ -168,11 +152,7 @@
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Offset Y:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InShOffsetY, Mode=TwoWay}" />
                     <TextBlock Grid.Row="5" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.InShColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.InShColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.InShColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Inner Glow -->
@@ -185,11 +165,7 @@
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Radius:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="16" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InGlRadius, Mode=TwoWay}" />
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Colour:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.InGlColorHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.InGlColorHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.InGlColorHex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Gradient Overlay -->
@@ -202,17 +178,9 @@
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Angle:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GradAngle, Mode=TwoWay}" />
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Start:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.GradColor1Hex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.GradColor1Hex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.GradColor1Hex, Mode=TwoWay}" />
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="End:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.GradColor2Hex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.GradColor2Hex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="4" Grid.Column="1" Hex="{Binding SelectedLayer.GradColor2Hex, Mode=TwoWay}" />
                 </Grid>
 
                 <!-- Bevel / Emboss -->
@@ -229,17 +197,9 @@
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Light angle:" Classes="fxLabel" />
                     <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BevAngle, Mode=TwoWay}" />
                     <TextBlock Grid.Row="5" Grid.Column="0" Text="Highlight:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.BevHighlightHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.BevHighlightHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.BevHighlightHex, Mode=TwoWay}" />
                     <TextBlock Grid.Row="6" Grid.Column="0" Text="Shadow:" Classes="fxLabel" />
-                    <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="#FF555555" BorderThickness="1"
-                                Background="{Binding SelectedLayer.BevShadowHex, Converter={x:Static local:HexToBrushConverter.Instance}}" />
-                        <TextBox Width="88" Text="{Binding SelectedLayer.BevShadowHex, Mode=TwoWay}" />
-                    </StackPanel>
+                    <local:HexColorField Grid.Row="6" Grid.Column="1" Hex="{Binding SelectedLayer.BevShadowHex, Mode=TwoWay}" />
                 </Grid>
             </Panel>
         </Border>

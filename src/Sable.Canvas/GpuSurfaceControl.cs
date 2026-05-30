@@ -31,7 +31,15 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     private TextureView* _compositeView;
 
     private Surface* _surface;
+    // pasteboard (canvas surround) colour, 0..1, set by the chrome theme. Defaults to dark.
+    private float _pasteR = 0.16f, _pasteG = 0.16f, _pasteB = 0.17f;
     private TextureFormat _format = TextureFormat.Bgra8Unorm;
+
+    /// <summary>Sets the pasteboard (surround) colour from the active chrome theme (0..255).</summary>
+    public void SetPasteboardColor(byte r, byte g, byte b)
+    {
+        _pasteR = r / 255f; _pasteG = g / 255f; _pasteB = b / 255f;
+    }
     private DispatcherTimer? _timer;
     private nint _hwnd;
     private uint _width = 1, _height = 1;
@@ -79,6 +87,17 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     public void ResetView()
     {
         _zoom = 1.0; _panX = 0; _panY = 0;
+    }
+
+    /// <summary>Fit the document to the window; if <paramref name="limitTo100"/>, never zoom past 100% (1 doc px = 1 screen px).</summary>
+    public void FitView(bool limitTo100)
+    {
+        _zoom = 1.0; _panX = 0; _panY = 0;
+        if (limitTo100)
+        {
+            var vp = ComputeViewport();          // scale = fit (since _zoom == 1)
+            if (vp.Scale > 1.0) _zoom = 1.0 / vp.Scale;   // cap effective scale at 1.0
+        }
     }
 
     // OS-specific canvas bits (surface creation, timer resolution) live behind the backend;
@@ -418,6 +437,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.GradX1 = (float)_gradEndSx; ov.GradY1 = (float)_gradEndSy;
             }
         }
+        ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

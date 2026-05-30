@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.ConfirmWindow"
+        Width="340" SizeToContent="Height"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="Confirm">
+    <Border Padding="16">
+        <StackPanel Spacing="12">
+            <TextBlock x:Name="TitleText" Classes="panelHeader" Padding="0" />
+            <TextBlock x:Name="BodyText" Foreground="{DynamicResource ChromeText}" FontSize="12" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="Cancel" Classes="opt" Padding="14,0" Click="OnCancel" />
+                <Button Content="Discard" Classes="opt" Padding="14,0" Click="OnOk" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

@@ -23,6 +23,9 @@ public partial class MainWindow : Window
     private string? _currentPath;
     private AdjustmentWindow? _adjWindow;
     private EffectsWindow? _fxWindow;
+    private readonly System.Collections.ObjectModel.ObservableCollection<DocumentTab> _tabs = new();
+    private DocumentTab? _activeTab;
+    private int _untitledCounter = 1;
 
     private LayerViewModel? _dragSource;
     private Point _dragStart;
@@ -37,8 +40,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // One shared Document drives both the GPU canvas and the layers panel.
-        LoadDocument(Document.CreateDemo());
+        // Start with no document (welcome / empty state) — New/Open/paste/drop creates the first tab.
+        TabStrip.ItemsSource = _tabs;
+        UpdateEmptyState();
 
         // layer drag-drop (manual pointer DnD: reorder / move into group / auto-group)
         LayerList.AddHandler(PointerPressedEvent, OnLayerPointerPressed, RoutingStrategies.Tunnel);
@@ -47,6 +51,11 @@ public partial class MainWindow : Window
 
         // selection keys tunnel-first so a focused panel (e.g. the layers list) can't eat Delete
         AddHandler(KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
+
+        // drop image / .sable files onto the window chrome → open each as a new tab
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnFilesDragOver);
+        AddHandler(DragDrop.DropEvent, OnFilesDrop);
 
         // gradient editor shares the canvas's gradient def; selecting a stop routes the colour wheel to it
         GradBar.Def = Canvas.Gradient;
@@ -60,6 +69,130 @@ public partial class MainWindow : Window
         BrushColorView.ColorChanged += OnBrushColorChanged;
 
         WireTools();
+
+        // settings: restore window placement + theme + recent menu + last session (PLAN §17.1)
+        ApplySettings();
+        Opened += (_, _) => RestoreSession();
+        Closing += OnWindowClosing;
+    }
+
+    private readonly Sable.Core.Settings.SableSettings _settings = Sable.Core.Settings.SettingsService.Load();
+
+    private void ApplySettings()
+    {
+        Width = _settings.WinW;
+        Height = _settings.WinH;
+        if (_settings.WinX is { } wx && _settings.WinY is { } wy)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = new PixelPoint((int)wx, (int)wy);
+        }
+        if (_settings.WinMaximized) WindowState = WindowState.Maximized;
+        ApplyTheme(_settings.Theme);
+        RebuildRecentMenu();
+    }
+
+    private void ApplyTheme(Sable.Core.Settings.AppTheme theme)
+    {
+        // Chrome surfaces bound via {DynamicResource Chrome…} swap with the variant (Theme.axaml
+        // ThemeDictionaries). Gray = custom variant inheriting Dark (Fluent controls stay dark).
+        var variant = theme switch
+        {
+            Sable.Core.Settings.AppTheme.Light => Avalonia.Styling.ThemeVariant.Light,
+            Sable.Core.Settings.AppTheme.Gray => Themes.Gray,
+            _ => Avalonia.Styling.ThemeVariant.Dark,
+        };
+        RequestedThemeVariant = variant;
+
+        // keep the GPU pasteboard (canvas surround) in sync with the ChromeCanvas token
+        // (resolved directly — variant resources aren't reliably available at ctor time)
+        switch (theme)
+        {
+            case Sable.Core.Settings.AppTheme.Light: Canvas.SetPasteboardColor(0xC4, 0xC4, 0xC4); break;
+            case Sable.Core.Settings.AppTheme.Gray:  Canvas.SetPasteboardColor(0x2A, 0x2A, 0x2A); break;
+            default:                                 Canvas.SetPasteboardColor(0x1B, 0x1B, 0x1B); break;
+        }
+    }
+
+    private void RestoreSession()
+    {
+        if (!_settings.ReopenOnStartup) return;
+        foreach (var path in _settings.OpenTabs.ToList())
+        {
+            try
+            {
+                if (System.IO.File.Exists(path) && path.EndsWith(".sable", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+                    tab.IsDirty = false;
+                }
+            }
+            catch { /* skip missing/corrupt */ }
+        }
+    }
+
+    private void OnWindowClosing(object? sender, Avalonia.Controls.WindowClosingEventArgs e)
+    {
+        _settings.WinMaximized = WindowState == WindowState.Maximized;
+        if (!_settings.WinMaximized)
+        {
+            _settings.WinW = Width; _settings.WinH = Height;
+            _settings.WinX = Position.X; _settings.WinY = Position.Y;
+        }
+        _settings.OpenTabs = _tabs.Where(t => t.Path is not null).Select(t => t.Path!).ToList();
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    /// <summary>Record a file in the recent list + persist + rebuild the menu.</summary>
+    private void NoteRecent(string path)
+    {
+        _settings.AddRecent(path);
+        Sable.Core.Settings.SettingsService.Save(_settings);
+        RebuildRecentMenu();
+    }
+
+    private void RebuildRecentMenu()
+    {
+        if (RecentMenu is null) return;
+        RecentMenu.Items.Clear();
+        if (_settings.RecentFiles.Count == 0)
+        {
+            RecentMenu.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false });
+            return;
+        }
+        foreach (var path in _settings.RecentFiles)
+        {
+            var item = new MenuItem { Header = System.IO.Path.GetFileName(path), Tag = path };
+            item.Click += OnOpenRecent;
+            RecentMenu.Items.Add(item);
+        }
+    }
+
+    private void OnOpenRecent(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string path } || !System.IO.File.Exists(path)) return;
+        try
+        {
+            if (path.EndsWith(".sable", System.StringComparison.OrdinalIgnoreCase))
+            {
+                var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+                tab.IsDirty = false;
+            }
+            else OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+            NoteRecent(path);
+        }
+        catch { /* ignore */ }
+    }
+
+    private async void OnPreferences(object? sender, RoutedEventArgs e)
+    {
+        var dlg = new SettingsWindow(_settings, "Default GPU (wgpu)");
+        if (await dlg.ShowDialog<bool>(this))
+        {
+            ApplyTheme(_settings.Theme);
+            foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
+            Sable.Core.Settings.SettingsService.Save(_settings);
+        }
     }
 
     private DocumentViewModel? Doc => DataContext as DocumentViewModel;
@@ -106,6 +239,8 @@ public partial class MainWindow : Window
                 case Key.E when shift && e.KeyModifiers.HasFlag(KeyModifiers.Alt): OnStamp(null, null!); e.Handled = true; return;
                 case Key.E when shift: OnMergeVisible(null, null!); e.Handled = true; return;
                 case Key.E: OnMergeDown(null, null!); e.Handled = true; return;
+                case Key.N: _ = OnNewDocument(); e.Handled = true; return;
+                case Key.W when _activeTab is { } wt: _ = CloseTab(wt); e.Handled = true; return;
             }
         }
         switch (e.Key)
@@ -647,33 +782,67 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void LoadDocument(Document doc)
+    /// <summary>Open a document in a new tab and make it active (PLAN Phase 2 multi-tab).</summary>
+    private DocumentTab OpenInNewTab(Document doc, string? path, string title)
     {
-        var vm = new DocumentViewModel(doc);
-        Canvas.Document = doc;
-        DataContext = vm;
-        UpdateActiveLayer(vm);
-        vm.PropertyChanged += (_, e) =>
+        var tab = new DocumentTab(doc, path, title);
+        tab.Vm.Undo.Capacity = _settings.UndoLimit;
+        tab.Vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(DocumentViewModel.SelectedLayer)) return;
-            UpdateActiveLayer(vm);
-            if (vm.SelectedLayer?.IsEffect == true) ShowAdjustmentWindow();
+            if (!ReferenceEquals(_activeTab, tab)) return;       // only the visible tab drives the UI
+            UpdateActiveLayer(tab.Vm);
+            if (tab.Vm.SelectedLayer?.IsEffect == true) ShowAdjustmentWindow();
             else _adjWindow?.Close();
         };
-        if (_adjWindow is not null) _adjWindow.DataContext = vm;
-        if (_fxWindow is not null) _fxWindow.DataContext = vm;
-        // brush strokes become undoable commands on the same stack as layer ops
+        _tabs.Add(tab);
+        ActivateTab(tab);
+        return tab;
+    }
+
+    /// <summary>Make a tab active: swap the canvas + DataContext, rewire the canvas callbacks.</summary>
+    private void ActivateTab(DocumentTab? tab)
+    {
+        if (_activeTab is { } prev) prev.IsActive = false;
+        _activeTab = tab;
+
+        if (tab is null)
+        {
+            Canvas.Document = null;
+            DataContext = null;
+            _currentPath = null;
+            UpdateEmptyState();
+            return;
+        }
+
+        tab.IsActive = true;
+        Canvas.Document = tab.Doc;
+        DataContext = tab.Vm;
+        _currentPath = tab.Path;
+        WireCanvas(tab.Vm);
+        UpdateActiveLayer(tab.Vm);
+        if (_adjWindow is not null) _adjWindow.DataContext = tab.Vm;
+        if (_fxWindow is not null) _fxWindow.DataContext = tab.Vm;
+        Canvas.FitView(_settings.LimitInitialZoom);
+        UpdateEmptyState();
+    }
+
+    // wire the canvas callbacks to the active tab's view-model
+    private void WireCanvas(DocumentViewModel vm)
+    {
         Canvas.CommandProduced = cmd =>
         {
             vm.Undo.Execute(cmd);
             vm.SelectedLayer?.RefreshThumbnail();   // live row thumb after paint/fill/erase/delete
         };
-        // a drawn shape becomes its own new layer (so Move/V grabs just the shape)
         Canvas.LayerProduced = layer => vm.AddAndSelect(layer);
-        // eyedropper (Alt+click) updates the color picker
         Canvas.ColorPicked = (r, g, b) => SetWheel(Avalonia.Media.Color.FromRgb(r, g, b));
-        // Ctrl+Alt HUD brush adjust → resync the options-bar sliders
         Canvas.BrushAdjusted = SyncBrushSliders;
+    }
+
+    private void UpdateEmptyState()
+    {
+        if (EmptyState is not null) EmptyState.IsVisible = _tabs.Count == 0;
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)
@@ -788,6 +957,86 @@ public partial class MainWindow : Window
     {
         if (sender is Control c && c.Tag is int tag && Doc?.SelectedLayer is { } vm)
             vm.ColorTag = tag;
+    }
+
+    // ===== document tabs (Phase 2 #1) =====
+
+    private void OnSelectTab(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Control { Tag: DocumentTab tab } && !ReferenceEquals(tab, _activeTab))
+            ActivateTab(tab);
+    }
+
+    private async void OnCloseTab(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { Tag: DocumentTab tab }) return;
+        e.Handled = true;   // don't let the click select the tab
+        await CloseTab(tab);
+    }
+
+    private async System.Threading.Tasks.Task CloseTab(DocumentTab tab)
+    {
+        if (tab.IsDirty)
+        {
+            var ok = await ConfirmWindow.Ask(this, $"Close \"{tab.Title}\"?", "You have unsaved changes that will be lost.");
+            if (!ok) return;
+        }
+        int i = _tabs.IndexOf(tab);
+        _tabs.Remove(tab);
+        if (ReferenceEquals(_activeTab, tab))
+            ActivateTab(_tabs.Count == 0 ? null : _tabs[System.Math.Clamp(i, 0, _tabs.Count - 1)]);
+    }
+
+    private void OnNewTabButton(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
+
+    private void OnFilesDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    private void OnFilesDrop(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.TryGetFiles() is not { } files) return;
+        foreach (var f in files)
+        {
+            var path = f.TryGetLocalPath();
+            if (string.IsNullOrEmpty(path)) continue;
+            try
+            {
+                var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+                if (ext == ".sable")
+                {
+                    var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+                    tab.IsDirty = false;
+                }
+                else
+                {
+                    OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+                }
+            }
+            catch { /* skip files we can't decode */ }
+        }
+    }
+
+    private async System.Threading.Tasks.Task OnNewDocument()
+    {
+        var dlg = new NewDocumentWindow(_settings.DefaultDpi);
+        if (await dlg.ShowDialog<bool>(this))
+            OpenInNewTab(new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi },
+                         null, $"Untitled {_untitledCounter++}");
+    }
+
+    private void OnNewMenu(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
+
+    private async void OnNewFromClipboard(object? sender, RoutedEventArgs e)
+    {
+        if (await ReadOsImage() is not { } img) return;
+        var doc = new Document(img.width, img.height);
+        var layer = new PixelLayer(img.width, img.height, "Clipboard");
+        img.rgba.CopyTo(layer.Pixels.AsSpan());
+        layer.Dirty = true;
+        doc.Layers.Add(layer);
+        OpenInNewTab(doc, null, $"Clipboard {_untitledCounter++}");
     }
 
     // ===== layer collapse ops (PLAN §16.3 / Phase 1 #6): GPU-render to a flat pixel layer =====
@@ -980,7 +1229,8 @@ public partial class MainWindow : Window
         var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
         if (string.IsNullOrEmpty(path)) return;
 
-        LoadDocument(DocumentIO.OpenImage(path));
+        OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+        NoteRecent(path);
     }
 
     private async void OnOpenSable(object? sender, RoutedEventArgs e)
@@ -994,13 +1244,19 @@ public partial class MainWindow : Window
         var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
         if (string.IsNullOrEmpty(path)) return;
 
-        LoadDocument(SableFile.Load(path));
-        _currentPath = path;
+        var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+        tab.IsDirty = false;
+        NoteRecent(path);
     }
 
     private async void OnSaveSable(object? sender, RoutedEventArgs e)
     {
-        if (_currentPath is { } p && Canvas.Document is { } doc) { SableFile.Save(doc, p); return; }
+        if (_currentPath is { } p && Canvas.Document is { } doc)
+        {
+            SableFile.Save(doc, p);
+            if (_activeTab is { } t) t.IsDirty = false;
+            return;
+        }
         await SaveAs();
     }
 
@@ -1021,28 +1277,34 @@ public partial class MainWindow : Window
 
         SableFile.Save(doc, path);
         _currentPath = path;
+        if (_activeTab is { } t)
+        {
+            t.Path = path;
+            t.Title = System.IO.Path.GetFileName(path);
+            t.IsDirty = false;
+        }
+        NoteRecent(path);
     }
 
-    private async void OnExportPng(object? sender, RoutedEventArgs e)
+    private async void OnExport(object? sender, RoutedEventArgs e)
     {
-        if (Canvas.Document is not { } doc) return;
+        if (Canvas.Document is not { } doc || Canvas.ReadComposite() is not { } rgba) return;
 
+        var dlg = new ExportDialog(doc.Width, doc.Height, rgba);
+        if (!await dlg.ShowDialog<bool>(this)) return;
+
+        string ext = ImageCodec.Extension(dlg.Format);
+        string baseName = System.IO.Path.GetFileNameWithoutExtension(_activeTab?.Title ?? "untitled");
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Export PNG",
-            SuggestedFileName = "export.png",
-            DefaultExtension = "png",
-            FileTypeChoices = new[]
-            {
-                new FilePickerFileType("PNG") { Patterns = new[] { "*.png" } }
-            }
+            Title = "Export image",
+            SuggestedFileName = $"{baseName}.{ext}",
+            DefaultExtension = ext,
+            FileTypeChoices = new[] { new FilePickerFileType(dlg.Format.ToString()) { Patterns = new[] { "*." + ext } } }
         });
 
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
-
-        var rgba = Canvas.ReadComposite();
-        if (rgba is null) return;
-        DocumentIO.ExportPng(path, doc.Width, doc.Height, rgba);
+        DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality);
     }
 }

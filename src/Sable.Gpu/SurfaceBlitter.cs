@@ -122,8 +122,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         // 52 floats / 208 bytes: viewport, rect, gizmo, brush, maskOn[35], gradient[36..40],
         // cropOn[41], shape[42..47], clone-source marker[48..50]
         var u = stackalloc float[56];
-        u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = 0;
-        u[4] = vp.DocW; u[5] = vp.DocH; u[6] = 0; u[7] = 0;
+        bool hasPaste = ov.PasteR > 0 || ov.PasteG > 0 || ov.PasteB > 0;
+        u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = hasPaste ? ov.PasteR : 0.16f;
+        u[4] = vp.DocW; u[5] = vp.DocH; u[6] = hasPaste ? ov.PasteG : 0.16f; u[7] = hasPaste ? ov.PasteB : 0.17f;
         u[8] = ov.RectX; u[9] = ov.RectY; u[10] = ov.RectW; u[11] = ov.RectH; u[12] = ov.RectOn ? 1f : 0f;
         u[13] = ov.SelHandles ? 1f : 0f;
         if (ov.Corners is { Length: 8 })

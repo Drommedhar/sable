@@ -6,11 +6,11 @@ struct Viewport {
     ox: f32,        // document top-left X in surface pixels
     oy: f32,        // document top-left Y in surface pixels
     invScale: f32,  // 1 / (pixels-per-doc-pixel)
-    _pad: f32,
+    pasteR: f32,    // pasteboard (surround) colour, themed
     docW: f32,
     docH: f32,
-    _pad1: f32,
-    _pad2: f32,
+    pasteG: f32,
+    pasteB: f32,
     ovX: f32, ovY: f32, ovW: f32, ovH: f32,   // overlay rect (doc px)
     ovOn: f32, selHandles: f32, _p4: f32, _p5: f32,  // ovOn: 1 = draw rect; selHandles: 1 = draw grips
     // transform gizmo: 4 corners in SURFACE px (TL,TR,BR,BL), rotate-handle distance
@@ -64,8 +64,8 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let u = docX / vp.docW;
     let v = docY / vp.docH;
 
-    // flat grey pasteboard outside the document; checker only inside (shows transparency)
-    var outc = vec3<f32>(0.16, 0.16, 0.17);
+    // flat pasteboard (themed) outside the document; checker only inside (shows transparency)
+    var outc = vec3<f32>(vp.pasteR, vp.pasteG, vp.pasteB);
     if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let bg = checker(frag.xy);
         let col = textureSample(tex, samp, vec2<f32>(u, v));
