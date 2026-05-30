@@ -21,6 +21,9 @@ public sealed partial class DocumentTab : ObservableObject
     /// <summary>Last saved path (.sable), or null if never saved.</summary>
     public string? Path { get; set; }
 
+    /// <summary>Stable id for the autosave/recovery file of this tab (PLAN §2.6).</summary>
+    public string RecoveryId { get; } = System.Guid.NewGuid().ToString("N");
+
     public DocumentTab(Document doc, string? path, string title)
     {
         Doc = doc;

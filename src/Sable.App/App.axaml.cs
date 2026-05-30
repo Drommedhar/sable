@@ -18,7 +18,7 @@ public partial class App : Application
         {
             // closing the main window quits the app, regardless of open tool windows
             desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
-            desktop.MainWindow = new MainWindow();
+            desktop.MainWindow = new MainWindow(desktop.Args);
         }
 
         base.OnFrameworkInitializationCompleted();

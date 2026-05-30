@@ -24,6 +24,10 @@ public sealed class SableSettings
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity
 
+    // --- Autosave / recovery (PLAN §2.6) ---
+    public bool AutosaveEnabled { get; set; } = true;
+    public int AutosaveMinutes { get; set; } = 5;          // autosave interval for crash recovery
+
     // --- Updates ---
     public bool AutoCheckUpdates { get; set; } = true;     // consumed by UpdateService (Phase 2 #4)
 

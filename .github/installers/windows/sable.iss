@@ -49,5 +49,12 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{autoprograms}\Sable"; Filename: "{app}\Sable.App.exe"
 Name: "{autodesktop}\Sable"; Filename: "{app}\Sable.App.exe"; Tasks: desktopicon
 
+[Registry]
+; associate the .sable document type with Sable (per-user, cleaned up on uninstall)
+Root: HKA; Subkey: "Software\Classes\.sable"; ValueType: string; ValueName: ""; ValueData: "Sable.Document"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Sable.Document"; ValueType: string; ValueName: ""; ValueData: "Sable Document"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Sable.Document\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Sable.App.exe,0"
+Root: HKA; Subkey: "Software\Classes\Sable.Document\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Sable.App.exe"" ""%1"""
+
 [Run]
 Filename: "{app}\Sable.App.exe"; Description: "Launch Sable"; Flags: nowait postinstall skipifsilent

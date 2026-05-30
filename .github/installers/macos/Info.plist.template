@@ -24,5 +24,18 @@
   <string>__APP_VERSION__</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Sable Document</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>sable</string></array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+    </dict>
+  </array>
 </dict>
 </plist>

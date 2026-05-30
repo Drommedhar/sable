@@ -36,8 +36,13 @@ public partial class MainWindow : Window
 
     private static FilePickerFileType SableType => new("Sable document") { Patterns = new[] { "*.sable" } };
 
-    public MainWindow()
+    private readonly string[] _launchArgs;
+
+    public MainWindow() : this(null) { }
+
+    public MainWindow(string[]? args)
     {
+        _launchArgs = args ?? System.Array.Empty<string>();
         InitializeComponent();
 
         // Start with no document (welcome / empty state) — New/Open/paste/drop creates the first tab.
@@ -74,7 +79,10 @@ public partial class MainWindow : Window
         ApplySettings();
         Opened += (_, _) =>
         {
+            OfferCrashRecovery();           // restore autosaved docs from a previous unclean exit
             RestoreSession();
+            OpenLaunchArgs();               // files passed on the command line (file associations)
+            StartAutosave();
             if (_settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(manual: false);   // silent launch check
         };
         Closing += OnWindowClosing;
@@ -180,6 +188,7 @@ public partial class MainWindow : Window
         }
         _settings.OpenTabs = _tabs.Where(t => t.Path is not null).Select(t => t.Path!).ToList();
         Sable.Core.Settings.SettingsService.Save(_settings);
+        RecoveryService.Clear();   // clean exit → discard autosaved recovery copies
     }
 
     /// <summary>Record a file in the recent list + persist + rebuild the menu.</summary>
@@ -209,18 +218,32 @@ public partial class MainWindow : Window
 
     private void OnOpenRecent(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string path } || !System.IO.File.Exists(path)) return;
+        if (sender is MenuItem { Tag: string path }) OpenPath(path);
+    }
+
+    /// <summary>Open a .sable or image file as a new tab (recent menu, file associations, drag-drop).</summary>
+    private DocumentTab? OpenPath(string path)
+    {
+        if (!System.IO.File.Exists(path)) return null;
         try
         {
+            DocumentTab tab;
             if (path.EndsWith(".sable", System.StringComparison.OrdinalIgnoreCase))
             {
-                var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+                tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
                 tab.IsDirty = false;
             }
-            else OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+            else tab = OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
             NoteRecent(path);
+            return tab;
         }
-        catch { /* ignore */ }
+        catch { return null; }
+    }
+
+    private void OpenLaunchArgs()
+    {
+        foreach (var a in _launchArgs)
+            if (!string.IsNullOrWhiteSpace(a) && !a.StartsWith('-')) OpenPath(a);
     }
 
     private const string GpuName = "Default GPU (wgpu)";
@@ -237,6 +260,46 @@ public partial class MainWindow : Window
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
+
+    // --- autosave + crash recovery (PLAN §2.6) ---
+    private Avalonia.Threading.DispatcherTimer? _autosaveTimer;
+
+    private void StartAutosave()
+    {
+        if (!_settings.AutosaveEnabled) return;
+        int mins = System.Math.Clamp(_settings.AutosaveMinutes, 1, 120);
+        _autosaveTimer = new Avalonia.Threading.DispatcherTimer
+            { Interval = System.TimeSpan.FromMinutes(mins) };
+        _autosaveTimer.Tick += (_, _) => AutosaveNow();
+        _autosaveTimer.Start();
+    }
+
+    private void AutosaveNow()
+    {
+        if (!_settings.AutosaveEnabled) return;
+        var dirty = _tabs.Where(t => t.IsDirty)
+            .Select(t => (t.RecoveryId, t.Path, t.Title, t.Doc));
+        if (dirty.Any()) RecoveryService.Save(dirty);
+    }
+
+    private async void OfferCrashRecovery()
+    {
+        var pending = RecoveryService.GetPending();
+        if (pending.Count == 0) return;
+        bool restore = await ConfirmWindow.Ask(this, "Recover documents",
+            $"Sable didn't close cleanly last time. Restore {pending.Count} unsaved document(s)?");
+        if (restore)
+            foreach (var p in pending)
+            {
+                try
+                {
+                    var tab = OpenInNewTab(SableFile.Load(p.RecoveryPath), p.OrigPath, p.Title);
+                    tab.IsDirty = true;   // recovered work isn't saved to its real location yet
+                }
+                catch { /* skip a corrupt recovery file */ }
+            }
+        RecoveryService.Clear();   // handled either way → don't prompt again
+    }
 
     // --- status bar: zoom UI + document info + cursor position (PLAN §2.5) ---
     private void OnZoomFit(object? sender, RoutedEventArgs e) { Canvas.FitView(false); UpdateZoomLabel(); }

@@ -207,6 +207,7 @@ jobs:
           Icon=sable
           Terminal=false
           Categories=Graphics;2DGraphics;RasterGraphics;
+          MimeType=application/x-sable;
           StartupNotify=true
           EOF
           cp "${appdir}/sable.desktop" "${appdir}/usr/share/applications/"
