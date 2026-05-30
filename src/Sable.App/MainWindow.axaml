@@ -31,7 +31,7 @@
                Height="18" Stretch="Uniform" Margin="12,5,12,5" VerticalAlignment="Center"
                RenderOptions.BitmapInterpolationMode="HighQuality"
                ToolTip.Tip="Sable" />
-        <Menu>
+        <Menu x:Name="MainMenu">
             <MenuItem Header="_File">
                 <MenuItem Header="New..." Click="OnNewMenu" InputGesture="Ctrl+N" />
                 <MenuItem Header="New from Clipboard" Click="OnNewFromClipboard" />

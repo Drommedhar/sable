@@ -218,6 +218,7 @@ public partial class MainWindow : Window
 
     private void OnOpenRecent(object? sender, RoutedEventArgs e)
     {
+        MainMenu.Close();   // dynamically-added submenu items don't auto-close the menu
         if (sender is MenuItem { Tag: string path }) OpenPath(path);
     }
 
@@ -233,7 +234,7 @@ public partial class MainWindow : Window
                 tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
                 tab.IsDirty = false;
             }
-            else tab = OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+            else tab = OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
             NoteRecent(path);
             return tab;
         }
@@ -759,19 +760,12 @@ public partial class MainWindow : Window
     private sealed record ToolDef(string Icon, string Name, Sable.Tools.ToolKind Kind);
 
     /// <summary>Build a fresh line-icon Path for a tool button (each button needs its own instance).</summary>
-    private static Avalonia.Controls.Shapes.Path MakeIcon(string data, double size = 20) => new()
-    {
-        Classes = { "icon" },
-        Width = size,
-        Height = size,
-        Data = Avalonia.Media.Geometry.Parse(data),
-    };
     private sealed class ToolGroup
     {
         public string Letter = "";
         public ToolDef[] Tools = Array.Empty<ToolDef>();
         public int Current;
-        public Button Button = null!;
+        public ToolButton Button = null!;
         public Avalonia.Controls.Primitives.Popup? Popup;
         public Control? PopupPanel;
     }
@@ -845,7 +839,7 @@ public partial class MainWindow : Window
         foreach (var (letter, tools) in defs)
         {
             var g = new ToolGroup { Letter = letter, Tools = tools };
-            var btn = new Button { Classes = { "tool" }, Content = MakeIcon(tools[0].Icon), Tag = g };
+            var btn = new ToolButton { Classes = { "tool" }, Icon = tools[0].Icon, Tag = g };
             btn.Click += (_, _) => Canvas.ActiveTool = g.Tools[g.Current].Kind;
 
             var tip = $"{tools[0].Name} ({letter})";
@@ -856,7 +850,7 @@ public partial class MainWindow : Window
                 foreach (var t in tools)
                 {
                     int mi = Array.IndexOf(tools, t);
-                    var mb = new Button { Classes = { "tool" }, Content = MakeIcon(t.Icon) };
+                    var mb = new ToolButton { Classes = { "tool" }, Icon = t.Icon };
                     ToolTip.SetTip(mb, t.Name);
                     mb.Click += (_, _) => { SelectMember(g, mi); CloseToolFlyout(); };
                     sp.Children.Add(mb);
@@ -945,7 +939,7 @@ public partial class MainWindow : Window
             if (sel)
             {
                 g.Current = idx;
-                g.Button.Content = MakeIcon(g.Tools[idx].Icon);
+                g.Button.Icon = g.Tools[idx].Icon;
                 ToolStatus.Text = g.Tools[idx].Name;
             }
             g.Button.Background = sel ? ToolSelBrush : Avalonia.Media.Brushes.Transparent;
@@ -1009,9 +1003,18 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Open a document in a new tab and make it active (PLAN Phase 2 multi-tab).</summary>
-    private DocumentTab OpenInNewTab(Document doc, string? path, string title)
+    private DocumentTab OpenInNewTab(Document doc, string? path, string title, string? sourcePath = null)
     {
-        var tab = new DocumentTab(doc, path, title);
+        sourcePath ??= path;   // .sable: source = save path; image import: caller passes the image path
+        // never open the same file twice — activate the existing tab instead (avoids save conflicts)
+        if (sourcePath is not null &&
+            _tabs.FirstOrDefault(t => string.Equals(t.SourcePath, sourcePath, System.StringComparison.OrdinalIgnoreCase)) is { } existing)
+        {
+            ActivateTab(existing);
+            return existing;
+        }
+
+        var tab = new DocumentTab(doc, path, title) { SourcePath = sourcePath };
         tab.Vm.Undo.Capacity = _settings.UndoLimit;
         tab.Vm.PropertyChanged += (_, e) =>
         {
@@ -1244,7 +1247,7 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+                    OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
                 }
             }
             catch { /* skip files we can't decode */ }
@@ -1484,7 +1487,7 @@ public partial class MainWindow : Window
         var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
         if (string.IsNullOrEmpty(path)) return;
 
-        OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path));
+        OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
         NoteRecent(path);
     }
 
@@ -1535,6 +1538,7 @@ public partial class MainWindow : Window
         if (_activeTab is { } t)
         {
             t.Path = path;
+            t.SourcePath = path;   // saved → dedupe future opens of this .sable
             t.Title = System.IO.Path.GetFileName(path);
             t.IsDirty = false;
         }

@@ -21,6 +21,10 @@ public sealed partial class DocumentTab : ObservableObject
     /// <summary>Last saved path (.sable), or null if never saved.</summary>
     public string? Path { get; set; }
 
+    /// <summary>The file this tab was opened from (.sable or imported image) — used to prevent
+    /// opening the same file twice. Distinct from <see cref="Path"/> (the .sable save target).</summary>
+    public string? SourcePath { get; set; }
+
     /// <summary>Stable id for the autosave/recovery file of this tab (PLAN §2.6).</summary>
     public string RecoveryId { get; } = System.Guid.NewGuid().ToString("N");
 

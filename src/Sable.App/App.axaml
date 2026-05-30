@@ -127,10 +127,10 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="8,4" />
         </Style>
-        <Style Selector="Button.tool">
+        <Style Selector=":is(Button).tool">
             <Setter Property="Width" Value="{StaticResource ToolButtonSize}" />
             <Setter Property="Height" Value="{StaticResource ToolButtonSize}" />
-            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Margin" Value="0,4" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
@@ -138,8 +138,12 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FontSize" Value="14" />
         </Style>
-        <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
+        <Style Selector=":is(Button).tool:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+        <!-- ToolButton glyph size comes from the theme token (single source of truth) -->
+        <Style Selector="local|ToolButton">
+            <Setter Property="IconSize" Value="{StaticResource ToolIconSize}" />
         </Style>
 
         <!-- Lucide-style monochrome line icons (project icon system, PLAN §13.3 / no-emoji rule) -->

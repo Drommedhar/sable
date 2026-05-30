@@ -73,6 +73,7 @@
     <!-- controls -->
     <x:Double x:Key="ControlHeight">22</x:Double>   <!-- combo / textbox / numeric / opt toggle -->
     <x:Double x:Key="ToolButtonSize">28</x:Double>  <!-- left tool palette buttons -->
+    <x:Double x:Key="ToolIconSize">24</x:Double>    <!-- glyph size inside a ToolButton (Lucide 24-frame) -->
     <x:Double x:Key="IconButtonSize">24</x:Double>  <!-- footer / eye icon buttons -->
     <x:Double x:Key="LayerRowHeight">28</x:Double>
     <x:Double x:Key="ColorWheelMaxSize">190</x:Double>
