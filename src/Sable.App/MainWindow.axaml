@@ -126,9 +126,9 @@
                 <MenuItem x:Name="SnapMenuItem" Header="Snap to Guides/Grid" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
                 <MenuItem Header="Clear Guides" Click="OnClearGuides" />
             </MenuItem>
-            <MenuItem Header="_Window">
-                <MenuItem Header="Adjustments" Click="OnToggleAdjustments" />
-                <MenuItem Header="Layer Effects" Click="OnToggleEffects" />
+            <MenuItem Header="_Window" SubmenuOpened="OnWindowMenuOpened">
+                <MenuItem x:Name="AdjustmentsMenuItem" Header="Adjustments" Click="OnToggleAdjustments" />
+                <MenuItem x:Name="EffectsMenuItem" Header="Layer Effects" Click="OnToggleEffects" />
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="Check for Updates..." Click="OnCheckUpdatesMenu" />
@@ -267,7 +267,7 @@
                                             Background="{Binding IsActive, Converter={x:Static local:BoolToTabBgConverter.Instance}}">
                                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding DisplayTitle}" Foreground="{DynamicResource ChromeText}" FontSize="12" VerticalAlignment="Center" />
-                                            <Button Classes="iconbtn" Width="16" Height="16" Padding="0" Click="OnCloseTab" Tag="{Binding}"
+                                            <Button Classes="iconbtn" Width="14" Height="14" Padding="0" Click="OnCloseTab" Tag="{Binding}"
                                                     ToolTip.Tip="Close tab" VerticalAlignment="Center">
                                                 <TextBlock Text="×" FontSize="13" Foreground="{DynamicResource ChromeTextDim}" />
                                             </Button>
@@ -429,15 +429,16 @@
 
                         <!-- adjustment params now live in the modeless AdjustmentWindow (Window menu) -->
                         <!-- footer buttons (bound to undoable layer commands) -->
-                        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="6,4">
+                        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}"
+                                Height="{StaticResource StatusBarHeight}" Padding="6,0">
                             <Grid ColumnDefinitions="Auto,*,Auto">
                                 <!-- left cluster: add layer / mask / adjustments / live filters / group -->
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
                                     <Button Classes="iconbtn" Command="{Binding NewLayerCommand}" ToolTip.Tip="New pixel layer">
-                                        <Path Classes="icon" Width="16" Height="16" Data="M12 5v14 M5 12h14" />
+                                        <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
                                     </Button>
                                     <Button Classes="iconbtn" Command="{Binding ToggleMaskCommand}" ToolTip.Tip="Add / remove mask">
-                                        <Path Classes="icon" Width="16" Height="16"
+                                        <Path Classes="icon" Width="14" Height="14"
                                               Data="M4 4h16v16H4z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
                                     </Button>
                                     <!-- adjustments flyout (Affinity half-circle) -->
@@ -461,7 +462,7 @@
                                                 <MenuItem Header="Invert" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Invert}" />
                                             </MenuFlyout>
                                         </Button.Flyout>
-                                        <Path Classes="icon" Width="16" Height="16"
+                                        <Path Classes="icon" Width="14" Height="14"
                                               Data="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 3v18" />
                                     </Button>
                                     <!-- live filters flyout -->
@@ -482,7 +483,7 @@
                                                 <MenuItem Header="Denoise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
                                             </MenuFlyout>
                                         </Button.Flyout>
-                                        <Path Classes="icon" Width="16" Height="16"
+                                        <Path Classes="icon" Width="14" Height="14"
                                               Data="M12 2.7s5 5.3 5 9.3a5 5 0 0 1-10 0c0-4 5-9.3 5-9.3z" />
                                     </Button>
                                     <Button Classes="iconbtn" Click="OnFxButton" ToolTip.Tip="Layer Effects">
@@ -490,13 +491,13 @@
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Button>
                                     <Button Classes="iconbtn" Command="{Binding GroupCommand}" ToolTip.Tip="Group selected">
-                                        <Path Classes="icon" Width="16" Height="16"
+                                        <Path Classes="icon" Width="14" Height="14"
                                               Data="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z M12 10v6 M9 13h6" />
                                     </Button>
                                 </StackPanel>
                                 <!-- right: delete (Affinity puts trash far right) -->
                                 <Button Grid.Column="2" Classes="iconbtn" Command="{Binding DeleteLayerCommand}" ToolTip.Tip="Delete layer">
-                                    <Path Classes="icon" Width="16" Height="16"
+                                    <Path Classes="icon" Width="14" Height="14"
                                           Data="M3 6h18 M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                 </Button>
                             </Grid>
@@ -518,9 +519,9 @@
                                                       IsChecked="{Binding IsVisible, Mode=TwoWay}"
                                                       ToolTip.Tip="Toggle visibility">
                                             <Panel>
-                                                <Path Classes="icon" Width="16" Height="16" IsVisible="{Binding IsVisible}"
+                                                <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsVisible}"
                                                       Data="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z" />
-                                                <Path Classes="icon" Width="16" Height="16" Opacity="0.4" IsVisible="{Binding !IsVisible}"
+                                                <Path Classes="icon" Width="14" Height="14" Opacity="0.4" IsVisible="{Binding !IsVisible}"
                                                       Data="M2 2l20 20 M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7 M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
                                             </Panel>
                                         </ToggleButton>
@@ -536,7 +537,7 @@
                                             <Border Width="1" Background="{DynamicResource ChromeBorder}" Margin="0,4"
                                                     IsVisible="{Binding IsNested}" />
                                             <!-- group disclosure chevron -->
-                                            <Button Classes="iconbtn" Width="16" Height="16" Padding="0"
+                                            <Button Classes="iconbtn" Width="14" Height="14" Padding="0"
                                                     Click="OnToggleGroupExpand" IsVisible="{Binding IsGroup}"
                                                     VerticalAlignment="Center">
                                                 <Panel>
@@ -551,15 +552,15 @@
                                                 <Panel>
                                                     <Image Source="{Binding Thumbnail}" Width="30" Height="24"
                                                            Stretch="Fill" IsVisible="{Binding IsPixel}" />
-                                                    <Path Classes="icon" Width="16" Height="16" IsVisible="{Binding IsGroup}"
+                                                    <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsGroup}"
                                                           Data="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" />
                                                     <Path Classes="icon" Width="16" Height="14" IsVisible="{Binding IsAdjustment}"
                                                           Data="M21 4H14 M10 4H3 M21 12H12 M8 12H3 M21 20H16 M12 20H3 M14 2v4 M8 10v4 M16 18v4" />
                                                     <Path Classes="icon" Width="15" Height="16" IsVisible="{Binding IsFilter}"
                                                           Data="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5S5 13 5 15a7 7 0 0 0 7 7z" />
-                                                    <Path Classes="icon" Width="16" Height="16" IsVisible="{Binding IsShape}"
+                                                    <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsShape}"
                                                           Data="M4 4h16v16H4z" />
-                                                    <Path Classes="icon" Width="16" Height="16" IsVisible="{Binding IsText}"
+                                                    <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsText}"
                                                           Data="M4 7V4h16v3 M9 20h6 M12 4v16" />
                                                 </Panel>
                                             </Border>

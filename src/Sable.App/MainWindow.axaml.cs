@@ -1169,20 +1169,10 @@ public partial class MainWindow : Window
 
         var win = new AdjustmentWindow { DataContext = DataContext };
         win.CompositeProvider = () => Canvas.ReadComposite();   // backdrop histogram source
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         win.Closed += (_, _) => _adjWindow = null;
         _adjWindow = win;
-        win.Show(this);            // modeless, owned by main
-        CenterOverCanvas(win);
-    }
-
-    // Position a tool window centered over the canvas surface.
-    private void CenterOverCanvas(Window win)
-    {
-        var center = Canvas.PointToScreen(new Point(Canvas.Bounds.Width / 2, Canvas.Bounds.Height / 2));
-        double scale = win.RenderScaling;
-        win.Position = new PixelPoint(
-            center.X - (int)(win.Width * scale / 2),
-            center.Y - (int)(win.Height * scale / 2));
+        win.Show(this);            // modeless, owned + centered over main
     }
 
     // ===== clipboard (PLAN §16.2 / Phase 1 #5) =====
@@ -1491,6 +1481,14 @@ public partial class MainWindow : Window
         Canvas.ResetView();
     }
 
+    // gate the Window-menu tool panels to the current selection (they're param panels for it)
+    private void OnWindowMenuOpened(object? sender, RoutedEventArgs e)
+    {
+        var sel = Doc?.SelectedLayer;
+        AdjustmentsMenuItem.IsEnabled = sel?.IsEffect == true;        // adjustment/filter layer
+        EffectsMenuItem.IsEnabled = sel is not null && sel.IsEffect == false;   // a content layer
+    }
+
     private void OnToggleAdjustments(object? sender, RoutedEventArgs e)
     {
         if (_adjWindow is not null) _adjWindow.Close();
@@ -1513,10 +1511,10 @@ public partial class MainWindow : Window
     private void ShowEffectsWindow()
     {
         var win = new EffectsWindow { DataContext = DataContext };
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         win.Closed += (_, _) => _fxWindow = null;
         _fxWindow = win;
         win.Show(this);
-        CenterOverCanvas(win);
     }
 
     private async void OnOpenImage(object? sender, RoutedEventArgs e)
