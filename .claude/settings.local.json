@@ -12,7 +12,10 @@
       "WebSearch",
       "WebFetch(domain:glensmith.co.uk)",
       "WebFetch(domain:edits101.com)",
-      "WebFetch(domain:helpx.adobe.com)"
-    ]
+      "WebFetch(domain:helpx.adobe.com)",
+      "Read(//private/tmp/**)",
+      "Bash(exit 0)"
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }

@@ -19,8 +19,9 @@ namespace Sable.Canvas;
 /// when dirty), and <see cref="SurfaceBlitter"/> presents the composite into the
 /// swapchain. Currently stretches the composite to the surface (aspect-fit later).
 ///
-/// Windows-only for now (HWND surface). Linux (Xlib/Wayland) + macOS (CAMetalLayer)
-/// surface descriptors are the cross-platform follow-up.
+/// Surface + input come from the OS backend (<see cref="Platform.CanvasPlatform"/>):
+/// Windows (HWND) and macOS (CAMetalLayer) are wired; Linux (Xlib/Wayland) is the
+/// remaining follow-up.
 /// </summary>
 public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
 {
