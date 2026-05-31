@@ -947,7 +947,39 @@ public partial class MainWindow : Window
         // keep the colour panel in sync: Gradient tool → Gradients tab, everything else → Color
         SetColorTab(kind == Sable.Tools.ToolKind.Gradient);
         UpdateOptionsBar(kind);
+        if (ToolHint is not null) ToolHint.Text = ToolHintFor(kind);
     }
+
+    // Affinity-style status-bar hints: what drag/click/modifiers do for the active tool.
+    private static string ToolHintFor(ToolKind k) => k switch
+    {
+        ToolKind.Move => "Drag to move the layer. Shift constrains to an axis. Use the Layers panel to pick a layer.",
+        ToolKind.Transform => "Drag a corner to scale, an edge to scale one axis, the handle to rotate.",
+        ToolKind.Marquee or ToolKind.EllipseMarquee => "Drag to select. Shift adds, Alt subtracts, Shift+Alt intersects. Drag the interior to move the selection.",
+        ToolKind.Lasso => "Drag to draw a freehand selection. Shift adds, Alt subtracts, Shift+Alt intersects.",
+        ToolKind.PolyLasso => "Click to place points; click the first point or press Enter to close, Esc to cancel. Shift adds, Alt subtracts.",
+        ToolKind.MagicWand => "Click a colour to select contiguous pixels. Shift adds, Alt subtracts, Shift+Alt intersects.",
+        ToolKind.ColorRange => "Click a colour to select all similar pixels. Shift adds, Alt subtracts.",
+        ToolKind.Brush or ToolKind.Pencil => "Drag to paint. Alt samples a colour. Ctrl+Alt-drag adjusts size/hardness. [ / ] resize.",
+        ToolKind.Eraser => "Drag to erase. Ctrl+Alt-drag adjusts size/hardness.",
+        ToolKind.Fill => "Click to flood-fill with the foreground colour. Alt samples a colour.",
+        ToolKind.Gradient => "Drag to draw a gradient (start → end). Shift constrains the angle.",
+        ToolKind.Crop => "Drag a rectangle, then Enter to commit or Esc to cancel.",
+        ToolKind.ShapeRect or ToolKind.ShapeEllipse => "Drag to draw the shape. Shift constrains to a square/circle.",
+        ToolKind.ShapeLine => "Drag to draw a line. Shift constrains the angle.",
+        ToolKind.CloneStamp => "Alt-click to set the source, then drag to paint cloned pixels.",
+        ToolKind.Dodge => "Drag to lighten. Adjust strength in the options bar.",
+        ToolKind.Burn => "Drag to darken. Adjust strength in the options bar.",
+        ToolKind.Sponge => "Drag to desaturate. Adjust strength in the options bar.",
+        ToolKind.BlurBrush => "Drag to blur. Adjust strength in the options bar.",
+        ToolKind.SharpenBrush => "Drag to sharpen. Adjust strength in the options bar.",
+        ToolKind.Smudge => "Drag to smudge colour along the stroke.",
+        ToolKind.Type => "Click to place a text layer, then type. Double-click existing text to edit.",
+        ToolKind.Eyedropper => "Click to sample a colour. Use the options bar to set the sample size.",
+        ToolKind.Hand => "Drag to pan. (Space-drag pans with any tool; wheel zooms.)",
+        ToolKind.Zoom => "Click to zoom in, Alt-click to zoom out. Wheel zooms to the cursor.",
+        _ => "",
+    };
 
     // show only the options-bar controls relevant to the active tool
     private void UpdateOptionsBar(Sable.Tools.ToolKind k)

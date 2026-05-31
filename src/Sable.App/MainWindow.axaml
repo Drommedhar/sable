@@ -23,7 +23,7 @@
     <!-- PS/Affinity-style chrome skeleton (PLAN §13). Real dockable panels (Dock.Avalonia)
          and the embedded wgpu canvas surface land in later milestones. -->
     <Panel>
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,*">
 
         <!-- (4) Menu bar — brand logo at left, like Affinity -->
         <DockPanel Grid.Row="0" Background="{DynamicResource ChromeMenuBg}">
@@ -293,21 +293,27 @@
 
                 <!-- status strip: live zoom UI + document info + cursor position -->
                 <Border Grid.Row="2" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="10">
-                        <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomFit" ToolTip.Tip="Fit (0)">
-                            <Path Classes="icon" Width="13" Height="13" Data="M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5" />
-                        </Button>
-                        <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomActual" ToolTip.Tip="100%">
-                            <TextBlock Text="1:1" FontSize="10" Foreground="{DynamicResource ChromeText}" />
-                        </Button>
-                        <TextBox x:Name="ZoomBox" Width="54" Text="100%" FontSize="11" TextAlignment="Center"
-                                 VerticalContentAlignment="Center" KeyDown="OnZoomBoxKey" ToolTip.Tip="Zoom level" />
-                        <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
-                        <TextBlock x:Name="DocInfoLabel" Text="—" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                        <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
-                        <TextBlock x:Name="CursorLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="110" />
-                        <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
-                    </StackPanel>
+                    <DockPanel Margin="8,0" LastChildFill="True">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                            <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomFit" ToolTip.Tip="Fit (0)">
+                                <Path Classes="icon" Width="13" Height="13" Data="M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5" />
+                            </Button>
+                            <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomActual" ToolTip.Tip="100%">
+                                <TextBlock Text="1:1" FontSize="10" Foreground="{DynamicResource ChromeText}" />
+                            </Button>
+                            <TextBox x:Name="ZoomBox" Width="54" Text="100%" FontSize="11" TextAlignment="Center"
+                                     VerticalContentAlignment="Center" KeyDown="OnZoomBoxKey" ToolTip.Tip="Zoom level" />
+                            <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                            <TextBlock x:Name="DocInfoLabel" Text="—" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                            <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                            <TextBlock x:Name="CursorLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="110" />
+                            <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
+                            <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                        </StackPanel>
+                        <!-- active-tool modifier hints (Affinity-style) -->
+                        <TextBlock x:Name="ToolHint" Foreground="{DynamicResource ChromeTextDim}" FontSize="11"
+                                   VerticalAlignment="Center" Margin="14,0,0,0" TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
                 </Border>
             </Grid>
 
@@ -552,11 +558,6 @@
             </Border>
         </Grid>
 
-        <!-- bottom app status bar -->
-        <Border Grid.Row="3" Background="#FF007ACC" Height="{StaticResource StatusBarHeight}">
-            <TextBlock Text="Sable — M0 spike build" Foreground="White" FontSize="11"
-                       VerticalAlignment="Center" Margin="8,0" />
-        </Border>
     </Grid>
 
     <!-- drag ghost overlay (follows cursor while dragging a layer) -->
