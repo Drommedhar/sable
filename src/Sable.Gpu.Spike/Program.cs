@@ -284,6 +284,39 @@ unsafe
         bcomp.Preview = null;
     }
 
+    // --- tiled storage: dirty-tile atlas re-upload across composites (PLAN §3) ---
+    {
+        var tdoc = new Sable.Engine.Document(300, 300);   // 2x2 tile grid (256-tiled)
+        var lay = new Sable.Engine.Layers.PixelLayer(300, 300, "paint");
+        tdoc.Layers.Add(lay);
+        using var tcomp = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        int TIdx(int x, int y) => (y * 300 + x) * 4;
+
+        // first composite: layer is fully transparent → all tiles empty
+        var t0 = tcomp.CompositeToBytes(tdoc);
+        bool emptyOk = t0[TIdx(10, 10) + 3] == 0 && t0[TIdx(280, 280) + 3] == 0;
+
+        // paint a blue block in tile (0,0) AND a block in tile (1,1); mark those tiles dirty
+        void Paint(int x0, int y0, int s, byte r, byte g, byte b)
+        {
+            for (int y = y0; y < y0 + s; y++)
+                for (int x = x0; x < x0 + s; x++)
+                { int i = (y * 300 + x) * 4; lay.Pixels[i] = r; lay.Pixels[i+1] = g; lay.Pixels[i+2] = b; lay.Pixels[i+3] = 255; }
+        }
+        Paint(8, 8, 16, 0, 0, 255);        // tile (0,0)
+        Paint(264, 264, 16, 0, 255, 0);    // tile (1,1)
+        lay.MarkTilesDirty(new[] { (0, 0), (1, 1) });
+        lay.Dirty = true;
+
+        var t1 = tcomp.CompositeToBytes(tdoc);
+        int a = TIdx(12, 12), c = TIdx(268, 268), e = TIdx(150, 150);
+        bool paintOk = t1[a+2] == 255 && t1[a+3] == 255            // blue appeared (tile 0,0)
+                    && t1[c+1] == 255 && t1[c+3] == 255            // green appeared (tile 1,1)
+                    && t1[e+3] == 0;                               // untouched tile still empty
+        Console.WriteLine($"tiled re-upload: emptyFirst={emptyOk} blue=({t1[a]},{t1[a+1]},{t1[a+2]},{t1[a+3]}) " +
+            $"green=({t1[c]},{t1[c+1]},{t1[c+2]},{t1[c+3]}) midA={t1[e+3]} ok={emptyOk && paintOk}");
+    }
+
     // --- M1 verification: .sable save/load round-trip ---------------------------
     var sdoc = Sable.Engine.Document.CreateDemo(80, 60);
     var sablePath = Path.GetFullPath("roundtrip.sable");

@@ -13,7 +13,9 @@ struct Params {
     mode: u32, opacity: f32, clip: f32,
     m00: f32, m01: f32, m10: f32, m11: f32, b0: f32, b1: f32,
     fillOpacity: f32, hasMask: f32,
-    h6: f32, h7: f32, h8: f32, _p3: f32, _p4: f32,   // perspective row (affine → 0,0,1)
+    h6: f32, h7: f32, h8: f32,   // perspective row (affine → 0,0,1)
+    srcMode: u32,                // 0 = contiguous `src` buffer; 1 = tiled atlas (binding 6/7)
+    _p4: f32,
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -22,6 +24,10 @@ struct Params {
 @group(0) @binding(3) var<storage, read>        src:  array<u32>;
 @group(0) @binding(4) var<storage, read_write>   outp: array<u32>;
 @group(0) @binding(5) var<storage, read>        mask: array<u32>;   // R channel = coverage
+// tiled storage (PLAN §3): a layer's 256×256 tiles live in a shared atlas; tileTable maps the
+// layer's tile grid → atlas slot (0xffffffff = empty/transparent tile, no slot). srcMode=1 only.
+@group(0) @binding(6) var<storage, read>        tileTable: array<u32>;   // [gridW, gridH, slot per tile row-major]
+@group(0) @binding(7) var<storage, read>        atlas:     array<u32>;   // resident tiles, 65536 u32 (256×256) each
 
 fn unpack(c: u32) -> vec4<f32> {
     return vec4<f32>(
@@ -142,7 +148,17 @@ fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
 
 fn srcTexel(ix: i32, iy: i32) -> vec4<f32> {
     if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return vec4<f32>(0.0); }
-    return unpack(src[u32(iy) * dims.srcW + u32(ix)]);
+    if (params.srcMode == 0u) {
+        return unpack(src[u32(iy) * dims.srcW + u32(ix)]);
+    }
+    // tiled atlas: locate the tile, look up its slot, index within the 256×256 slot
+    let gw = tileTable[0];
+    let tx = u32(ix) >> 8u;
+    let ty = u32(iy) >> 8u;
+    let slot = tileTable[2u + ty * gw + tx];
+    if (slot == 0xffffffffu) { return vec4<f32>(0.0); }   // empty tile → transparent
+    let inTile = (u32(iy) & 255u) * 256u + (u32(ix) & 255u);
+    return unpack(atlas[slot * 65536u + inTile]);
 }
 fn maskTexel(ix: i32, iy: i32) -> f32 {
     if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return 0.0; }

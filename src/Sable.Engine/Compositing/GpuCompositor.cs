@@ -26,6 +26,24 @@ public sealed unsafe class GpuCompositor : IDisposable
     private readonly Dictionary<Layer, nint> _maskBuffers = new();
     private readonly Dictionary<Layer, int> _maskBufferBytes = new();
 
+    // --- GPU-tiled layer storage (PLAN §3/§17.3): a shared 256×256 tile atlas with LRU residency.
+    // Pixel layers sample through a per-layer tile table → atlas slot instead of a monolithic buffer,
+    // so only resident (recently-touched, non-empty) tiles consume VRAM. Layers whose live tile count
+    // exceeds the atlas fall back to the monolithic GetLayerBuffer path.
+    private const int TileSz = 256;
+    private const int TileWords = TileSz * TileSz;            // 65536 u32 per slot
+    private const int TileBytes = TileWords * 4;             // 256 KiB per slot
+    private Buffer* _atlasBuf;
+    private ulong _atlasBytes;
+    private int _atlasSlots;
+    private TileResidency? _residency;
+    private Buffer* _tileTableBuf;                            // per-layer table, reuploaded each composite
+    private int _tileTableWords;                             // _tileTableBuf capacity (u32)
+    private uint[] _tableScratch = System.Array.Empty<uint>();
+    private Buffer* _dummyStore;                              // 4-byte filler for unused storage bindings
+    private readonly Dictionary<(Layer, int, int), bool> _emptyTiles = new();   // tile transparency cache
+    private readonly Dictionary<Layer, (int w, int h)> _layerTileDims = new();   // detect a layer resize → reset tiles
+
     /// <summary>Live brush-preview dab composited into the stack after its target layer (null = none).</summary>
     public PreviewDab? Preview { get; set; }
 
@@ -81,14 +99,16 @@ public sealed unsafe class GpuCompositor : IDisposable
     private void BuildPipeline()
     {
         var api = _gpu.Api;
-        var bglEntries = stackalloc BindGroupLayoutEntry[6];
+        var bglEntries = stackalloc BindGroupLayoutEntry[8];
         bglEntries[0] = Entry(0, BufferBindingType.Uniform);
         bglEntries[1] = Entry(1, BufferBindingType.Uniform);
         bglEntries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);
         bglEntries[3] = Entry(3, BufferBindingType.ReadOnlyStorage);
         bglEntries[4] = Entry(4, BufferBindingType.Storage);
         bglEntries[5] = Entry(5, BufferBindingType.ReadOnlyStorage);   // mask
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 6, Entries = bglEntries };
+        bglEntries[6] = Entry(6, BufferBindingType.ReadOnlyStorage);   // tile table (atlas mode)
+        bglEntries[7] = Entry(7, BufferBindingType.ReadOnlyStorage);   // tile atlas (atlas mode)
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 8, Entries = bglEntries };
         _bgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
 
         var bglLocal = _bgl;
@@ -116,6 +136,18 @@ public sealed unsafe class GpuCompositor : IDisposable
         _stampParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
         _fxParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
         _filterParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
+
+        // tile atlas: cap to the device's storage-buffer binding limit (and a sane budget).
+        const ulong budget = 768UL * 1024 * 1024;
+        ulong cap = System.Math.Min(System.Math.Min(_gpu.MaxStorageBinding, _gpu.MaxBufferSize), budget);
+        _atlasSlots = System.Math.Max(8, (int)(cap / TileBytes));
+        _atlasBytes = (ulong)_atlasSlots * TileBytes;
+        _atlasBuf = NewBuffer((int)_atlasBytes, BufferUsage.Storage | BufferUsage.CopyDst);
+        _residency = new TileResidency(_atlasSlots);
+        _dummyStore = NewBuffer(4, BufferUsage.Storage | BufferUsage.CopyDst);
+        _tileTableWords = 4096;   // grows on demand
+        _tileTableBuf = NewBuffer(_tileTableWords * 4, BufferUsage.Storage | BufferUsage.CopyDst);
+        _tableScratch = new uint[_tileTableWords];
 
         BuildPresentPipeline();
         BuildAdjustPipeline();
@@ -360,6 +392,11 @@ public sealed unsafe class GpuCompositor : IDisposable
         foreach (var p in _maskBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
         _maskBufferBytes.Clear();
+        // tiled storage: tile coords are doc-size independent, but a same-doc canvas resize is rare
+        // and re-uploading is cheap, so reset residency to stay simple + correct.
+        _residency?.Clear();
+        _emptyTiles.Clear();
+        _layerTileDims.Clear();
         ReleaseScratch();
         _valid = true;
     }
@@ -404,6 +441,10 @@ public sealed unsafe class GpuCompositor : IDisposable
         foreach (var p in _maskBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
         _maskBufferBytes.Clear();
+        // tiled storage: drop residency for the old doc's layers (atlas buffer itself is reused)
+        _residency?.Clear();
+        _emptyTiles.Clear();
+        _layerTileDims.Clear();
     }
 
     /// <summary>Composite the document and return the result texture view.</summary>
@@ -434,20 +475,30 @@ public sealed unsafe class GpuCompositor : IDisposable
 
             if (layer is PixelLayer px)
             {
-                var srcBuf = GetLayerBuffer(px);
-                // brush preview: stamp the dab into a copy of the layer, then composite normally
-                // (so erase reveals layers below and paint respects the layer's blend/opacity).
-                // The preview buffer is sized to the layer (grows for an oversized/offset layer) and
-                // the dab centre is mapped into buffer space, so it works on any layer bounds.
-                if (Preview is { } pv && ReferenceEquals(pv.Layer, layer))
+                bool previewing = Preview is { } pv0 && ReferenceEquals(pv0.Layer, layer);
+                Buffer* srcBuf;
+                Buffer* tileTable = null;
+                if (previewing)
                 {
+                    // brush preview needs a contiguous buffer to stamp the dab into a copy, then
+                    // composite normally (so erase reveals below + paint respects blend/opacity).
+                    // The actively-painted layer therefore stays on the monolithic path during hover.
+                    var pv = Preview!.Value;
+                    srcBuf = GetLayerBuffer(px);
                     int layerBytes = px.Width * px.Height * 4;
                     EnsurePreviewBuffer(layerBytes);
                     CopyBuffer(srcBuf, _previewBuf, layerBytes);
                     DispatchStamp(_previewBuf, srcBuf, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
                     srcBuf = _previewBuf;
                 }
-                BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf, px.Width, px.Height);
+                else
+                {
+                    // tiled atlas path (PLAN §3): sample resident tiles via a per-layer table; monster
+                    // layers (more tiles than the atlas holds) fall back to the monolithic buffer.
+                    tileTable = GetLayerTiles(px);
+                    srcBuf = tileTable is not null ? _dummyStore : GetLayerBuffer(px);
+                }
+                BlendContentWithFx(ref current, ref other, srcBuf, layer, maskBuf, px.Width, px.Height, tileTable);
             }
             else if (layer is ShapeLayer sh)
             {
@@ -497,7 +548,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     // write the 64B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask,
     // perspective row h6,h7,h8 (affine → 0,0,1), 2 pad
     private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill, bool hasMask,
-        ReadOnlySpan<float> perspRow = default)
+        ReadOnlySpan<float> perspRow = default, uint srcMode = 0)
     {
         var prm = stackalloc float[16];
         ((uint*)prm)[0] = mode;
@@ -509,6 +560,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         prm[11] = perspRow.Length == 3 ? perspRow[0] : 0f;   // h6
         prm[12] = perspRow.Length == 3 ? perspRow[1] : 0f;   // h7
         prm[13] = perspRow.Length == 3 ? perspRow[2] : 1f;   // h8
+        ((uint*)prm)[14] = srcMode;                          // 0 = contiguous src, 1 = tiled atlas
         _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 64);
     }
 
@@ -526,11 +578,13 @@ public sealed unsafe class GpuCompositor : IDisposable
         return (inv, new[] { 0f, 0f, 1f });
     }
 
-    private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf, int srcW, int srcH)
+    private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf, int srcW, int srcH,
+        Buffer* tileTable = null)
     {
         var (inv, persp) = LayerInverse(layer, srcW, srcH);
-        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity, maskBuf is not null, persp);
-        DispatchBlend(current, src, other, maskBuf, srcW, srcH);
+        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity,
+            maskBuf is not null, persp, tileTable is not null ? 1u : 0u);
+        DispatchBlend(current, src, other, maskBuf, srcW, srcH, tileTable);
         var tmp = current; current = other; other = tmp;
     }
 
@@ -546,12 +600,12 @@ public sealed unsafe class GpuCompositor : IDisposable
     }
 
     // render a content layer into doc space (offset/transform + mask applied) → _fxLdoc, for FX source
-    private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH)
+    private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH, Buffer* tileTable = null)
     {
         var (inv, persp) = LayerInverse(layer, srcW, srcH);
         ClearBuffer(_fxTint);   // transparent backdrop
-        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null, persp);
-        DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf, srcW, srcH);
+        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null, persp, tileTable is not null ? 1u : 0u);
+        DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf, srcW, srcH, tileTable);
     }
 
     private void DispatchFx(Buffer* src, Buffer* outp, uint mode, float r, float g, float b, float size, float pos,
@@ -590,15 +644,16 @@ public sealed unsafe class GpuCompositor : IDisposable
     }
 
     // composite a content layer plus its non-destructive effects (shadow/glow behind, overlay/stroke front)
-    private void BlendContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* srcBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH)
+    private void BlendContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* srcBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH,
+        Buffer* tileTable = null)
     {
         if (!layer.HasEffects)
         {
-            BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH);
+            BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH, tileTable);
             return;
         }
 
-        RasterizeLayerToDoc(srcBuf, layer, maskBuf, srcW, srcH);   // _fxLdoc = layer in doc space
+        RasterizeLayerToDoc(srcBuf, layer, maskBuf, srcW, srcH, tileTable);   // _fxLdoc = layer in doc space
 
         // behind effects (drop shadow / outer glow), in Effects-list order
         foreach (var fx in layer.Effects)
@@ -613,7 +668,7 @@ public sealed unsafe class GpuCompositor : IDisposable
             }
 
         // the layer itself
-        BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH);
+        BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH, tileTable);
 
         // front effects, in Effects-list order (so list reordering changes the stacking)
         foreach (var fx in layer.Effects)
@@ -896,22 +951,30 @@ public sealed unsafe class GpuCompositor : IDisposable
     // layer coords, so it must match the source layout (doc-sized white mask is uniform → safe).
     // mask == null → the layer has no mask (params.hasMask is 0); bind src as a harmless dummy so
     // the bind group is complete. A real mask is layer-aligned, so its size equals srcBytes.
-    private void DispatchBlend(Buffer* dst, Buffer* src, Buffer* outp, Buffer* mask, int srcW, int srcH)
+    private void DispatchBlend(Buffer* dst, Buffer* src, Buffer* outp, Buffer* mask, int srcW, int srcH, Buffer* tileTable = null)
     {
         var api = _gpu.Api;
         // refresh dims with this layer's src size (output grid stays the document)
         var dimsv = stackalloc uint[4] { (uint)_width, (uint)_height, (uint)srcW, (uint)srcH };
         api.QueueWriteBuffer(_gpu.Queue, _dimsBuf, 0, dimsv, 16);
         ulong srcBytes = (ulong)srcW * (ulong)srcH * 4;
-        var maskBuf = mask is not null ? mask : src;
-        var bg = stackalloc BindGroupEntry[6];
+        bool atlas = tileTable is not null;
+        // src (binding 3): real buffer in contiguous mode, a 4-byte dummy in atlas mode
+        Buffer* srcBind = atlas ? _dummyStore : src;
+        ulong srcSize = atlas ? 4 : srcBytes;
+        // mask (binding 5): real layer-aligned mask, or a 4-byte dummy when the layer has none
+        Buffer* maskBind = mask is not null ? mask : _dummyStore;
+        ulong maskSize = mask is not null ? srcBytes : 4;
+        var bg = stackalloc BindGroupEntry[8];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 64 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = dst, Size = (ulong)_imgBytes };
-        bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = srcBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = srcBind, Size = srcSize };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
-        bg[5] = new BindGroupEntry { Binding = 5, Buffer = maskBuf, Size = srcBytes };
-        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 6, Entries = bg };
+        bg[5] = new BindGroupEntry { Binding = 5, Buffer = maskBind, Size = maskSize };
+        bg[6] = new BindGroupEntry { Binding = 6, Buffer = atlas ? tileTable : _dummyStore, Size = atlas ? (ulong)_tileTableWords * 4 : 4 };
+        bg[7] = new BindGroupEntry { Binding = 7, Buffer = atlas ? _atlasBuf : _dummyStore, Size = atlas ? _atlasBytes : 4 };
+        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 8, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var encDesc = new CommandEncoderDescriptor();
@@ -1012,6 +1075,119 @@ public sealed unsafe class GpuCompositor : IDisposable
         px.DirtyTiles.Clear();
         px.Dirty = false;
         return buf;
+    }
+
+    // ----- GPU-tiled storage (PLAN §3/§17.3) -----
+
+    /// <summary>
+    /// Ensure the layer's non-empty 256×256 tiles are resident in the shared atlas and (re)upload
+    /// its tile table. Returns the table buffer, or null when the layer should use the monolithic
+    /// buffer instead (more live tiles than the atlas can hold in one pass).
+    /// </summary>
+    private Buffer* GetLayerTiles(PixelLayer px)
+    {
+        if (_residency is null) return null;
+        int gw = (px.Width + TileSz - 1) / TileSz;
+        int gh = (px.Height + TileSz - 1) / TileSz;
+        int tiles = gw * gh;
+        if (tiles > _atlasSlots) return null;   // monster layer → monolithic fallback
+
+        // resize or bulk change (Dirty with no tile info) → reset this layer's residency + emptiness
+        bool resized = !_layerTileDims.TryGetValue(px, out var d) || d.w != px.Width || d.h != px.Height;
+        // the atlas path clears px.Dirty; a monolithic buffer cached from a prior hover-preview would
+        // then look up-to-date but miss this edit. Drop it so the next preview re-syncs from px.Pixels.
+        if ((resized || px.Dirty) && _layerBuffers.TryGetValue(px, out var stale))
+        {
+            _gpu.Api.BufferRelease((Buffer*)stale);
+            _layerBuffers.Remove(px);
+            _layerBufferBytes.Remove(px);
+        }
+        if (resized || (px.Dirty && px.DirtyTiles.Count == 0))
+        {
+            _residency.ReleaseOwner(px);
+            RemoveEmpties(px);
+        }
+        else
+        {
+            foreach (var (tx, ty) in px.DirtyTiles)
+            {
+                _residency.Invalidate(new TileResidency.Key(px, tx, ty));
+                _emptyTiles.Remove((px, tx, ty));
+            }
+        }
+        _layerTileDims[px] = (px.Width, px.Height);
+
+        int need = 2 + tiles;
+        if (need > _tileTableWords)
+        {
+            int n = _tileTableWords;
+            while (n < need) n *= 2;
+            _gpu.Api.BufferRelease(_tileTableBuf);
+            _tileTableBuf = NewBuffer(n * 4, BufferUsage.Storage | BufferUsage.CopyDst);
+            _tileTableWords = n;
+            _tableScratch = new uint[n];
+        }
+
+        _tableScratch[0] = (uint)gw;
+        _tableScratch[1] = (uint)gh;
+        for (int ty = 0; ty < gh; ty++)
+            for (int tx = 0; tx < gw; tx++)
+            {
+                int ti = 2 + ty * gw + tx;
+                if (IsTileEmpty(px, tx, ty)) { _tableScratch[ti] = 0xFFFFFFFFu; continue; }
+                int slot = _residency.Acquire(new TileResidency.Key(px, tx, ty), out bool needUpload);
+                if (needUpload) UploadTile(px, tx, ty, slot);
+                _tableScratch[ti] = (uint)slot;
+            }
+
+        fixed (uint* tp = _tableScratch)
+            _gpu.Api.QueueWriteBuffer(_gpu.Queue, _tileTableBuf, 0, tp, (nuint)(need * 4));
+
+        px.DirtyTiles.Clear();
+        px.Dirty = false;
+        return _tileTableBuf;
+    }
+
+    private void RemoveEmpties(Layer owner)
+    {
+        var drop = new List<(Layer, int, int)>();
+        foreach (var k in _emptyTiles.Keys) if (ReferenceEquals(k.Item1, owner)) drop.Add(k);
+        foreach (var k in drop) _emptyTiles.Remove(k);
+    }
+
+    /// <summary>A tile is empty (no slot needed) when every pixel's alpha is 0. Cached; invalidated on paint.</summary>
+    private bool IsTileEmpty(PixelLayer px, int tx, int ty)
+    {
+        if (_emptyTiles.TryGetValue((px, tx, ty), out bool cached)) return cached;
+        int tw = RasterTiles.TileWidth(px.Width, tx);
+        int th = RasterTiles.TileHeight(px.Height, ty);
+        var pix = px.Pixels;
+        bool empty = true;
+        for (int ry = 0; ry < th && empty; ry++)
+        {
+            int rowBase = ((ty * TileSz + ry) * px.Width + tx * TileSz) * 4;
+            for (int rx = 0; rx < tw; rx++)
+                if (pix[rowBase + rx * 4 + 3] != 0) { empty = false; break; }
+        }
+        _emptyTiles[(px, tx, ty)] = empty;
+        return empty;
+    }
+
+    /// <summary>Upload one tile's rows from the layer buffer into its atlas slot (strided copy).</summary>
+    private void UploadTile(PixelLayer px, int tx, int ty, int slot)
+    {
+        int tw = RasterTiles.TileWidth(px.Width, tx);
+        int th = RasterTiles.TileHeight(px.Height, ty);
+        ulong slotBase = (ulong)slot * TileBytes;
+        fixed (byte* p = px.Pixels)
+        {
+            for (int ry = 0; ry < th; ry++)
+            {
+                int srcOff = ((ty * TileSz + ry) * px.Width + tx * TileSz) * 4;
+                ulong dstOff = slotBase + (ulong)(ry * TileSz) * 4;
+                _gpu.Api.QueueWriteBuffer(_gpu.Queue, _atlasBuf, dstOff, p + srcOff, (nuint)(tw * 4));
+            }
+        }
     }
 
     private byte[]? _shapeScratch;
@@ -1134,6 +1310,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         foreach (var p in _maskBuffers.Values) api.BufferRelease((Buffer*)p);
         _maskBuffers.Clear();
         _maskBufferBytes.Clear();
+        if (_atlasBuf is not null) api.BufferRelease(_atlasBuf);
+        if (_dummyStore is not null) api.BufferRelease(_dummyStore);
+        if (_tileTableBuf is not null) api.BufferRelease(_tileTableBuf);
         ReleaseSizeResources();
         if (_dimsBuf is not null) api.BufferRelease(_dimsBuf);
         if (_paramsBuf is not null) api.BufferRelease(_paramsBuf);

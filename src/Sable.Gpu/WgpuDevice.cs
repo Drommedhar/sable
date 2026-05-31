@@ -18,6 +18,12 @@ public sealed unsafe class WgpuDevice : IDisposable
     public Device* Device { get; }
     public Queue* Queue { get; }
 
+    /// <summary>Max bytes bindable from a single storage buffer (caps the tile-atlas size). Default
+    /// WebGPU limit is 128 MiB; we request the adapter's higher value when available.</summary>
+    public ulong MaxStorageBinding { get; private set; } = 128u * 1024 * 1024;
+    /// <summary>Max single-buffer allocation the device permits (also caps the atlas).</summary>
+    public ulong MaxBufferSize { get; private set; } = 256u * 1024 * 1024;
+
     public WgpuDevice()
     {
         Api = WebGPU.GetApi();
@@ -43,16 +49,39 @@ public sealed unsafe class WgpuDevice : IDisposable
 
         // --- request device (sync under wgpu-native) ---
         Device* device = null;
+        // non-throwing: leave device null on failure so the full-limits → defaults fallback can retry
         var deviceCb = PfnRequestDeviceCallback.From((status, d, msgPtr, _) =>
         {
             if (status == RequestDeviceStatus.Success) device = d;
-            else throw new InvalidOperationException($"wgpu: device request failed: {SilkMarshal.PtrToString((nint)msgPtr)}");
         });
-        var deviceDesc = new DeviceDescriptor();
-        Api.AdapterRequestDevice(Adapter, in deviceDesc, deviceCb, null);
+        // Request the adapter's full limits so the tile atlas can exceed the 128 MiB default
+        // storage-buffer binding cap (PLAN §3/§17.3). Falls back to defaults if that request fails.
+        var supported = new SupportedLimits();
+        bool gotLimits = Api.AdapterGetLimits(Adapter, ref supported);
+        if (gotLimits)
+        {
+            var required = new RequiredLimits { Limits = supported.Limits };
+            var deviceDesc = new DeviceDescriptor { RequiredLimits = &required };
+            Api.AdapterRequestDevice(Adapter, in deviceDesc, deviceCb, null);
+        }
+        if (device is null)
+        {
+            // retry with defaults (some drivers reject the full-limits request)
+            var deviceDesc = new DeviceDescriptor();
+            Api.AdapterRequestDevice(Adapter, in deviceDesc, deviceCb, null);
+        }
         if (device is null)
             throw new InvalidOperationException("wgpu: device creation failed.");
         Device = device;
+
+        // report the ACTUAL device limits (the raise above is best-effort and may have fallen back
+        // to defaults) so the tile atlas never sizes past what this device can bind.
+        var actual = new SupportedLimits();
+        if (Api.DeviceGetLimits(Device, ref actual))
+        {
+            if (actual.Limits.MaxStorageBufferBindingSize > 0) MaxStorageBinding = actual.Limits.MaxStorageBufferBindingSize;
+            if (actual.Limits.MaxBufferSize > 0) MaxBufferSize = actual.Limits.MaxBufferSize;
+        }
 
         Queue = Api.DeviceGetQueue(Device);
     }

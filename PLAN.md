@@ -655,8 +655,8 @@ Not in the §16 feature comparison but needed. ⬜ all not started.
 - ✅ **Window/session restore + recent files (DONE)**: window size/pos/maximized saved on close + applied on launch; `OpenTabs` (saved-file paths) reopened on `Opened`; `RecentFiles` (deduped, capped 12) → **File▸Open Recent** submenu, recorded on every open/save.
 - ✅ **Theming engine (DONE)**: `Theme.axaml` `ThemeDictionaries` (Dark / Gray / Light) define `Chrome*` brush tokens; Gray = custom `Themes.Gray` `ThemeVariant` (inherits Dark). `MainWindow.ApplyTheme` sets `RequestedThemeVariant` from the setting; **MainWindow chrome surfaces bound via `{DynamicResource Chrome…}`** so Dark/Gray/Light re-theme live. 🔶 remaining: the **dialog windows + many inline text colours aren't tokenised yet** (Light theme has text-readability gaps until text tokens are added) — finish by tokenising the rest opportunistically.
 - ✅ **Reusable controls (DONE)**: `src/Sable.App/Controls/` — `LabeledSlider`, `HexColorField`, `SettingRow`; new panels compose these instead of re-rolling Grid+Slider+TextBox (CLAUDE UI conventions). Existing dialogs migrate opportunistically.
-- ⬜ **Customisable canvas-overlay appearance (settings)**: every hardcoded overlay visual must become a user setting — selection marching-ants **colour + line width + dash speed**, **mask / quick-mask overlay colour + opacity** (rubylith), **guide colour**, **smart-guide colour**, **grid colour + spacing + subdivisions**, **pixel-grid colour**, **pasteboard colour** (currently theme-derived), **ruler unit** (px/mm/in/%), brush-cursor ring style. Store in `SableSettings`, edit via a new `SettingsWindow` "Canvas / Appearance" category (compose `HexColorField`/`LabeledSlider`), and feed them into the blit uniform (`fullscreen_blit.wgsl` consts → uniform fields), `Ruler.cs`, and the selection render — these are hardcoded constants today.
-- ⬜ **Rebindable hotkeys**: a keymap model (`action → gesture`, persisted in `SableSettings`) + a **Keyboard-Shortcuts settings page** (searchable action list, live conflict detection, PS/Affinity presets, per-action reset). Route every shortcut through it — the hardcoded `MainWindow.OnGlobalKeyDown` switch, `CycleGroup` tool letters, and menu `InputGesture`s — instead of literal `Key.*` cases. (All shortcuts are hardcoded today.)
+- 🔶 **Customisable canvas-overlay appearance (settings) — colours DONE (Phase 7)**: guide / smart-guide / grid / quick-mask **colours** are now `SableSettings` hex fields, edited in the SettingsWindow "User Interface ▸ Canvas overlays" page (`HexColorField`s), fed into the blit uniform (`fullscreen_blit.wgsl` consts → vp uniform `u[57..68]`, grown 60→72 floats). ⬜ remaining: **line width / dash speed / opacity / spacing+subdivisions / pixel-grid colour / ruler unit / brush-cursor style** (pasteboard already theme-derived).
+- 🔶 **Rebindable hotkeys — command actions DONE (Phase 7)**: keymap model (`Sable.Core.Settings.KeyCommands` catalog + `SableSettings.KeyBindings` override map, persisted) + **Keyboard settings page** (searchable via the existing filter, steal+warn conflict handling, per-action reset). `MainWindow.OnGlobalKeyDown` now matches the keymap (`KeyGesture.Matches`) before fixed keys. ⬜ remaining: route **`CycleGroup` tool letters** + **menu `InputGesture` display labels** through it; **PS/Affinity preset** sets.
 - **File associations**: double-click `.sable` opens app, "Open with", OS file-type registration via installer.
 - **Telemetry / crash reporting** (opt-in) + **logging/diagnostics** framework.
 - **Autosave / crash recovery** (periodic snapshot of open docs; recover on next launch).
@@ -671,7 +671,7 @@ Not in the §16 feature comparison but needed. ⬜ all not started.
 - **Tab UX** — reorder tabs, overflow scroll when many, detach tab to its own window.
 
 ### 17.3 Architecture debt (real, affects scale)
-- **Layers are NOT actually GPU-tiled**: `PixelLayer` is one doc-sized buffer; the 256² tiling exists only for undo snapshots + partial upload. The §3 "tiled, GPU-resident" invariant isn't truly met → VRAM/perf blows up on 100MP docs and with many open tabs. Real tiled layer storage (atlas, partial residency, eviction) is the big engine refactor for scale. Tie to the composite-cache perf work.
+- 🔶 **GPU-tiled layer storage — DONE (Phase 7)**: pixel layers now sample resident 256² tiles from a shared atlas (`GpuCompositor` `_atlasBuf` + per-layer tile table; `TileResidency` LRU eviction; `composite.wgsl` `srcMode`/atlas bindings). VRAM is bounded to the device storage-binding cap regardless of doc size; doc-swap residency is freed. ⬜ remaining: tie viewport-tile culling to the composite-cache for true 100MP (today the full atlas must hold a layer's live tiles or it falls back to monolithic); masks not yet atlased.
 - **HiDPI / per-monitor DPI**: canvas assumes 1:1; needs render-scaling-aware surface sizing + input mapping.
 - **Doc-swap GPU buffer leak** (already noted §15) — must fix before multi-tab (each tab swap currently leaks).
 
@@ -724,10 +724,12 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 
 ### Phase 7 — Architecture & scale  *(Engine track, heavy — partial)*
 - ✅ **History panel + named snapshots** (`HistoryWindow`, `UndoStack.JumpTo`). ✅ **Command palette** (Ctrl+K) + **right-click context menus**.
-- ⬜ **Real GPU-tiled layer storage** (atlas + partial residency + eviction) — meet the §3 invariant; unblocks 100MP + many tabs. *(large, dedicated slice)*
-- ⬜ **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint. *(hot-path)*
+- ✅ **Real GPU-tiled layer storage** (atlas + LRU residency + eviction) — meets the §3 invariant; pixel layers sample resident 256² tiles from a shared atlas (`TileResidency` + `composite.wgsl` srcMode/atlas bindings). ⬜ follow-up: viewport-tile culling for true 100MP; atlas masks.
+- ✅ **Rebindable hotkeys (keymap settings page)** — command actions (`KeyCommands` catalog + `SableSettings.KeyBindings`); steal+warn. ⬜ tool letters + presets.
+- ✅ **Customisable canvas-overlay appearance** — guide/smart/grid/quick-mask colours (blit uniform 60→72 floats). ⬜ widths/dash/opacity/spacing/ruler-unit.
+- ⬜ **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint. *(hot-path; also enables atlas viewport culling)*
 - ⬜ **HiDPI / per-monitor DPI**.
-- ⬜ **Dock.Avalonia docking** + saved workspaces + **rebindable hotkeys (keymap settings page)** + **customisable canvas-overlay appearance settings** (selection/mask/guide/grid colours + sizes — needs the blit uniform) + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
+- ⬜ **Dock.Avalonia docking** + saved workspaces + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
 
 ### Phase 8 — AI (was M3)
 - ONNX light tier in-process: SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal. Then Diffusers **sidecar** (uv venv, IPC) for generative fill/expand + **model manager + VRAM gating** (§6, §16.15).
