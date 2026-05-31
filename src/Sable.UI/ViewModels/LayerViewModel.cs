@@ -519,6 +519,27 @@ public sealed partial class LayerViewModel : ObservableObject
     public double SatPct { get => (Model as AdjustmentLayer)?.Saturation * 100 ?? 100; set => SetAdj(a => a.Saturation = (float)(value / 100.0)); }
     public double LightPct { get => (Model as AdjustmentLayer)?.Lightness * 100 ?? 0; set => SetAdj(a => a.Lightness = (float)(value / 100.0)); }
 
+    // --- transform params (any layer) — numeric Transform panel ---
+    private void SetXform(Action<Layer> set, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
+    {
+        set(Model); Model.Dirty = true; OnPropertyChanged(name);
+    }
+    public double XfX { get => Model.OffsetX; set => SetXform(l => l.OffsetX = (int)Math.Round(value)); }
+    public double XfY { get => Model.OffsetY; set => SetXform(l => l.OffsetY = (int)Math.Round(value)); }
+    public double XfScaleX { get => Model.ScaleX * 100; set => SetXform(l => l.ScaleX = (float)(value / 100.0)); }
+    public double XfScaleY { get => Model.ScaleY * 100; set => SetXform(l => l.ScaleY = (float)(value / 100.0)); }
+    public double XfRotation { get => Model.Rotation; set => SetXform(l => l.Rotation = (float)value); }
+    public double XfShearX { get => Model.ShearX * 100; set => SetXform(l => l.ShearX = (float)(value / 100.0)); }
+    public double XfShearY { get => Model.ShearY * 100; set => SetXform(l => l.ShearY = (float)(value / 100.0)); }
+
+    /// <summary>Refresh all transform-panel bindings (after a gizmo drag / flip / reset).</summary>
+    public void RefreshTransform()
+    {
+        OnPropertyChanged(nameof(XfX)); OnPropertyChanged(nameof(XfY));
+        OnPropertyChanged(nameof(XfScaleX)); OnPropertyChanged(nameof(XfScaleY));
+        OnPropertyChanged(nameof(XfRotation)); OnPropertyChanged(nameof(XfShearX)); OnPropertyChanged(nameof(XfShearY));
+    }
+
     // --- shape-layer params (only meaningful when Model is ShapeLayer) — Shape properties panel ---
     public bool ShapeUsesSides => Model is ShapeLayer { Kind: ShapeKind.Polygon or ShapeKind.Star };
     public bool ShapeUsesInner => Model is ShapeLayer { Kind: ShapeKind.Star };

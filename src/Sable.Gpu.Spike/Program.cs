@@ -182,6 +182,16 @@ unsafe
     var doc = Sable.Engine.Document.CreateDemo(643, 360);   // non-256-aligned width on purpose
     doc.Layers[1].OffsetX = 40; doc.Layers[1].OffsetY = 20;   // translate
     doc.Layers[1].Rotation = 20f; doc.Layers[1].ScaleX = 1.3f; doc.Layers[1].ScaleY = 1.3f;   // rotate+scale (affine)
+    doc.Layers[1].ShearX = 0.3f;   // + horizontal shear (skew)
+    // perspective GPU smoke: free-corner homography on a small layer
+    {
+        var pl = new Sable.Engine.Layers.PixelLayer(80, 80, "persp");
+        var pp = pl.Pixels;
+        for (int i = 0; i < 80 * 80; i++) { pp[i * 4] = 80; pp[i * 4 + 1] = 200; pp[i * 4 + 2] = 255; pp[i * 4 + 3] = 255; }
+        pl.Perspective = true;
+        pl.PerspCorners = new float[] { 480, 30, 600, 60, 580, 150, 470, 120 };   // TL,TR,BR,BL (doc px)
+        doc.Layers.Add(pl);
+    }
     // layer-effects GPU smoke: exercise the full BlendContentWithFx path (shadow/glow/stroke/overlay)
     doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.DropShadow));
     doc.Layers[1].Effects.Add(Sable.Engine.Layers.LayerEffect.Create(Sable.Engine.Layers.LayerEffectKind.OuterGlow));

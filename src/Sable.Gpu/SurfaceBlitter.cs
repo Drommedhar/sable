@@ -22,7 +22,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private Silk.NET.WebGPU.Buffer* _penBuf;      // pen-tool node geometry (storage)
     private const int GuidesFloats = 512;         // [countX, countY, _, _, Xs..., Ys...]
     private const int PenFloats = 512;            // [count, activeIdx, _, _, (ax,ay,inx,iny,outx,outy)×n]
-    private const int VpFloats = 60;              // 240 bytes (16-byte aligned)
+    private const int VpFloats = 72;              // 288 bytes (16-byte aligned)
     private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
     private TextureView* _dummyMaskView;
 
@@ -173,6 +173,21 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[48] = ov.CloneSrcOn ? 1f : 0f; u[49] = ov.CloneSrcSx; u[50] = ov.CloneSrcSy; u[51] = ov.PixelGrid ? 1f : 0f;
         u[52] = ov.CaretOn ? 1f : 0f; u[53] = ov.CaretX; u[54] = ov.CaretY0; u[55] = ov.CaretY1;
         u[56] = ov.PenOn ? 1f : 0f;
+        // overlay colours (57..68); fall back to built-in defaults when unset
+        if (ov.HasOverlayColors)
+        {
+            u[57] = ov.GuideColR; u[58] = ov.GuideColG; u[59] = ov.GuideColB;
+            u[60] = ov.SmartColR; u[61] = ov.SmartColG; u[62] = ov.SmartColB;
+            u[63] = ov.GridColR; u[64] = ov.GridColG; u[65] = ov.GridColB;
+            u[66] = ov.QuickMaskColR; u[67] = ov.QuickMaskColG; u[68] = ov.QuickMaskColB;
+        }
+        else
+        {
+            u[57] = 0.0f; u[58] = 0.63f; u[59] = 0.9f;   // guides cyan
+            u[60] = 1.0f; u[61] = 0.2f; u[62] = 0.6f;    // smart magenta
+            u[63] = 0.5f; u[64] = 0.5f; u[65] = 0.5f;    // grid grey
+            u[66] = 0.95f; u[67] = 0.1f; u[68] = 0.2f;   // quick-mask red
+        }
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, (uint)(VpFloats * 4));
 
         // pack guide positions: [countX, countY, _, _, Xs..., Ys...] (doc px)

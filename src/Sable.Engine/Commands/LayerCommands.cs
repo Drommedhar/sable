@@ -208,10 +208,17 @@ public sealed class MoveOffsetCommand : IUndoableCommand
 }
 
 /// <summary>Snapshot of a layer's full affine transform (Transform tool). Undoable.</summary>
-public readonly record struct LayerXform(int OffsetX, int OffsetY, float ScaleX, float ScaleY, float Rotation)
+public readonly record struct LayerXform(int OffsetX, int OffsetY, float ScaleX, float ScaleY, float Rotation, float ShearX, float ShearY,
+    bool Perspective = false, float[]? PerspCorners = null)
 {
-    public static LayerXform From(Layer l) => new(l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation);
-    public void ApplyTo(Layer l) { l.OffsetX = OffsetX; l.OffsetY = OffsetY; l.ScaleX = ScaleX; l.ScaleY = ScaleY; l.Rotation = Rotation; }
+    public static LayerXform From(Layer l) => new(l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation, l.ShearX, l.ShearY,
+        l.Perspective, l.PerspCorners is { } pc ? (float[])pc.Clone() : null);
+    public void ApplyTo(Layer l)
+    {
+        l.OffsetX = OffsetX; l.OffsetY = OffsetY; l.ScaleX = ScaleX; l.ScaleY = ScaleY; l.Rotation = Rotation; l.ShearX = ShearX; l.ShearY = ShearY;
+        l.Perspective = Perspective;
+        l.PerspCorners = PerspCorners is { } pc ? (float[])pc.Clone() : null;
+    }
 }
 
 public sealed class TransformLayerCommand : IUndoableCommand
@@ -353,6 +360,49 @@ public sealed class SetTextPathCommand : IUndoableCommand
     {
         _text.PathPoints = new System.Collections.Generic.List<(float, float)>(pts);
         _text.Dirty = true;
+        _doc.MarkStructureChanged();
+    }
+
+    public void Do() => Apply(_after);
+    public void Undo() => Apply(_before);
+}
+
+/// <summary>Batch offset change for align/distribute of several layers. Undoable as one step.</summary>
+public sealed class AlignLayersCommand : IUndoableCommand
+{
+    private readonly Document _doc;
+    private readonly System.Collections.Generic.List<(Layer layer, int ox, int oy, int nx, int ny)> _moves;
+
+    public AlignLayersCommand(Document doc, System.Collections.Generic.List<(Layer, int, int, int, int)> moves)
+    {
+        _doc = doc; _moves = moves;
+    }
+
+    public string Name => "Align";
+
+    public void Do() { foreach (var (l, _, _, nx, ny) in _moves) { l.OffsetX = nx; l.OffsetY = ny; } _doc.MarkStructureChanged(); }
+    public void Undo() { foreach (var (l, ox, oy, _, _) in _moves) { l.OffsetX = ox; l.OffsetY = oy; } _doc.MarkStructureChanged(); }
+}
+
+/// <summary>Replace the document's entire layer list (History-panel snapshot restore). Undoable.</summary>
+public sealed class RestoreSnapshotCommand : IUndoableCommand
+{
+    private readonly Document _doc;
+    private readonly System.Collections.Generic.List<Layer> _before, _after;
+
+    public RestoreSnapshotCommand(Document doc, System.Collections.Generic.List<Layer> after)
+    {
+        _doc = doc;
+        _before = new System.Collections.Generic.List<Layer>(doc.Layers);
+        _after = after;
+    }
+
+    public string Name => "Restore Snapshot";
+
+    private void Apply(System.Collections.Generic.List<Layer> layers)
+    {
+        _doc.Layers.Clear();
+        foreach (var l in layers) _doc.Layers.Add(l.Clone());   // clone so the stored snapshot stays pristine
         _doc.MarkStructureChanged();
     }
 

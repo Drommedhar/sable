@@ -75,4 +75,12 @@ public struct BlitOverlay
     public float[]? PenNodes;   // length = 6 × nodeCount
     public float[]? PenFlat;    // flattened spine polyline, length = 2 × pointCount (surface px)
     public int PenActive;
+
+    // customisable overlay colours (0..1). When HasOverlayColors is false the blitter
+    // uses built-in defaults (cyan guides / magenta smart-guides / grey grid / red quick-mask).
+    public bool HasOverlayColors;
+    public float GuideColR, GuideColG, GuideColB;
+    public float SmartColR, SmartColG, SmartColB;
+    public float GridColR, GridColG, GridColB;
+    public float QuickMaskColR, QuickMaskColG, QuickMaskColB;
 }

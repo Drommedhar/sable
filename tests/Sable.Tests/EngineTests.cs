@@ -252,7 +252,7 @@ public class LayerCommandTests
         var stack = new UndoStack();
 
         var old = LayerXform.From(a);
-        stack.Execute(new TransformLayerCommand(doc, a, old, new LayerXform(5, 6, 1.5f, 1.5f, 30f)));
+        stack.Execute(new TransformLayerCommand(doc, a, old, new LayerXform(5, 6, 1.5f, 1.5f, 30f, 0, 0)));
         Assert.Equal(5, a.OffsetX);
         Assert.Equal(1.5f, a.ScaleX, 4);
         Assert.Equal(30f, a.Rotation, 4);
@@ -546,6 +546,53 @@ public class AffineMathTests
         // doc (100,80) → layer (75,60) (half the displacement from centre)
         float cx = m[0] * 100 + m[1] * 80 + m[4];
         Assert.Equal(75f, cx, 3);
+    }
+
+    [Fact]
+    public void Shear_RoundTripsThroughInverse()
+    {
+        // forward then inverse should return the original layer point (shear included)
+        int w = 100, h = 80;
+        float shx = 0.4f, shy = 0.2f;
+        var (dx, dy) = AffineMath.LayerToDoc(w, h, 7, -3, 1.2f, 0.9f, 15f, 30f, 25f, shx, shy);
+        var m = AffineMath.DocToLayer(w, h, 7, -3, 1.2f, 0.9f, 15f, shx, shy);
+        float lx = m[0] * dx + m[1] * dy + m[4];
+        float ly = m[2] * dx + m[3] * dy + m[5];
+        Assert.Equal(30f, lx, 2);
+        Assert.Equal(25f, ly, 2);
+    }
+
+    [Fact]
+    public void Homography_MapsDraggedCornersToLayerRect()
+    {
+        int w = 100, h = 80;
+        // a non-affine quad (true perspective): corners pulled in on one side
+        var corners = new float[] { 10, 10, 200, 30, 180, 150, 30, 120 };   // TL,TR,BR,BL doc
+        var (inv6, persp) = Homography.DocToLayerQuad(w, h, corners);
+
+        (float lx, float ly) Map(float dx, float dy)
+        {
+            float wgt = persp[0] * dx + persp[1] * dy + persp[2];
+            float lx = (inv6[0] * dx + inv6[1] * dy + inv6[4]) / wgt;   // [m00,m01,_,_,b0,_]
+            float ly = (inv6[2] * dx + inv6[3] * dy + inv6[5]) / wgt;
+            return (lx, ly);
+        }
+        // each doc corner must map back to the corresponding layer-rect corner
+        var tl = Map(10, 10); Assert.Equal(0f, tl.lx, 1); Assert.Equal(0f, tl.ly, 1);
+        var tr = Map(200, 30); Assert.Equal(w, tr.lx, 1); Assert.Equal(0f, tr.ly, 1);
+        var br = Map(180, 150); Assert.Equal(w, br.lx, 1); Assert.Equal(h, br.ly, 1);
+        var bl = Map(30, 120); Assert.Equal(0f, bl.lx, 1); Assert.Equal(h, bl.ly, 1);
+    }
+
+    [Fact]
+    public void ShearX_SlantsHorizontally()
+    {
+        // pure +X shear: a point below centre shifts right in doc space
+        int w = 100, h = 80;
+        var (cxDoc, _) = AffineMath.LayerToDoc(w, h, 0, 0, 1, 1, 0, 50, 40, 0, 0);        // centre stays
+        var (belowX, _) = AffineMath.LayerToDoc(w, h, 0, 0, 1, 1, 0, 50, 80, 0.5f, 0);    // below centre, sheared
+        Assert.Equal(50f, cxDoc, 3);
+        Assert.True(belowX > 50f);   // sheared right
     }
 }
 

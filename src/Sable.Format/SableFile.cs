@@ -45,6 +45,10 @@ public static class SableFile
         public float ScaleX { get; set; } = 1f;
         public float ScaleY { get; set; } = 1f;
         public float Rotation { get; set; }
+        public float ShearX { get; set; }
+        public float ShearY { get; set; }
+        public bool Perspective { get; set; }
+        public float[]? PerspCorners { get; set; }
         public int LayerW { get; set; }   // pixel-layer buffer size (0 = legacy → document size)
         public int LayerH { get; set; }
         public string? Pixels { get; set; }   // zip entry name, if a pixel layer
@@ -202,6 +206,10 @@ public static class SableFile
             ColorTag = layer.ColorTag,
             OffsetX = layer.OffsetX,
             OffsetY = layer.OffsetY,
+            ShearX = layer.ShearX,
+            ShearY = layer.ShearY,
+            Perspective = layer.Perspective,
+            PerspCorners = layer.PerspCorners is { } pc ? (float[])pc.Clone() : null,
             ScaleX = layer.ScaleX,
             ScaleY = layer.ScaleY,
             Rotation = layer.Rotation
@@ -361,6 +369,10 @@ public static class SableFile
         created.ColorTag = ld.ColorTag;
         created.OffsetX = ld.OffsetX;
         created.OffsetY = ld.OffsetY;
+        created.ShearX = ld.ShearX;
+        created.ShearY = ld.ShearY;
+        created.Perspective = ld.Perspective;
+        created.PerspCorners = ld.PerspCorners is { Length: 8 } ? ld.PerspCorners : null;
         created.ScaleX = ld.ScaleX;
         created.ScaleY = ld.ScaleY;
         created.Rotation = ld.Rotation;

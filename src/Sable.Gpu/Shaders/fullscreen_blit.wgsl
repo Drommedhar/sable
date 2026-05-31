@@ -25,7 +25,13 @@ struct Viewport {
     shx0: f32, shy0: f32, shx1: f32, shy1: f32,
     cloneOn: f32, clsx: f32, clsy: f32, pixGrid: f32,       // clone crosshair; pixGrid: 1 = 1px pixel grid
     caretOn: f32, caretX: f32, caretY0: f32, caretY1: f32,  // text caret (surface px)
-    penOn: f32, penPad0: f32, penPad1: f32, penPad2: f32,   // pen-path node markers (geometry in binding 6)
+    penOn: f32,                                            // pen-path node markers (geometry in binding 6)
+    // customisable overlay colours (0..1), set from settings
+    guideR: f32, guideG: f32, guideB: f32,                 // guide lines
+    smartR: f32, smartG: f32, smartB: f32,                 // smart-guide alignment lines
+    gridR: f32, gridG: f32, gridB: f32,                    // document/pixel grid
+    qmR: f32, qmG: f32, qmB: f32,                          // quick-mask (rubylith) fill
+    _pad0: f32, _pad1: f32, _pad2: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -82,13 +88,13 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         if (vp.gridOn > 0.5 && vp.gridSp > 0.0) {
             let mx = docX - round(docX / vp.gridSp) * vp.gridSp;
             let my = docY - round(docY / vp.gridSp) * vp.gridSp;
-            if (abs(mx) <= t || abs(my) <= t) { outc = mix(outc, vec3<f32>(0.5), 0.45); }
+            if (abs(mx) <= t || abs(my) <= t) { outc = mix(outc, vec3<f32>(vp.gridR, vp.gridG, vp.gridB), 0.45); }
         }
         // pixel grid only when zoomed in enough that 1 doc px > ~3 surface px
         if (vp.pixGrid > 0.5 && vp.invScale < 0.34) {
             let px = docX - round(docX);
             let py = docY - round(docY);
-            if (abs(px) <= t || abs(py) <= t) { outc = mix(outc, vec3<f32>(0.5), 0.25); }
+            if (abs(px) <= t || abs(py) <= t) { outc = mix(outc, vec3<f32>(vp.gridR, vp.gridG, vp.gridB), 0.25); }
         }
     }
 
@@ -100,14 +106,14 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         var ghit = false;
         for (var i = 0u; i < nx; i = i + 1u) { if (abs(docX - guides[4u + i]) <= gt) { ghit = true; } }
         for (var i = 0u; i < ny; i = i + 1u) { if (abs(docY - guides[4u + cap + i]) <= gt) { ghit = true; } }
-        if (ghit) { outc = vec3<f32>(0.0, 0.63, 0.9); }
+        if (ghit) { outc = vec3<f32>(vp.guideR, vp.guideG, vp.guideB); }
 
         // smart-guide alignment lines (magenta), span the whole surface (not just doc)
         let snx = u32(smart[0]); let sny = u32(smart[1]);
         var shit = false;
         for (var i = 0u; i < snx; i = i + 1u) { if (abs(docX - smart[4u + i]) <= gt) { shit = true; } }
         for (var i = 0u; i < sny; i = i + 1u) { if (abs(docY - smart[4u + cap + i]) <= gt) { shit = true; } }
-        if (shit) { outc = vec3<f32>(1.0, 0.2, 0.6); }
+        if (shit) { outc = vec3<f32>(vp.smartR, vp.smartG, vp.smartB); }
     }
 
     // crop preview: dim the document outside the rect + a thin border
@@ -155,7 +161,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // quick mask (maskOn == 2): rubylith — fill the selected area with translucent red
     if (vp.maskOn > 1.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let cov = textureSample(maskTex, samp, vec2<f32>(u, v)).r;
-        outc = mix(outc, vec3<f32>(0.95, 0.1, 0.2), cov * 0.5);
+        outc = mix(outc, vec3<f32>(vp.qmR, vp.qmG, vp.qmB), cov * 0.5);
     }
     else if (vp.maskOn > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let step = max(vp.invScale, 1.0);          // ~1 surface px expressed in doc px
@@ -192,6 +198,12 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         }
         if (inSquare(p, c0, 5.0) || inSquare(p, c1, 5.0) || inSquare(p, c2, 5.0) || inSquare(p, c3, 5.0)) {
             outc = vec3<f32>(1.0);              // corner handles
+        }
+        // edge midpoint handles (single-axis scale)
+        let em0 = (c0 + c1) * 0.5; let em1 = (c1 + c2) * 0.5;
+        let em2 = (c2 + c3) * 0.5; let em3 = (c3 + c0) * 0.5;
+        if (inSquare(p, em0, 4.0) || inSquare(p, em1, 4.0) || inSquare(p, em2, 4.0) || inSquare(p, em3, 4.0)) {
+            outc = vec3<f32>(0.85);             // edge handles (slightly dimmer)
         }
         if (length(p - rp) < 6.0) { outc = vec3<f32>(1.0); }   // rotate handle
     }

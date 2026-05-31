@@ -55,16 +55,28 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private bool _maskMoving;                    // moving a non-rect (mask) selection
     private byte[]? _maskMoveOrig;
     private double _maskMoveStartX, _maskMoveStartY;
+    private bool _patching;                       // patch tool: dragging the selection to a source
+    private double _patchStartX, _patchStartY;
+    private bool _liquifying;                      // liquify displacement stroke
+    private PixelLayer? _liquifyLayer;
+    private RasterState _liquifyBefore;
+
+    /// <summary>Liquify brush mode (push/bloat/pucker/twirl). Set from the options bar.</summary>
+    public LiquifyMode LiquifyMode { get; set; } = LiquifyMode.Push;
+    /// <summary>Liquify strength 0..1 (options bar).</summary>
+    public float LiquifyStrength { get; set; } = 0.5f;
 
     // transform gizmo state
     private const float RotHandleDist = 28f;
     private bool _transforming;
-    private int _xfMode;                 // 1 = move, 2 = rotate, 3 = scale
+    private int _xfMode;                 // 1 = move, 2 = rotate, 3 = scale (uniform), 4 = scale one axis (edge)
     private LayerXform _xfStart;
     private double _xfCenterX, _xfCenterY, _xfStartAngle, _xfStartDist;
     private float _xfStartSx, _xfStartSy;
     private double _xfMoveDocX, _xfMoveDocY;
     private int _xfOrigOffX, _xfOrigOffY;
+    private int _xfEdgeAxis;             // 0 = scale X (left/right edge), 1 = scale Y (top/bottom edge)
+    private double _xfEdgeNx, _xfEdgeNy, _xfEdgeStartHalf;   // outward unit normal (surface) + start half-extent
 
     /// <summary>The active PIXEL layer for paint (brush/fill/eyedropper). Null if a non-pixel layer is selected.</summary>
     public PixelLayer? ActiveLayer { get; set; }
@@ -82,7 +94,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             if (_activeTool == value) return;
             if (_activeTool == ToolKind.Pen && value != ToolKind.Pen) CommitPen();   // leaving Pen finishes the path
+            if (_activeTool == ToolKind.MeshWarp && value != ToolKind.MeshWarp) CancelMeshWarp();
             _activeTool = value;
+            if (value == ToolKind.MeshWarp) BeginMeshWarp();
             if (value != ToolKind.Type) CommitTextEdit();   // leaving Type ends editing
             ToolChanged?.Invoke(value);
         }
@@ -105,6 +119,28 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     /// <summary>Raised (R,G,B) when the eyedropper (Alt+click) samples a color.</summary>
     public Action<byte, byte, byte>? ColorPicked { get; set; }
+
+    /// <summary>Background colour (foreground = <see cref="Brush"/> R/G/B). For swap + gradient bg.</summary>
+    public byte BgR { get; set; } = 255;
+    public byte BgG { get; set; } = 255;
+    public byte BgB { get; set; } = 255;
+
+    /// <summary>Swap foreground/background colours (X). Raises ColorPicked with the new foreground.</summary>
+    public void SwapColors()
+    {
+        (Brush.R, BgR) = (BgR, Brush.R);
+        (Brush.G, BgG) = (BgG, Brush.G);
+        (Brush.B, BgB) = (BgB, Brush.B);
+        ColorPicked?.Invoke(Brush.R, Brush.G, Brush.B);
+    }
+
+    /// <summary>Reset to default black foreground / white background (D).</summary>
+    public void ResetColors()
+    {
+        Brush.R = 0; Brush.G = 0; Brush.B = 0;
+        BgR = BgG = BgB = 255;
+        ColorPicked?.Invoke(Brush.R, Brush.G, Brush.B);
+    }
 
     /// <summary>Raised after a Ctrl+Alt HUD brush adjust so the options-bar sliders can resync.</summary>
     public Action? BrushAdjusted { get; set; }
@@ -300,6 +336,22 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             NodeMove(sx, sy);
         }
+        else if (_meshDragIdx >= 0)
+        {
+            MeshDrag(sx, sy);
+        }
+        else if (_liquifying && _liquifyLayer is { } lq)
+        {
+            var (dx, dy) = MapToDoc(sx, sy);
+            double ddx = dx - _lastDocX, ddy = dy - _lastDocY;
+            // map doc → layer-buffer space (layer may be offset)
+            double lcx = dx - lq.OffsetX, lcy = dy - lq.OffsetY;
+            LiquifyTool.Stamp(lq.Pixels, lq.Width, lq.Height, lcx, lcy, ddx, ddy,
+                LiquifyMode, LiquifyStrength, Brush.Radius, Brush.Hardness);
+            lq.Dirty = true;
+            _doc?.MarkStructureChanged();
+            _lastDocX = dx; _lastDocY = dy;
+        }
         else if (_panningMouse)
         {
             PanBy(sx - _lastPanX, sy - _lastPanY);
@@ -393,7 +445,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         }
 
         if (ActiveLayer is not { } layer) return null;
-        Brush.Clone = false;   // reset; clone configured per-stroke below
+        Brush.Clone = false; Brush.Heal = false;   // reset; clone/heal configured per-stroke below
         Brush.Mode = ActiveTool switch
         {
             ToolKind.Dodge => BrushMode.Dodge,
@@ -537,7 +589,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         // grab a guide line first (works under any tool)
         if (TryGrabGuide(dx, dy)) { _input?.Capture(); return; }
         bool brushy = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
-            or ToolKind.CloneStamp or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
+            or ToolKind.CloneStamp or ToolKind.Heal or ToolKind.SpotHeal or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
             or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
 
         // Affinity HUD: Ctrl+Alt + drag adjusts brush size/hardness (intercept before painting)
@@ -552,8 +604,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
         bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill;
         if (alt && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
-        // clone stamp: Alt+click sets the source point
-        if (ActiveTool == ToolKind.CloneStamp && alt)
+        // clone stamp / healing brush: Alt+click sets the source point
+        if (ActiveTool is ToolKind.CloneStamp or ToolKind.Heal && alt)
         {
             if (ActiveLayer is not null) { _cloneSrcX = dx; _cloneSrcY = dy; _cloneSet = true; }
             return;
@@ -599,6 +651,26 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _shapeEndSx = sx; _shapeEndSy = sy;
                 }
                 break;
+            case ToolKind.Patch:
+                if (_doc is not null && ActiveLayer is not null && (_doc.SelectionMask is not null || _doc.Selection is not null))
+                {
+                    _patching = true; _input?.Capture();
+                    _patchStartX = dx; _patchStartY = dy;
+                }
+                break;
+            case ToolKind.MeshWarp:
+                MeshDown(dx, dy);
+                break;
+            case ToolKind.Liquify:
+                if (ActiveLayer is { LockPixels: false } liq)
+                {
+                    _liquifying = true; _input?.Capture();
+                    _liquifyLayer = liq;
+                    if (_doc is { } ld) liq.ExpandToCover(ld.Width, ld.Height);
+                    _liquifyBefore = RasterState.Capture(liq);
+                    _lastDocX = dx; _lastDocY = dy;
+                }
+                break;
             case ToolKind.Pen:
                 PenDown(dx, dy, mods);
                 break;
@@ -612,7 +684,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 StartPan(sx, sy);
                 break;
             case ToolKind.Transform:
-                BeginTransform(sx, sy);
+                BeginTransform(sx, sy, mods.HasFlag(CanvasMods.Ctrl));
                 break;
             case ToolKind.EllipseMarquee:
                 if (_doc is not null)
@@ -735,18 +807,25 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _moveOrigX = ml.OffsetX; _moveOrigY = ml.OffsetY;
                 }
                 break;
-            default: // Brush / Eraser / CloneStamp
-                if (ActiveTool == ToolKind.CloneStamp && !_cloneSet) break;   // need a source first (Alt+click)
+            default: // Brush / Eraser / CloneStamp / Heal / SpotHeal
+                if (ActiveTool is ToolKind.CloneStamp or ToolKind.Heal && !_cloneSet) break;   // need a source first (Alt+click)
                 _session = CreateSession();
                 if (_session is not null)
                 {
-                    if (ActiveTool == ToolKind.CloneStamp && ActiveLayer is { } cl)
+                    bool cloning = ActiveTool is ToolKind.CloneStamp or ToolKind.Heal or ToolKind.SpotHeal;
+                    if (cloning && ActiveLayer is { } cl)
                     {
                         Brush.Clone = true;
+                        Brush.Heal = ActiveTool is ToolKind.Heal or ToolKind.SpotHeal;
                         Brush.CloneSrc = (byte[])cl.Pixels.Clone();   // snapshot avoids feedback during the stroke
                         Brush.CloneSrcW = cl.Width; Brush.CloneSrcH = cl.Height;
-                        Brush.CloneOffX = (int)Math.Round(dx - _cloneSrcX);
-                        Brush.CloneOffY = (int)Math.Round(dy - _cloneSrcY);
+                        if (ActiveTool == ToolKind.SpotHeal)
+                        {
+                            // auto-source: pull texture from a nearby region (one brush-diameter to the left)
+                            int off = Math.Max(4, (int)(Brush.Radius * 2));
+                            Brush.CloneOffX = off; Brush.CloneOffY = 0;
+                        }
+                        else { Brush.CloneOffX = (int)Math.Round(dx - _cloneSrcX); Brush.CloneOffY = (int)Math.Round(dy - _cloneSrcY); }
                     }
                     _input?.Capture();
                     _painting = true;
@@ -784,7 +863,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             _painting = false;
             _input?.ReleaseCapture();
-            Brush.Clone = false;   // clone is per-stroke; clear after
+            Brush.Clone = false; Brush.Heal = false;   // clone/heal is per-stroke; clear after
             if (_strokeLayer is { } pl)
             {
                 // pixel paint: auto-crop the layer to its painted content, then record the whole
@@ -929,11 +1008,86 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             NodeUp();
         }
+        else if (_patching)
+        {
+            _patching = false; _input?.ReleaseCapture();
+            var (ux, uy) = MapToDoc(_lastMouseX, _lastMouseY);
+            DoPatch((int)Math.Round(ux - _patchStartX), (int)Math.Round(uy - _patchStartY));
+        }
+        else if (_meshDragIdx >= 0)
+        {
+            MeshUp();
+        }
+        else if (_liquifying && _liquifyLayer is { } lq)
+        {
+            _liquifying = false; _input?.ReleaseCapture();
+            var after = RasterState.Capture(lq);
+            CommandProduced?.Invoke(new RasterStateCommand(lq, _liquifyBefore, after, () => lq.Dirty = true));
+            _liquifyLayer = null;
+        }
         else if (_panningMouse)
         {
             _panningMouse = false;
             _input?.ReleaseCapture();
         }
+    }
+
+    /// <summary>Patch: heal the current selection using the source region offset by (offX,offY),
+    /// shifting the source tone to match the selection's own tone. Undoable.</summary>
+    private void DoPatch(int offX, int offY)
+    {
+        if (_doc is not { } d || ActiveLayer is not { } l) return;
+        if (offX == 0 && offY == 0) return;
+        var mask = d.SelectionMask; var rect = d.Selection;
+        if (mask is null && rect is null) return;
+
+        var target = l.Pixels; int lw = l.Width, lh = l.Height, ox = l.OffsetX, oy = l.OffsetY;
+        var src = (byte[])target.Clone();   // read source from a snapshot (avoids feedback)
+
+        int bx0, by0, bx1, by1;
+        if (rect is { } rr) { bx0 = rr.X; by0 = rr.Y; bx1 = rr.Right; by1 = rr.Bottom; }
+        else { bx0 = 0; by0 = 0; bx1 = d.Width; by1 = d.Height; }
+
+        float Cov(int x, int y)
+        {
+            if (mask is { } m) { int mi = y * d.Width + x; return (mi >= 0 && mi < m.Length) ? m[mi] / 255f : 0f; }
+            return (rect is { } r2 && x >= r2.X && y >= r2.Y && x < r2.Right && y < r2.Bottom) ? 1f : 0f;
+        }
+
+        // tone shift = mean(dest) - mean(source) over the selection
+        double sdr = 0, sdg = 0, sdb = 0, ssr = 0, ssg = 0, ssb = 0; int cnt = 0;
+        for (int y = by0; y < by1; y++)
+        for (int x = bx0; x < bx1; x++)
+        {
+            if (Cov(x, y) <= 0f) continue;
+            int lx = x - ox, ly = y - oy, sx = x - offX - ox, sy = y - offY - oy;
+            if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) continue;
+            if (sx < 0 || sy < 0 || sx >= lw || sy >= lh) continue;
+            int di = (ly * lw + lx) * 4, sj = (sy * lw + sx) * 4;
+            sdr += target[di]; sdg += target[di + 1]; sdb += target[di + 2];
+            ssr += src[sj]; ssg += src[sj + 1]; ssb += src[sj + 2]; cnt++;
+        }
+        if (cnt == 0) return;
+        float tor = (float)((sdr - ssr) / cnt), tog = (float)((sdg - ssg) / cnt), tob = (float)((sdb - ssb) / cnt);
+
+        var before = SnapshotAllTiles(target, lw, lh);
+        for (int y = by0; y < by1; y++)
+        for (int x = bx0; x < bx1; x++)
+        {
+            float cov = Cov(x, y);
+            if (cov <= 0f) continue;
+            int lx = x - ox, ly = y - oy, sx = x - offX - ox, sy = y - offY - oy;
+            if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) continue;
+            if (sx < 0 || sy < 0 || sx >= lw || sy >= lh) continue;
+            int di = (ly * lw + lx) * 4, sj = (sy * lw + sx) * 4;
+            float hr = Math.Clamp(src[sj] + tor, 0, 255), hg = Math.Clamp(src[sj + 1] + tog, 0, 255), hb = Math.Clamp(src[sj + 2] + tob, 0, 255);
+            target[di] = (byte)(target[di] + (hr - target[di]) * cov + 0.5f);
+            target[di + 1] = (byte)(target[di + 1] + (hg - target[di + 1]) * cov + 0.5f);
+            target[di + 2] = (byte)(target[di + 2] + (hb - target[di + 2]) * cov + 0.5f);
+        }
+        var after = SnapshotAllTiles(target, lw, lh);
+        l.MarkTilesDirty(after.Keys);
+        CommandProduced?.Invoke(new PaintRasterCommand(target, lw, lh, before, after, t => l.MarkTilesDirty(t)));
     }
 
     /// <summary>Commit the pending crop rectangle (Enter), resizing the document. Undoable.</summary>
@@ -1049,7 +1203,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     /// <summary>Active layer's 4 transformed corners (TL,TR,BR,BL) in surface pixels.</summary>
     public float[] CornersSurface(PixelLayer l)
     {
-        var c = AffineMath.Corners(l.Width, l.Height, l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation);
+        var c = l.Perspective && l.PerspCorners is { Length: 8 } pc
+            ? pc
+            : AffineMath.Corners(l.Width, l.Height, l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation, l.ShearX, l.ShearY);
         var vp = ComputeViewport();
         var r = new float[8];
         for (int i = 0; i < 4; i++)
@@ -1060,10 +1216,31 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         return r;
     }
 
-    private void BeginTransform(double sx, double sy)
+    private int _xfCornerIdx = -1;   // perspective corner being dragged (0..3)
+
+    private void BeginTransform(double sx, double sy, bool ctrl = false)
     {
         if (ActiveLayer is not { } l) return;
         var cs = CornersSurface(l);
+
+        // Ctrl + corner → perspective / free-distort: drag that corner independently
+        if (ctrl)
+        {
+            int ci = NearestCornerIndex(cs, sx, sy);
+            if (ci >= 0)
+            {
+                _transforming = true; _input?.Capture();
+                _xfStart = LayerXform.From(l);
+                if (!l.Perspective || l.PerspCorners is not { Length: 8 })
+                {
+                    // initialise the free corners from the current affine quad
+                    l.PerspCorners = AffineMath.Corners(l.Width, l.Height, l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation, l.ShearX, l.ShearY);
+                    l.Perspective = true;
+                }
+                _xfMode = 5; _xfCornerIdx = ci;
+                return;
+            }
+        }
         double cx = (cs[0] + cs[2] + cs[4] + cs[6]) * 0.25;
         double cy = (cs[1] + cs[3] + cs[5] + cs[7]) * 0.25;
         double tmx = (cs[0] + cs[2]) * 0.5, tmy = (cs[1] + cs[3]) * 0.5;   // top mid
@@ -1071,9 +1248,19 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         double rpx = tmx, rpy = tmy;
         if (dl > 1e-3) { rpx = tmx + (tmx - cx) / dl * RotHandleDist; rpy = tmy + (tmy - cy) / dl * RotHandleDist; }
 
+        // edge midpoints (TL,TR,BR,BL → top,right,bottom,left)
+        double tx = (cs[0] + cs[2]) * 0.5, ty = (cs[1] + cs[3]) * 0.5;   // top
+        double rx = (cs[2] + cs[4]) * 0.5, ry = (cs[3] + cs[5]) * 0.5;   // right
+        double bx = (cs[4] + cs[6]) * 0.5, by = (cs[5] + cs[7]) * 0.5;   // bottom
+        double lxm = (cs[6] + cs[0]) * 0.5, lym = (cs[7] + cs[1]) * 0.5; // left
+
         _xfMode = 0;
         if (Dist(sx, sy, rpx, rpy) <= 8) _xfMode = 2;                       // rotate handle
-        else if (NearestCornerDist(cs, sx, sy) <= 8) _xfMode = 3;          // corner → scale
+        else if (NearestCornerDist(cs, sx, sy) <= 8) _xfMode = 3;          // corner → uniform scale
+        else if (Dist(sx, sy, tx, ty) <= 7) BeginEdge(1, cx, cy, tx, ty);   // top → scale Y
+        else if (Dist(sx, sy, bx, by) <= 7) BeginEdge(1, cx, cy, bx, by);   // bottom → scale Y
+        else if (Dist(sx, sy, lxm, lym) <= 7) BeginEdge(0, cx, cy, lxm, lym); // left → scale X
+        else if (Dist(sx, sy, rx, ry) <= 7) BeginEdge(0, cx, cy, rx, ry);   // right → scale X
         else if (PointInQuad(cs, sx, sy)) _xfMode = 1;                     // inside → move
 
         if (_xfMode == 0) return;
@@ -1089,11 +1276,39 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _xfOrigOffX = l.OffsetX; _xfOrigOffY = l.OffsetY;
     }
 
+    // arm an edge (1-axis) scale: store the outward unit normal (center→edge mid) + start half-extent
+    private void BeginEdge(int axis, double cx, double cy, double ex, double ey)
+    {
+        double dx = ex - cx, dy = ey - cy, len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 1e-3) { _xfMode = 0; return; }
+        _xfEdgeAxis = axis;
+        _xfEdgeNx = dx / len; _xfEdgeNy = dy / len;
+        _xfEdgeStartHalf = len;
+        _xfMode = 4;
+    }
+
     private void TransformDrag(double sx, double sy)
     {
         if (ActiveLayer is not { } l) return;
         switch (_xfMode)
         {
+            case 5: // perspective: drag one free corner
+            {
+                if (l.PerspCorners is { Length: 8 } pc && _xfCornerIdx >= 0)
+                {
+                    var (dx, dy) = MapToDoc(sx, sy);
+                    pc[_xfCornerIdx * 2] = (float)dx; pc[_xfCornerIdx * 2 + 1] = (float)dy;
+                }
+                break;
+            }
+            case 4: // single-axis scale via an edge handle
+            {
+                double proj = (sx - _xfCenterX) * _xfEdgeNx + (sy - _xfCenterY) * _xfEdgeNy;
+                double ratio = proj / Math.Max(1e-3, _xfEdgeStartHalf);
+                if (_xfEdgeAxis == 0) l.ScaleX = (float)(_xfStartSx * ratio);
+                else l.ScaleY = (float)(_xfStartSy * ratio);
+                break;
+            }
             case 2: // rotate about center
             {
                 double ang = Math.Atan2(sy - _xfCenterY, sx - _xfCenterX);
@@ -1157,6 +1372,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         double m = double.MaxValue;
         for (int i = 0; i < 4; i++) m = Math.Min(m, Dist(x, y, cs[2 * i], cs[2 * i + 1]));
         return m;
+    }
+    private static int NearestCornerIndex(float[] cs, double x, double y, double tol = 10)
+    {
+        int best = -1; double m = tol;
+        for (int i = 0; i < 4; i++) { double d = Dist(x, y, cs[2 * i], cs[2 * i + 1]); if (d <= m) { m = d; best = i; } }
+        return best;
     }
     private static bool PointInQuad(float[] cs, double x, double y)
     {

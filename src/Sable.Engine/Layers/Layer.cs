@@ -41,7 +41,16 @@ public abstract class Layer
     public float ScaleY { get; set; } = 1f;
     public float Rotation { get; set; }
 
-    public bool HasTransform => OffsetX != 0 || OffsetY != 0 || ScaleX != 1f || ScaleY != 1f || Rotation != 0f;
+    /// <summary>Non-destructive shear (0 = none): X = horizontal slant, Y = vertical slant.</summary>
+    public float ShearX { get; set; }
+    public float ShearY { get; set; }
+
+    /// <summary>Perspective/distort: when true, the layer's 4 corners are free-dragged to
+    /// <see cref="PerspCorners"/> (doc px, TL,TR,BR,BL = 8 floats) and the affine is ignored.</summary>
+    public bool Perspective { get; set; }
+    public float[]? PerspCorners { get; set; }
+
+    public bool HasTransform => OffsetX != 0 || OffsetY != 0 || ScaleX != 1f || ScaleY != 1f || Rotation != 0f || ShearX != 0f || ShearY != 0f;
 
     /// <summary>Tight content bounds in doc px (before offset). Default = whole document; shape layers override.</summary>
     public virtual (int x, int y, int w, int h) ContentBounds(int docW, int docH) => (0, 0, docW, docH);
@@ -110,6 +119,9 @@ public abstract class Layer
         c.ColorTag = ColorTag;
         c.OffsetX = OffsetX; c.OffsetY = OffsetY;
         c.ScaleX = ScaleX; c.ScaleY = ScaleY; c.Rotation = Rotation;
+        c.ShearX = ShearX; c.ShearY = ShearY;
+        c.Perspective = Perspective;
+        if (PerspCorners is not null) c.PerspCorners = (float[])PerspCorners.Clone();
         if (Mask is not null) { c.Mask = (byte[])Mask.Clone(); c.MaskDirty = true; }
         foreach (var fx in Effects) c.Effects.Add(fx.Clone());
         c.Dirty = true;

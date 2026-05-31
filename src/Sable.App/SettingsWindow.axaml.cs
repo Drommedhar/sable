@@ -1,6 +1,9 @@
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.VisualTree;
 using Sable.Core.Settings;
 
@@ -16,13 +19,17 @@ public partial class SettingsWindow : Window
     private readonly SableSettings _s;
     private StackPanel[] _panels = System.Array.Empty<StackPanel>();
 
+    // keyboard page working state: command id → current gesture, plus the per-row display boxes
+    private readonly Dictionary<string, string> _workKeys = new();
+    private readonly Dictionary<string, TextBox> _keyBoxes = new();
+
     public SettingsWindow() : this(new SableSettings(), "—") { }
 
     public SettingsWindow(SableSettings settings, string gpuName)
     {
         InitializeComponent();
         _s = settings;
-        _panels = new[] { PanelGeneral, PanelUI, PanelPerf, PanelColor, PanelAI, PanelUpdates, PanelAbout };
+        _panels = new[] { PanelGeneral, PanelUI, PanelPerf, PanelColor, PanelAI, PanelUpdates, PanelKeys, PanelAbout };
 
         // General
         ReopenSwitch.IsChecked = _s.ReopenOnStartup;
@@ -30,12 +37,18 @@ public partial class SettingsWindow : Window
         DpiBox.Text = ((int)_s.DefaultDpi).ToString();
         // UI
         ThemeCombo.SelectedIndex = (int)_s.Theme;
+        GuideColorField.Hex = _s.GuideColor;
+        SmartColorField.Hex = _s.SmartGuideColor;
+        GridColorField.Hex = _s.GridColor;
+        QuickMaskColorField.Hex = _s.QuickMaskColor;
         // Performance
         UndoSlider.Value = _s.UndoLimit;
         UndoLabel.Text = _s.UndoLimit.ToString();
         RendererLabel.Text = gpuName;
         // Updates
         AutoUpdateSwitch.IsChecked = _s.AutoCheckUpdates;
+        // Keyboard
+        BuildKeyRows();
         // About
         var ver = typeof(SettingsWindow).Assembly.GetName().Version;
         VersionLabel.Text = $"Version {ver?.ToString(3) ?? "0.1.0"}  ·  net10.0  ·  Avalonia + wgpu";
@@ -109,10 +122,131 @@ public partial class SettingsWindow : Window
         _s.LimitInitialZoom = LimitZoomSwitch.IsChecked == true;
         _s.DefaultDpi = int.TryParse(DpiBox.Text, out var dpi) ? System.Math.Clamp(dpi, 1, 2400) : _s.DefaultDpi;
         _s.Theme = (AppTheme)System.Math.Clamp(ThemeCombo.SelectedIndex, 0, 2);
+        _s.GuideColor = NormHex(GuideColorField.Hex, _s.GuideColor);
+        _s.SmartGuideColor = NormHex(SmartColorField.Hex, _s.SmartGuideColor);
+        _s.GridColor = NormHex(GridColorField.Hex, _s.GridColor);
+        _s.QuickMaskColor = NormHex(QuickMaskColorField.Hex, _s.QuickMaskColor);
         _s.UndoLimit = (int)UndoSlider.Value;
         _s.AutoCheckUpdates = AutoUpdateSwitch.IsChecked == true;
+        // keyboard: store only the overrides that differ from the catalog default (keeps JSON small)
+        _s.KeyBindings.Clear();
+        foreach (var c in KeyCommands.Catalog)
+            if (_workKeys.TryGetValue(c.Id, out var g) && g != c.DefaultGesture)
+                _s.KeyBindings[c.Id] = g;
         Close(true);
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(false);
+
+    // ===== Keyboard page (PLAN §17.1 rebindable hotkeys) =====
+
+    private void BuildKeyRows()
+    {
+        KeyRows.Children.Clear();
+        _keyBoxes.Clear();
+        _workKeys.Clear();
+        string? cat = null;
+        foreach (var c in KeyCommands.Catalog)
+        {
+            _workKeys[c.Id] = _s.GestureFor(c.Id);
+            if (c.Category != cat)
+            {
+                cat = c.Category;
+                KeyRows.Children.Add(new TextBlock { Text = cat, Classes = { "settingHeader" }, Margin = new Avalonia.Thickness(0, 8, 0, 0) });
+            }
+
+            var box = new TextBox
+            {
+                Width = 150, IsReadOnly = true, Focusable = true,
+                Text = _workKeys[c.Id], Tag = c.Id, PlaceholderText = "unbound",
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            box.AddHandler(KeyDownEvent, OnGestureKeyDown, RoutingStrategies.Tunnel);
+            _keyBoxes[c.Id] = box;
+
+            var reset = new Button { Content = "Reset", Classes = { "opt" }, Tag = c.Id, Padding = new Avalonia.Thickness(10, 0) };
+            reset.Click += OnResetGesture;
+
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            content.Children.Add(box);
+            content.Children.Add(reset);
+            KeyRows.Children.Add(new SettingRow { Label = c.Label, Content = content });
+        }
+    }
+
+    /// <summary>Capture the pressed chord as a gesture; tunnel so the read-only box never types.</summary>
+    private void OnGestureKeyDown(object? sender, KeyEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not TextBox box || box.Tag is not string id) return;
+
+        // clear (unbind) on Backspace/Delete; ignore lone modifier presses
+        if (e.Key is Key.Back or Key.Delete) { SetGesture(id, ""); return; }
+        if (IsModifierKey(e.Key)) return;
+
+        var mods = e.KeyModifiers;
+        bool fkey = e.Key >= Key.F1 && e.Key <= Key.F24;
+        // command hotkeys need a modifier (or be a function key) so they don't shadow tool letters
+        if (mods == KeyModifiers.None && !fkey)
+        {
+            ShowWarn("Add Ctrl/Alt/Shift (tool letters stay fixed).");
+            return;
+        }
+        AssignGesture(id, Canonical(mods, e.Key));
+    }
+
+    private void OnResetGesture(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id })
+            SetGesture(id, KeyCommands.Catalog.First(c => c.Id == id).DefaultGesture);
+    }
+
+    /// <summary>Assign a gesture, stealing it from whoever currently holds it (steal + warn).</summary>
+    private void AssignGesture(string id, string gesture)
+    {
+        var owner = _workKeys.FirstOrDefault(kv => kv.Key != id &&
+                        string.Equals(kv.Value, gesture, System.StringComparison.OrdinalIgnoreCase));
+        if (owner.Key is not null)
+        {
+            SetGesture(owner.Key, "");
+            var label = KeyCommands.Catalog.First(c => c.Id == owner.Key).Label;
+            ShowWarn($"{gesture} unbound from “{label}”.");
+        }
+        else KeyWarn.IsVisible = false;
+        SetGesture(id, gesture);
+    }
+
+    private void SetGesture(string id, string gesture)
+    {
+        _workKeys[id] = gesture;
+        if (_keyBoxes.TryGetValue(id, out var box)) box.Text = gesture;
+    }
+
+    private void ShowWarn(string msg) { KeyWarn.Text = msg; KeyWarn.IsVisible = true; }
+
+    private static bool IsModifierKey(Key k) => k is Key.LeftCtrl or Key.RightCtrl
+        or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt
+        or Key.LWin or Key.RWin or Key.System;
+
+    /// <summary>Format a chord to KeyGesture.Parse grammar: "Ctrl+Shift+C", "Ctrl+OemPlus".</summary>
+    private static string Canonical(KeyModifiers mods, Key key)
+    {
+        var parts = new List<string>(4);
+        if (mods.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
+        if (mods.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
+        if (mods.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
+        if (mods.HasFlag(KeyModifiers.Meta)) parts.Add("Meta");
+        parts.Add(key.ToString());
+        return string.Join("+", parts);
+    }
+
+    /// <summary>Normalise a hex field to "#RRGGBB"; keep the previous value if invalid.</summary>
+    private static string NormHex(string? hex, string fallback)
+    {
+        var s = (hex ?? "").Trim().TrimStart('#');
+        if (s.Length == 8) s = s.Substring(2);
+        if (s.Length == 6 && int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out _))
+            return "#" + s.ToUpperInvariant();
+        return fallback;
+    }
 }

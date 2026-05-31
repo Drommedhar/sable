@@ -593,12 +593,12 @@ Researched against Photoshop + Affinity Photo. Legend: ✅ have · 🔶 partial 
 - ⬜ hardness+flow UI (fields exist) · brush HUD adjust (Ctrl+Alt-drag) · brush presets panel · textured/image tips, spacing/jitter/scatter/dual/rotation/wet-edges · tablet pressure/tilt (post-v1) · pencil · colour-replacement · paint-mixer · pattern stamp · symmetry/mirror · stabiliser · gradient types beyond linear (radial/conical/reflected).
 
 ### 16.8 Retouching / repair
-- ✅ clone stamp.
-- ⬜ healing brush · spot healing · patch · inpainting/content-aware (LaMa, M3) · blemish/red-eye · history/undo brush · perspective clone.
+- ✅ clone stamp, **healing brush** (clone texture + dest-tone match), **spot heal** (auto nearby source), **patch** (drag a selection to a clean source, tone-matched).
+- ⬜ inpainting/content-aware (LaMa, Phase 8 AI) · blemish/red-eye · history/undo brush · perspective clone.
 
 ### 16.9 Transform / distort
-- ✅ move (offset), free transform (uniform scale + rotate).
-- ⬜ non-uniform scale + edge handles · skew/shear · perspective/distort · warp/mesh warp · content-aware scale · puppet/liquify · numeric transform panel · transform-again · align/distribute.
+- ✅ move (offset), free transform (uniform scale + rotate), **non-uniform scale + edge handles**, **skew/shear** (affine A=R·S·K), **perspective/distort** (free-corner homography — compositor 3×3 inverse + perspective divide; Ctrl-drag a gizmo corner), **mesh warp** (draggable control-point grid → destructive triangle-mesh warp), **numeric transform panel**, **flip H/V + rotate 90/180** quick ops, **align/distribute** (multi-layer), **liquify** (push/bloat/pucker/twirl displacement brush).
+- ⬜ content-aware scale (Phase 8 AI) · transform-again · non-destructive (GPU) mesh warp.
 
 ### 16.10 Vector / shapes / text
 - ✅ rect/ellipse/line (parametric), text (parametric, font/B/I/U/S/align/leading, multiline, on-canvas edit).
@@ -609,20 +609,20 @@ Researched against Photoshop + Affinity Photo. Legend: ✅ have · 🔶 partial 
 - ⬜ more shapes (polygon/star/arrow/custom) · shape stroke (width/colour/dash/joins)+fill toggle on rect/ellipse/line · boolean ops · text-on-path · frame/area text+wrap · character/paragraph panels (kerning/tracking/super-sub/lists) · text styles · text→curves · vector export.
 
 ### 16.11 Colour
-- ✅ custom HSV wheel+triangle, hex, eyedropper.
-- ⬜ swatches/palettes (placeholder) · alpha in picker · RGB/HSL/CMYK/LAB sliders · fg/bg swatches+swap · gradient presets · patterns · gamut warning/soft-proof · colour sampler points · histogram (placeholder) · info panel · 16/32-bit + ICC pipeline (internal working space exists; no UI/convert).
+- ✅ custom HSV wheel+triangle, hex, eyedropper, **alpha slider**, **RGB/HSL/CMYK/LAB sliders** (`ColorConvert`, mode combo + relabeling rows), **fg/bg swatches + swap (X) / reset (D)**, **swatches palette** (add + click-to-pick), **histogram panel** (live composite), **info readout** (cursor colour + selection size in the status bar).
+- ⬜ saved/named palettes (persist) · gradient presets · patterns · gamut warning/soft-proof · colour sampler points · 16/32-bit + ICC pipeline (internal working space exists; no UI/convert — engine-wide refactor).
 
 ### 16.12 File / IO / export
 - ✅ `.sable`, open PNG/JPEG/WebP/BMP, direct PNG export.
 - ⬜ Export dialog (PNG/JPEG/TIFF/WebP/GIF + quality/compression/resize/preview) · export persona/slices/presets · PSD import/export · TIFF/EXR/HDR/RAW import · SVG/PDF/EPS export · place/embed · batch · metadata/EXIF.
 
 ### 16.13 History / non-destructive
-- ✅ linear undo/redo, `.sable` keeps params.
-- ⬜ History panel · non-linear history/states · named snapshots · history-brush source · configurable depth/disk-backed.
+- ✅ linear undo/redo, `.sable` keeps params, **History panel** (`HistoryWindow`, click a state to jump — `UndoStack.History/Cursor/JumpTo`) + **named snapshots** (`DocumentViewModel.CaptureSnapshot`/`RestoreSnapshot` via `RestoreSnapshotCommand`).
+- ⬜ non-linear history tree · history-brush source · configurable depth/disk-backed.
 
 ### 16.14 Workflow / UI
-- ✅ dark chrome, grouped toolbar+flyouts+hotkey cycle, tool-specific options bar, custom controls, layers/color/gradient panels.
-- ⬜ `Dock.Avalonia` docking (float/tab/auto-hide) · saved workspaces · command palette · customisable shortcuts + PS/Affinity presets · right-click context menus · status-bar live info (zoom/coords/colour) · autosave/crash recovery · macros/actions+batch · plugin API · preferences dialog · real Brushes/Swatches/Channels/Paths/Navigator/History/Character/Paragraph panels (several placeholders) · multi-monitor float.
+- ✅ dark chrome, grouped toolbar+flyouts+hotkey cycle, tool-specific options bar, custom controls, layers/color/gradient panels, **command palette** (Ctrl+K, `CommandPalette`, fuzzy search + run ~45 actions/tools), **right-click context menus** (layer rows), status-bar live info (zoom/coords/colour), autosave/crash recovery, preferences dialog, **History panel**.
+- ⬜ `Dock.Avalonia` docking (float/tab/auto-hide) · saved workspaces · **customisable shortcuts** (keymap settings page) + PS/Affinity presets · **customisable canvas-overlay appearance** (selection/mask/guide/grid colours+sizes) · macros/actions+batch · plugin API · real Brushes/Swatches/Channels/Paths/Navigator/Character/Paragraph panels · multi-monitor float.
 
 ### 16.15 AI (M3, parked)
 - ⬜ SAM2 smart select · background removal · upscale (Real-ESRGAN) · object removal (LaMa) · generative fill/expand (Diffusers sidecar) · model manager + VRAM gating.
@@ -714,18 +714,20 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 - ✅ **Pen tool + bézier path** (`PathLayer` + Pen tool, key P; flatten-raster fill/stroke; live overlay via blit binding 6; serialized; GPU smoke). ✅ **Node-editing tool** (drag/insert/delete nodes + handles, de Casteljau split, undoable). ✅ shape **stroke/fill/dash + RoundedRect/Polygon/Star/Arrow** (shared `VectorRaster`, options bar + Shape panel). ✅ **text-on-path** + **area/frame text + wrap** + **tracking** + **text→curves** (multi-contour fill). ✅ **stroke joins/caps** (miter/round/bevel + butt/round/square; Shape panel combos; serialized).
 - Moved to §16.16 (advanced/pro, post-Phase): vector **boolean ops**, custom/preset shape library, full **character/paragraph** typography (kerning pairs / super-sub / lists), named **text styles**, live (non-baked) text↔path link.
 
-### Phase 5 — Retouch & transform depth
-- Healing brush / spot heal / patch, perspective clone; non-uniform scale + edge handles, skew/shear, perspective/distort, warp/mesh warp, content-aware scale, liquify, align/distribute, numeric transform panel, layer rotate/flip quick ops (§16.8, §16.9, §17.2). (Content-aware fill → needs Phase 8 AI.)
+### Phase 5 — Retouch & transform depth ✅ DONE
+- ✅ **Healing brush / spot heal / patch** (CPU, tone-matched). ✅ **non-uniform scale + edge handles**, **skew/shear** (affine R·S·K), **perspective/distort** (free-corner homography, compositor 3×3), **mesh warp** (control-point grid), **liquify** (push/bloat/pucker/twirl), **align/distribute**, **numeric transform panel**, **flip/rotate 90/180 quick ops**.
+- ⬜ deferred: perspective clone, content-aware scale/fill (→ Phase 8 AI), transform-again, non-destructive GPU mesh warp (§16.8, §16.9).
 
-### Phase 6 — Colour & IO depth
-- Swatches/palettes panel, alpha in picker, RGB/HSL/CMYK/LAB sliders, fg/bg swatches, gradient/pattern presets, gamut/soft-proof, histogram/info panels; **16/32-bit + ICC pipeline** (UI + convert at boundaries); **PSD import/export**, TIFF/EXR/HDR/RAW import, SVG/PDF export, place/embed, batch (§16.11, §16.12).
+### Phase 6 — Colour & IO depth  *(colour panel + histogram/info DONE)*
+- ✅ **Colour panel depth** (alpha, RGB/HSL/CMYK/LAB sliders, fg/bg swatches+swap/reset, swatches palette) + **histogram panel** + **info readout**.
+- ⬜ remaining: gradient/pattern presets, gamut/soft-proof; **16/32-bit + ICC pipeline** (engine-wide refactor); **PSD import/export**, TIFF/EXR/HDR/RAW import (licensed libs), SVG/PDF export, place/embed, batch, export-dialog formats (§16.11, §16.12).
 
-### Phase 7 — Architecture & scale  *(Engine track, heavy)*
-- **Real GPU-tiled layer storage** (atlas + partial residency + eviction) — meet the §3 invariant; unblocks 100MP + many tabs.
-- **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint.
-- **HiDPI / per-monitor DPI**.
-- **History panel** + non-linear history/states + named snapshots.
-- **Dock.Avalonia docking** + saved workspaces + command palette + **rebindable hotkeys (keymap + shortcuts settings page)** + **customisable canvas-overlay appearance settings** (selection/mask/guide/grid colours + sizes — see §17.1) + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
+### Phase 7 — Architecture & scale  *(Engine track, heavy — partial)*
+- ✅ **History panel + named snapshots** (`HistoryWindow`, `UndoStack.JumpTo`). ✅ **Command palette** (Ctrl+K) + **right-click context menus**.
+- ⬜ **Real GPU-tiled layer storage** (atlas + partial residency + eviction) — meet the §3 invariant; unblocks 100MP + many tabs. *(large, dedicated slice)*
+- ⬜ **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint. *(hot-path)*
+- ⬜ **HiDPI / per-monitor DPI**.
+- ⬜ **Dock.Avalonia docking** + saved workspaces + **rebindable hotkeys (keymap settings page)** + **customisable canvas-overlay appearance settings** (selection/mask/guide/grid colours + sizes — needs the blit uniform) + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
 
 ### Phase 8 — AI (was M3)
 - ONNX light tier in-process: SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal. Then Diffusers **sidecar** (uv venv, IPC) for generative fill/expand + **model manager + VRAM gating** (§6, §16.15).

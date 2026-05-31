@@ -26,6 +26,7 @@ public sealed class BrushTool
     public byte R { get; set; } = 255;
     public byte G { get; set; } = 255;
     public byte B { get; set; } = 255;
+    public float Alpha { get; set; } = 1f;         // foreground opacity (0..1), multiplies coverage
     public float Flow { get; set; } = 1f;          // max alpha per stamp
 
     /// <summary>When true the brush erases (destination-out) instead of painting.</summary>
@@ -61,6 +62,10 @@ public sealed class BrushTool
     public int CloneOffX { get; set; }   // source pixel = dest - (CloneOffX, CloneOffY)
     public int CloneOffY { get; set; }
 
+    /// <summary>Healing: clone the source TEXTURE but shift its tone to match the destination
+    /// neighbourhood (so the patch blends seamlessly). Requires a clone source.</summary>
+    public bool Heal { get; set; }
+
     /// <summary>Stamp a single dab centered at (cx, cy) into an RGBA8 buffer.</summary>
     public void Stamp(byte[] px, int w, int h, double cx, double cy)
     {
@@ -80,6 +85,31 @@ public sealed class BrushTool
             int scx = Math.Clamp((int)cx, 0, w - 1), scy = Math.Clamp((int)cy, 0, h - 1);
             int sc = (scy * w + scx) * 4;
             if (!_smInit) { _smR = px[sc]; _smG = px[sc + 1]; _smB = px[sc + 2]; _smInit = true; }
+        }
+
+        // healing: precompute the dab's tone shift = mean(dest) - mean(source) over the disc
+        float healOffR = 0, healOffG = 0, healOffB = 0;
+        if (Heal && Clone && CloneSrc is { } hc)
+        {
+            double sdr = 0, sdg = 0, sdb = 0, ssr = 0, ssg = 0, ssb = 0; int cnt = 0;
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+            {
+                float ddx = x - (float)cx, ddy = y - (float)cy;
+                if (ddx * ddx + ddy * ddy > r * r) continue;
+                int sx = x - CloneOffX, sy = y - CloneOffY;
+                if (sx < 0 || sy < 0 || sx >= CloneSrcW || sy >= CloneSrcH) continue;
+                int di = (y * w + x) * 4, sj = (sy * CloneSrcW + sx) * 4;
+                if (hc[sj + 3] == 0) continue;
+                sdr += px[di]; sdg += px[di + 1]; sdb += px[di + 2];
+                ssr += hc[sj]; ssg += hc[sj + 1]; ssb += hc[sj + 2]; cnt++;
+            }
+            if (cnt > 0)
+            {
+                healOffR = (float)((sdr - ssr) / cnt) / 255f;
+                healOffG = (float)((sdg - ssg) / cnt) / 255f;
+                healOffB = (float)((sdb - ssb) / cnt) / 255f;
+            }
         }
 
         for (int y = y0; y <= y1; y++)
@@ -117,7 +147,7 @@ public sealed class BrushTool
                 continue;
             }
 
-            float sa = cov * Flow * clipCov;
+            float sa = cov * Flow * clipCov * Alpha;
             if (sa <= 0f) continue;
 
             // clone: source colour sampled at the locked offset (skip outside source / transparent)
@@ -128,6 +158,7 @@ public sealed class BrushTool
                 if (srcx < 0 || srcy < 0 || srcx >= CloneSrcW || srcy >= CloneSrcH) continue;
                 int sj = (srcy * CloneSrcW + srcx) * 4;
                 csr = cs[sj] / 255f; csg = cs[sj + 1] / 255f; csb = cs[sj + 2] / 255f;
+                if (Heal) { csr = Math.Clamp(csr + healOffR, 0f, 1f); csg = Math.Clamp(csg + healOffG, 0f, 1f); csb = Math.Clamp(csb + healOffB, 0f, 1f); }
                 sa *= cs[sj + 3] / 255f;
                 if (sa <= 0f) continue;
             }

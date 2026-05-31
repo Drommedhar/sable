@@ -15,6 +15,79 @@ public class BrushToolTests
     }
 
     [Fact]
+    public void MeshWarp_IdentityGrid_PreservesContent_ShiftMovesIt()
+    {
+        int w = 40, h = 40, gx = 3, gy = 3;
+        var src = new byte[w * h * 4];
+        // a white block at (10..20, 10..20)
+        for (int y = 10; y < 20; y++)
+        for (int x = 10; x < 20; x++)
+        { int i = (y * w + x) * 4; src[i] = src[i + 1] = src[i + 2] = src[i + 3] = 255; }
+
+        var grid = new (float, float)[gx * gy];
+        for (int j = 0; j < gy; j++)
+        for (int k = 0; k < gx; k++)
+            grid[j * gx + k] = (w * k / (float)(gx - 1), h * j / (float)(gy - 1));
+
+        // identity warp → block stays
+        var id = MeshWarpTool.Warp(src, w, h, gx, gy, grid, grid);
+        Assert.True(id[(15 * w + 15) * 4 + 3] > 200);
+
+        // shift every dst point +8 in X → block moves right by ~8
+        var shifted = new (float X, float Y)[grid.Length];
+        for (int i = 0; i < grid.Length; i++) shifted[i] = (grid[i].Item1 + 8, grid[i].Item2);
+        var moved = MeshWarpTool.Warp(src, w, h, gx, gy, grid, shifted);
+        Assert.True(moved[(15 * w + 23) * 4 + 3] > 200);   // block now around x=18..28
+        Assert.True(moved[(15 * w + 12) * 4 + 3] < 80);    // original spot mostly empty
+    }
+
+    [Fact]
+    public void Liquify_Push_MovesEdge()
+    {
+        int w = 40, h = 40;
+        var px = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            int i = (y * w + x) * 4;
+            if (x < 20) { px[i] = 255; px[i + 2] = 0; } else { px[i] = 0; px[i + 2] = 255; }   // red | blue
+            px[i + 3] = 255;
+        }
+        LiquifyTool.Stamp(px, w, h, 20, 20, dragX: 10, dragY: 0, LiquifyMode.Push, strength: 1f, radius: 12, hardness: 0.5f);
+        // a pixel just right of the old edge now samples from the red side → red rises, blue falls
+        int p = (20 * w + 23) * 4;
+        Assert.True(px[p] > 80, $"red should bleed right (got {px[p]})");
+        Assert.True(px[p + 2] < 220, $"blue should drop (got {px[p + 2]})");
+    }
+
+    [Fact]
+    public void Heal_MatchesDestinationTone_KeepsSourceTexture()
+    {
+        int w = 24, h = 24;
+        var dest = new byte[w * h * 4];
+        var srcBuf = new byte[w * h * 4];
+        for (int i = 0; i < w * h; i++)
+        {
+            dest[i * 4] = dest[i * 4 + 1] = dest[i * 4 + 2] = 100; dest[i * 4 + 3] = 255;
+            srcBuf[i * 4] = srcBuf[i * 4 + 1] = srcBuf[i * 4 + 2] = 200; srcBuf[i * 4 + 3] = 255;
+        }
+        int spot = (12 * w + 12) * 4; srcBuf[spot] = srcBuf[spot + 1] = srcBuf[spot + 2] = 210;
+
+        var brush = new BrushTool
+        {
+            Radius = 8, Hardness = 1f, Flow = 1f, Clone = true, Heal = true,
+            CloneSrc = srcBuf, CloneSrcW = w, CloneSrcH = h, CloneOffX = 0, CloneOffY = 0,
+        };
+        brush.BeginStroke();
+        brush.Stamp(dest, w, h, 12, 12);
+
+        // healed centre ≈ dest tone (100) + the source's local texture excess (~+10), NOT 200
+        int c = (12 * w + 12) * 4;
+        Assert.InRange(dest[c], 104, 124);
+        Assert.True(dest[c] < 160);
+    }
+
+    [Fact]
     public void Stroke_PaintsCoverage()
     {
         var layer = new PixelLayer(64, 64);

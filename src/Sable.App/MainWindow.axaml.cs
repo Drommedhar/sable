@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     private AdjustmentWindow? _adjWindow;
     private EffectsWindow? _fxWindow;
     private ShapeWindow? _shapeWindow;
+    private TransformWindow? _transformWindow;
+    private HistoryWindow? _historyWindow;
     private readonly System.Collections.ObjectModel.ObservableCollection<DocumentTab> _tabs = new();
     private DocumentTab? _activeTab;
     private int _untitledCounter = 1;
@@ -83,6 +85,7 @@ public partial class MainWindow : Window
 
         // settings: restore window placement + theme + recent menu + last session (PLAN §17.1)
         ApplySettings();
+        RebuildKeyGestures();   // load the rebindable keymap (defaults + user overrides)
         Opened += (_, _) =>
         {
             OfferCrashRecovery();           // restore autosaved docs from a previous unclean exit
@@ -102,6 +105,15 @@ public partial class MainWindow : Window
         });
         // canvas can change scale on window resize without a ViewChanged → refresh rulers on layout
         Canvas.LayoutUpdated += (_, _) => UpdateRulers();
+
+        // live histogram of the composite (low-frequency; readback is not free)
+        var histTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        histTimer.Tick += (_, _) =>
+        {
+            if (HistView is null || !HistView.IsEffectivelyVisible || Canvas.Document is null) return;
+            if (Canvas.ReadComposite() is { } rgba) HistView.SetBins(Histogram.Compute(rgba));
+        };
+        histTimer.Start();
 
         // click a ruler to drop a guide: top ruler → vertical guide (X), left ruler → horizontal guide (Y)
         RulerH.GuideRequested += d => AddGuide(vertical: true, d);
@@ -142,7 +154,16 @@ public partial class MainWindow : Window
         }
         if (_settings.WinMaximized) WindowState = WindowState.Maximized;
         ApplyTheme(_settings.Theme);
+        ApplyOverlayColors();
         RebuildRecentMenu();
+    }
+
+    /// <summary>Push the customisable canvas-overlay colours from settings to the GPU canvas.</summary>
+    private void ApplyOverlayColors()
+    {
+        Canvas.SetOverlayColors(
+            _settings.GuideRgb(), _settings.SmartGuideRgb(),
+            _settings.GridRgb(), _settings.QuickMaskRgb());
     }
 
     private void ApplyTheme(Sable.Core.Settings.AppTheme theme)
@@ -261,6 +282,8 @@ public partial class MainWindow : Window
         if (await dlg.ShowDialog<bool>(this))
         {
             ApplyTheme(_settings.Theme);
+            ApplyOverlayColors();
+            RebuildKeyGestures();   // pick up any rebound hotkeys
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
             Sable.Core.Settings.SettingsService.Save(_settings);
         }
@@ -395,6 +418,27 @@ public partial class MainWindow : Window
     private void UpdateCursorLabel(double docX, double docY)
     {
         if (CursorLabel is not null) CursorLabel.Text = $"{(int)System.Math.Floor(docX)}, {(int)System.Math.Floor(docY)} px";
+
+        // Info: colour under the cursor (active layer pixel) + selection size
+        if (InfoLabel is not null)
+        {
+            int ix = (int)System.Math.Floor(docX), iy = (int)System.Math.Floor(docY);
+            if (Canvas.ActiveLayer is { } al)
+            {
+                int lx = ix - al.OffsetX, ly = iy - al.OffsetY;
+                if (lx >= 0 && ly >= 0 && lx < al.Width && ly < al.Height)
+                {
+                    int j = (ly * al.Width + lx) * 4;
+                    byte r = al.Pixels[j], g = al.Pixels[j + 1], b = al.Pixels[j + 2], a = al.Pixels[j + 3];
+                    InfoLabel.Text = $"R{r} G{g} B{b} A{a}";
+                    InfoSwatch.Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(r, g, b));
+                }
+                else { InfoLabel.Text = ""; InfoSwatch.Background = Avalonia.Media.Brushes.Transparent; }
+            }
+            else { InfoLabel.Text = ""; InfoSwatch.Background = Avalonia.Media.Brushes.Transparent; }
+        }
+        if (SelSizeLabel is not null)
+            SelSizeLabel.Text = Canvas.Document?.Selection is { } s ? $"Sel {s.W} x {s.H}" : "";
     }
 
     private void UpdateDocInfo()
@@ -457,26 +501,10 @@ public partial class MainWindow : Window
             }
             return;
         }
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // rebindable command hotkeys (PLAN §17.1): match the keymap before the fixed tool/nav keys
+        foreach (var (g, id) in _keyGestures)
         {
-            bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-            switch (e.Key)
-            {
-                case Key.C when shift: OnCopyMerged(null, null!); e.Handled = true; return;
-                case Key.C: OnCopy(null, null!); e.Handled = true; return;
-                case Key.X: OnCut(null, null!); e.Handled = true; return;
-                case Key.V when shift: OnPasteInto(null, null!); e.Handled = true; return;
-                case Key.V: OnPaste(null, null!); e.Handled = true; return;
-                case Key.J: OnDuplicate(null, null!); e.Handled = true; return;
-                case Key.E when shift && e.KeyModifiers.HasFlag(KeyModifiers.Alt): OnStamp(null, null!); e.Handled = true; return;
-                case Key.E when shift: OnMergeVisible(null, null!); e.Handled = true; return;
-                case Key.E: OnMergeDown(null, null!); e.Handled = true; return;
-                case Key.N: _ = OnNewDocument(); e.Handled = true; return;
-                case Key.W when _activeTab is { } wt: _ = CloseTab(wt); e.Handled = true; return;
-                case Key.A: OnSelectAll(null, null!); e.Handled = true; return;
-                case Key.D: OnDeselect(null, null!); e.Handled = true; return;
-                case Key.I when shift: OnInvertSelection(null, null!); e.Handled = true; return;
-            }
+            if (g.Matches(e)) { RunKeyCommand(id); e.Handled = true; return; }
         }
         switch (e.Key)
         {
@@ -484,12 +512,14 @@ public partial class MainWindow : Window
             case Key.Enter:
                 if (Canvas.QuickMask) Canvas.ToggleQuickMask();       // commit quick mask
                 else if (Canvas.PenActive) Canvas.CommitPen();        // finish pen path (open)
+                else if (Canvas.MeshActive) Canvas.CommitMeshWarp();  // apply mesh warp
                 else if (Canvas.PolyLassoActive) Canvas.CommitPolyLasso();
                 else Canvas.CommitCrop();
                 e.Handled = true; break;
             case Key.Escape:
                 if (Canvas.QuickMask) Canvas.CancelQuickMask();       // cancel quick mask (restore prior selection)
                 else if (Canvas.PenActive) Canvas.CancelPen();        // discard pen path
+                else if (Canvas.MeshActive) Canvas.CancelMeshWarp();
                 else if (Canvas.PolyLassoActive) Canvas.CancelPolyLasso();
                 else { Canvas.CancelCrop(); Canvas.Deselect(); }
                 e.Handled = true; break;
@@ -631,7 +661,14 @@ public partial class MainWindow : Window
     private void OnStrengthChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.Brush.Strength = (float)(e.NewValue / 100.0);
+        Canvas.LiquifyStrength = (float)(e.NewValue / 100.0);
         if (StrengthLabel is not null) StrengthLabel.Text = $"{e.NewValue:0}%";
+    }
+
+    private void OnLiquifyModeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (LiquifyModeCombo is not null)
+            Canvas.LiquifyMode = (Sable.Tools.LiquifyMode)Math.Max(0, LiquifyModeCombo.SelectedIndex);
     }
 
     private void OnBrushHardnessChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -788,6 +825,132 @@ public partial class MainWindow : Window
         Canvas.Brush.R = c.R;
         Canvas.Brush.G = c.G;
         Canvas.Brush.B = c.B;
+        if (!_syncingColor) SyncColorEditor(c.R, c.G, c.B);
+        else UpdateSwatchFills();
+    }
+
+    // ===== colour editor: fg/bg swatches, alpha, RGB/HSL/CMYK/LAB sliders, palette (PLAN §16.11) =====
+    private int _colorMode;            // 0=RGB 1=HSL 2=CMYK 3=LAB
+    private bool _syncingColor;
+
+    private void OnPickFg(object? sender, TappedEventArgs e)
+        => SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
+    private void OnPickBg(object? sender, TappedEventArgs e)
+        => SetWheel(Avalonia.Media.Color.FromRgb(Canvas.BgR, Canvas.BgG, Canvas.BgB));
+
+    private void OnSwapColors(object? sender, RoutedEventArgs e) { Canvas.SwapColors(); UpdateSwatchFills(); }
+    private void OnResetColors(object? sender, RoutedEventArgs e) { Canvas.ResetColors(); UpdateSwatchFills(); }
+
+    private void OnAlphaChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        => Canvas.Brush.Alpha = (float)(e.NewValue / 100.0);
+
+    private void UpdateSwatchFills()
+    {
+        if (FgSwatch is null) return;
+        FgSwatch.Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
+        BgSwatch.Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(Canvas.BgR, Canvas.BgG, Canvas.BgB));
+    }
+
+    private void OnColorModeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (ColorModeCombo is null || CSlider0 is null) return;   // init-time event before rows exist
+        _colorMode = Math.Max(0, ColorModeCombo.SelectedIndex);
+        SyncColorEditor(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+    }
+
+    // refresh the slider rows + boxes + swatches to show colour (r,g,b) in the current mode
+    private void SyncColorEditor(byte r, byte g, byte b)
+    {
+        if (CSlider0 is null) return;
+        _syncingColor = true;
+        UpdateSwatchFills();
+        (string l0, string l1, string l2, string l3) labels;
+        double[] mins = { 0, 0, 0, 0 }, maxs = { 255, 255, 255, 255 }, vals = { r, g, b, 0 };
+        bool row3 = false;
+        switch (_colorMode)
+        {
+            case 1:   // HSL
+            {
+                var (h, s, l) = Sable.Core.ColorConvert.RgbToHsl(r, g, b);
+                labels = ("H", "S", "L", ""); maxs = new double[] { 360, 100, 100, 100 };
+                vals = new double[] { h, s * 100, l * 100, 0 }; break;
+            }
+            case 2:   // CMYK
+            {
+                var (c, m, y, k) = Sable.Core.ColorConvert.RgbToCmyk(r, g, b);
+                labels = ("C", "M", "Y", "K"); maxs = new double[] { 100, 100, 100, 100 };
+                vals = new double[] { c * 100, m * 100, y * 100, k * 100 }; row3 = true; break;
+            }
+            case 3:   // LAB
+            {
+                var (L, a, bb) = Sable.Core.ColorConvert.RgbToLab(r, g, b);
+                labels = ("L", "a", "b", ""); mins = new double[] { 0, -128, -128, 0 }; maxs = new double[] { 100, 127, 127, 100 };
+                vals = new double[] { L, a, bb, 0 }; break;
+            }
+            default:  // RGB
+                labels = ("R", "G", "B", ""); break;
+        }
+        CLbl0.Text = labels.l0; CLbl1.Text = labels.l1; CLbl2.Text = labels.l2; CLbl3.Text = labels.l3;
+        var sl = new[] { CSlider0, CSlider1, CSlider2, CSlider3 };
+        var bx = new[] { CVal0, CVal1, CVal2, CVal3 };
+        for (int i = 0; i < 4; i++) { sl[i].Minimum = mins[i]; sl[i].Maximum = maxs[i]; sl[i].Value = vals[i]; bx[i].Text = $"{vals[i]:0}"; }
+        CRow3.IsVisible = row3;
+        _syncingColor = false;
+    }
+
+    private void OnColorSlider(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_syncingColor) return;
+        _syncingColor = true;
+        CVal0.Text = $"{CSlider0.Value:0}"; CVal1.Text = $"{CSlider1.Value:0}"; CVal2.Text = $"{CSlider2.Value:0}"; CVal3.Text = $"{CSlider3.Value:0}";
+        _syncingColor = false;
+        ApplyColorFromEditor();
+    }
+
+    private void OnColorValBox(object? sender, Avalonia.Controls.TextChangedEventArgs e)
+    {
+        if (_syncingColor) return;
+        _syncingColor = true;
+        if (double.TryParse(CVal0.Text, out var v0)) CSlider0.Value = v0;
+        if (double.TryParse(CVal1.Text, out var v1)) CSlider1.Value = v1;
+        if (double.TryParse(CVal2.Text, out var v2)) CSlider2.Value = v2;
+        if (double.TryParse(CVal3.Text, out var v3)) CSlider3.Value = v3;
+        _syncingColor = false;
+        ApplyColorFromEditor();
+    }
+
+    private void ApplyColorFromEditor()
+    {
+        double a = CSlider0.Value, b = CSlider1.Value, c = CSlider2.Value, d = CSlider3.Value;
+        var (r, g, bl) = _colorMode switch
+        {
+            1 => Sable.Core.ColorConvert.HslToRgb(a, b / 100, c / 100),
+            2 => Sable.Core.ColorConvert.CmykToRgb(a / 100, b / 100, c / 100, d / 100),
+            3 => Sable.Core.ColorConvert.LabToRgb(a, b, c),
+            _ => ((byte)Math.Clamp(a, 0, 255), (byte)Math.Clamp(b, 0, 255), (byte)Math.Clamp(c, 0, 255)),
+        };
+        _syncingColor = true;
+        SetWheel(Avalonia.Media.Color.FromRgb(r, g, bl));   // updates wheel + Brush via OnBrushColorChanged
+        UpdateSwatchFills();
+        _syncingColor = false;
+    }
+
+    private void OnAddSwatch(object? sender, RoutedEventArgs e)
+        => AddSwatch(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+
+    private void AddSwatch(byte r, byte g, byte b)
+    {
+        if (SwatchList is null) return;
+        var items = (SwatchList.Items as System.Collections.IList);
+        var sw = new Border
+        {
+            Width = 16, Height = 16, Margin = new Thickness(1),
+            Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(r, g, b)),
+            BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FF555555")), BorderThickness = new Thickness(1),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+        };
+        sw.Tapped += (_, _) => SetWheel(Avalonia.Media.Color.FromRgb(r, g, b));
+        items?.Add(sw);
     }
 
     private void OnSelectColorTab(object? sender, TappedEventArgs e)
@@ -855,6 +1018,11 @@ public partial class MainWindow : Window
         const string shStar = "M12 2 14.9 8.6 22 9.3l-5.3 4.7L18.2 21 12 17.3 5.8 21l1.5-7L2 9.3l7.1-.7z";
         const string shArrow= "M3 12h15 M13 7l6 5-6 5";
         const string clone  = "M5 22h14 M19 18v-3a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3 M12 2a2 2 0 0 0-2 2c0 .8.5 1.4 1 1.7V9h2V5.7c.5-.3 1-.9 1-1.7a2 2 0 0 0-2-2z";
+        const string heal   = "M8 4h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M12 9v6 M9 12h6";
+        const string spot   = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8v8 M8 12h8";
+        const string patch  = "M4 4h16v16H4z M4 12h16 M12 4v16";
+        const string liquify= "M12 3c3 4 6 6 6 10a6 6 0 0 1-12 0c0-4 3-6 6-10z M9 14a3 3 0 0 0 5 1";
+        const string mesh   = "M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18";
         const string type   = "M4 7V4h16v3 M9 20h6 M12 4v16";
         const string dodge  = "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8z M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1.4 1.4 M17.6 17.6 19 19 M19 5l-1.4 1.4 M6.4 17.6 5 19";
         const string burn   = "M12 3c2 4 6 5 6 9a6 6 0 0 1-12 0c0-2 1-3 2-4 0 1 1 2 2 2 1-2 0-5 0-7z";
@@ -891,13 +1059,18 @@ public partial class MainWindow : Window
                           new ToolDef(shStar, "Star", Sable.Tools.ToolKind.ShapeStar),
                           new ToolDef(shLine, "Line", Sable.Tools.ToolKind.ShapeLine),
                           new ToolDef(shArrow, "Arrow", Sable.Tools.ToolKind.ShapeArrow) }),
-            ("S", new[] { new ToolDef(clone, "Clone Stamp", Sable.Tools.ToolKind.CloneStamp) }),
+            ("S", new[] { new ToolDef(clone, "Clone Stamp", Sable.Tools.ToolKind.CloneStamp),
+                          new ToolDef(heal, "Healing Brush", Sable.Tools.ToolKind.Heal),
+                          new ToolDef(spot, "Spot Heal", Sable.Tools.ToolKind.SpotHeal),
+                          new ToolDef(patch, "Patch", Sable.Tools.ToolKind.Patch) }),
             ("O", new[] { new ToolDef(dodge, "Dodge", Sable.Tools.ToolKind.Dodge),
                           new ToolDef(burn, "Burn", Sable.Tools.ToolKind.Burn),
                           new ToolDef(sponge, "Sponge", Sable.Tools.ToolKind.Sponge),
                           new ToolDef(blurB, "Blur", Sable.Tools.ToolKind.BlurBrush),
                           new ToolDef(sharpB, "Sharpen", Sable.Tools.ToolKind.SharpenBrush),
                           new ToolDef(smudge, "Smudge", Sable.Tools.ToolKind.Smudge) }),
+            ("Y", new[] { new ToolDef(liquify, "Liquify", Sable.Tools.ToolKind.Liquify),
+                          new ToolDef(mesh, "Mesh Warp", Sable.Tools.ToolKind.MeshWarp) }),
             ("T", new[] { new ToolDef(type, "Text", Sable.Tools.ToolKind.Type) }),
             ("P", new[] { new ToolDef(pen, "Pen", Sable.Tools.ToolKind.Pen),
                           new ToolDef(node, "Node", Sable.Tools.ToolKind.Node) }),
@@ -1018,13 +1191,15 @@ public partial class MainWindow : Window
         SetColorTab(kind == Sable.Tools.ToolKind.Gradient);
         UpdateOptionsBar(kind);
         if (ToolHint is not null) ToolHint.Text = ToolHintFor(kind);
+        if (kind == Sable.Tools.ToolKind.Transform) ShowTransformWindow();
+        else _transformWindow?.Close();
     }
 
     // Affinity-style status-bar hints: what drag/click/modifiers do for the active tool.
     private static string ToolHintFor(ToolKind k) => k switch
     {
         ToolKind.Move => "Drag to move the layer. Shift constrains to an axis. Use the Layers panel to pick a layer.",
-        ToolKind.Transform => "Drag a corner to scale, an edge to scale one axis, the handle to rotate.",
+        ToolKind.Transform => "Drag corners to scale, edges for one axis, outside to rotate. Ctrl-drag a corner = perspective/distort.",
         ToolKind.Marquee or ToolKind.EllipseMarquee => "Drag to select. Shift adds, Alt subtracts, Shift+Alt intersects. Drag the interior to move the selection.",
         ToolKind.Lasso => "Drag to draw a freehand selection. Shift adds, Alt subtracts, Shift+Alt intersects.",
         ToolKind.PolyLasso => "Click to place points; click the first point or press Enter to close, Esc to cancel. Shift adds, Alt subtracts.",
@@ -1039,6 +1214,11 @@ public partial class MainWindow : Window
             or ToolKind.ShapePolygon or ToolKind.ShapeStar => "Drag to draw the shape. Set fill/stroke/sides in the options bar; edit it later in the Shape panel.",
         ToolKind.ShapeLine or ToolKind.ShapeArrow => "Drag to draw. Shift constrains the angle.",
         ToolKind.CloneStamp => "Alt-click to set the source, then drag to paint cloned pixels.",
+        ToolKind.Heal => "Alt-click to set the source, then drag to heal (source texture, matched to the destination tone).",
+        ToolKind.SpotHeal => "Drag over a blemish to heal it from a nearby region (no source click needed).",
+        ToolKind.Patch => "Make a selection, then drag it over a clean area to patch (tone-matched).",
+        ToolKind.Liquify => "Drag to push pixels. Choose Push/Bloat/Pucker/Twirl + strength in the options bar.",
+        ToolKind.MeshWarp => "Drag the grid points to deform the layer. Enter applies, Esc cancels.",
         ToolKind.Dodge => "Drag to lighten. Adjust strength in the options bar.",
         ToolKind.Burn => "Drag to darken. Adjust strength in the options bar.",
         ToolKind.Sponge => "Drag to desaturate. Adjust strength in the options bar.",
@@ -1059,6 +1239,7 @@ public partial class MainWindow : Window
     {
         if (SizeOpts is null) return;   // not initialized yet
         SizeOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.CloneStamp
+                              or ToolKind.Heal or ToolKind.SpotHeal or ToolKind.Liquify
                               or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                               or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         bool shapeTool = k is ToolKind.ShapeRect or ToolKind.ShapeRoundedRect or ToolKind.ShapeEllipse
@@ -1071,7 +1252,8 @@ public partial class MainWindow : Window
         ShapeInnerOpts.IsVisible = k is ToolKind.ShapeStar;
         ShapeCornerOpts.IsVisible = k is ToolKind.ShapeRoundedRect;
         StrengthOpts.IsVisible = k is ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
-                                  or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
+                                  or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge or ToolKind.Liquify;
+        LiquifyOpts.IsVisible = k == ToolKind.Liquify;
         SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.PolyLasso or ToolKind.MagicWand or ToolKind.ColorRange;
         TypeOpts.IsVisible = k == ToolKind.Type;
         EyedropperOpts.IsVisible = k == ToolKind.Eyedropper;
@@ -1099,14 +1281,17 @@ public partial class MainWindow : Window
             case Key.S when e.KeyModifiers == KeyModifiers.None: CycleGroup("S"); break;
             case Key.O: CycleGroup("O"); break;
             case Key.T: CycleGroup("T"); break;
+            case Key.Y when e.KeyModifiers == KeyModifiers.None: CycleGroup("Y"); break;
             case Key.P: CycleGroup("P"); break;
             case Key.I: CycleGroup("I"); break;
             case Key.H: CycleGroup("H"); break;
             case Key.Z: CycleGroup("Z"); break;
+            // Ctrl+K (palette) and Ctrl+D (deselect) are owned by the rebindable keymap (OnGlobalKeyDown)
+            case Key.X when e.KeyModifiers == KeyModifiers.None: Canvas.SwapColors(); UpdateSwatchFills(); break;   // swap fg/bg
+            case Key.D when e.KeyModifiers == KeyModifiers.None: Canvas.ResetColors(); UpdateSwatchFills(); break;  // reset fg/bg
             case Key.Q: Canvas.ToggleQuickMask(); break;   // quick mask (paint the selection as rubylith)
             case Key.K: Canvas.PaintMask = !Canvas.PaintMask; break;   // edit layer mask
             case Key.Escape: Canvas.Deselect(); break;
-            case Key.D when e.KeyModifiers == KeyModifiers.Control: Canvas.Deselect(); break;
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); break;
             case Key.Left: Canvas.PanBy(step, 0); break;
             case Key.Right: Canvas.PanBy(-step, 0); break;
@@ -1171,6 +1356,8 @@ public partial class MainWindow : Window
         if (_adjWindow is not null) _adjWindow.DataContext = tab.Vm;
         if (_fxWindow is not null) _fxWindow.DataContext = tab.Vm;
         if (_shapeWindow is not null) _shapeWindow.DataContext = tab.Vm;
+        if (_transformWindow is not null) _transformWindow.DataContext = tab.Vm;
+        if (_historyWindow is not null) _historyWindow.DataContext = tab.Vm;
         Canvas.FitView(_settings.LimitInitialZoom);
         UpdateEmptyState();
         UpdateDocInfo();
@@ -1252,6 +1439,142 @@ public partial class MainWindow : Window
         win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         win.Closed += (_, _) => _shapeWindow = null;
         _shapeWindow = win;
+        win.Show(this);
+    }
+
+    private void ShowTransformWindow()
+    {
+        if (_transformWindow is not null) { _transformWindow.Activate(); return; }
+        var win = new TransformWindow { DataContext = DataContext };
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        win.Closed += (_, _) => _transformWindow = null;
+        _transformWindow = win;
+        win.Show(this);
+    }
+
+    private void OnCommandPalette(object? sender, RoutedEventArgs e)
+    {
+        var actions = new List<(string, Action)>
+        {
+            ("New Document", () => OnNewMenu(null, _e)),
+            ("Open…", () => OnOpenSable(null, _e)),
+            ("Open Image…", () => OnOpenImage(null, _e)),
+            ("Save", () => OnSaveSable(null, _e)),
+            ("Save As…", () => OnSaveAsSable(null, _e)),
+            ("Export…", () => OnExport(null, _e)),
+            ("Undo", () => Doc?.Undo.Undo()),
+            ("Redo", () => Doc?.Undo.Redo()),
+            ("Copy", () => OnCopy(null, _e)),
+            ("Copy Merged", () => OnCopyMerged(null, _e)),
+            ("Cut", () => OnCut(null, _e)),
+            ("Paste", () => OnPaste(null, _e)),
+            ("Select All", () => OnSelectAll(null, _e)),
+            ("Deselect", () => OnDeselect(null, _e)),
+            ("Invert Selection", () => OnInvertSelection(null, _e)),
+            ("New Layer", () => Doc?.NewLayerCommand.Execute(null)),
+            ("Duplicate Layer", () => OnDuplicate(null, _e)),
+            ("Merge Down", () => OnMergeDown(null, _e)),
+            ("Merge Visible", () => OnMergeVisible(null, _e)),
+            ("Flatten Image", () => OnFlatten(null, _e)),
+            ("Rasterise Layer", () => OnRasterise(null, _e)),
+            ("Flip Horizontal", () => OnFlipH(null, _e)),
+            ("Flip Vertical", () => OnFlipV(null, _e)),
+            ("Rotate 90° CW", () => OnRotate90CW(null, _e)),
+            ("Rotate 90° CCW", () => OnRotate90CCW(null, _e)),
+            ("Rotate 180°", () => OnRotate180(null, _e)),
+            ("Reset Transform", () => OnResetTransform(null, _e)),
+            ("Align Left", () => OnAlignLeft(null, _e)),
+            ("Align Centre", () => OnAlignCenterH(null, _e)),
+            ("Align Right", () => OnAlignRight(null, _e)),
+            ("Align Top", () => OnAlignTop(null, _e)),
+            ("Align Middle", () => OnAlignMiddle(null, _e)),
+            ("Align Bottom", () => OnAlignBottom(null, _e)),
+            ("Distribute Horizontally", () => OnDistributeH(null, _e)),
+            ("Distribute Vertically", () => OnDistributeV(null, _e)),
+            ("Text to Curves", () => OnTextToCurves(null, _e)),
+            ("Fit to Window", () => OnZoomFit(null, _e)),
+            ("Zoom 100%", () => OnZoomActual(null, _e)),
+            ("Toggle Grid", () => OnToggleGrid(null, _e)),
+            ("Toggle Rulers", () => OnToggleRulers(null, _e)),
+            ("Window: Adjustments", () => OnToggleAdjustments(null, _e)),
+            ("Window: Layer Effects", () => OnToggleEffects(null, _e)),
+            ("Window: History", () => OnToggleHistory(null, _e)),
+        };
+        foreach (var t in _toolKinds) { var k = t; actions.Add(($"Tool: {ToolDisplayName(k)}", () => Canvas.ActiveTool = k)); }
+        var pal = new CommandPalette(actions);
+        pal.Show(this);
+    }
+
+    private static readonly RoutedEventArgs _e = new();
+    private static readonly Sable.Tools.ToolKind[] _toolKinds = (Sable.Tools.ToolKind[])Enum.GetValues(typeof(Sable.Tools.ToolKind));
+    private static string ToolDisplayName(Sable.Tools.ToolKind k) => k.ToString();
+
+    // ===== rebindable hotkeys (PLAN §17.1) =====
+    // id → handler. Built once (lambdas read the live Doc/_activeTab, so a single map is enough).
+    private Dictionary<string, Action>? _keyCommandRun;
+    // current keymap as matchable gestures, rebuilt from settings on init + after a settings change.
+    private readonly List<(Avalonia.Input.KeyGesture Gesture, string Id)> _keyGestures = new();
+
+    private Dictionary<string, Action> KeyCommandRun => _keyCommandRun ??= new()
+    {
+        ["file.new"]        = () => OnNewMenu(null, _e),
+        ["file.open"]       = () => OnOpenSable(null, _e),
+        ["file.openImage"]  = () => OnOpenImage(null, _e),
+        ["file.save"]       = () => OnSaveSable(null, _e),
+        ["file.saveAs"]     = () => OnSaveAsSable(null, _e),
+        ["file.export"]     = () => OnExport(null, _e),
+        ["file.closeTab"]   = () => { if (_activeTab is { } t) _ = CloseTab(t); },
+        ["edit.undo"]       = () => Doc?.Undo.Undo(),
+        ["edit.redo"]       = () => Doc?.Undo.Redo(),
+        ["edit.cut"]        = () => OnCut(null, _e),
+        ["edit.copy"]       = () => OnCopy(null, _e),
+        ["edit.copyMerged"] = () => OnCopyMerged(null, _e),
+        ["edit.paste"]      = () => OnPaste(null, _e),
+        ["edit.pasteInto"]  = () => OnPasteInto(null, _e),
+        ["edit.duplicate"]  = () => OnDuplicate(null, _e),
+        ["select.all"]      = () => OnSelectAll(null, _e),
+        ["select.deselect"] = () => OnDeselect(null, _e),
+        ["select.invert"]   = () => OnInvertSelection(null, _e),
+        ["layer.new"]          = () => Doc?.NewLayerCommand.Execute(null),
+        ["layer.mergeDown"]    = () => OnMergeDown(null, _e),
+        ["layer.mergeVisible"] = () => OnMergeVisible(null, _e),
+        ["layer.stamp"]        = () => OnStamp(null, _e),
+        ["view.zoomIn"]     = () => OnZoomInMenu(null, _e),
+        ["view.zoomOut"]    = () => OnZoomOutMenu(null, _e),
+        ["view.fit"]        = () => OnZoomFit(null, _e),
+        ["view.actual"]     = () => OnZoomActual(null, _e),
+        ["window.palette"]     = () => OnCommandPalette(null, _e),
+        ["window.history"]     = () => OnToggleHistory(null, _e),
+        ["window.adjustments"] = () => OnToggleAdjustments(null, _e),
+        ["window.effects"]     = () => OnToggleEffects(null, _e),
+    };
+
+    /// <summary>Re-parse the keymap (catalog defaults + user overrides) into matchable gestures.</summary>
+    private void RebuildKeyGestures()
+    {
+        _keyGestures.Clear();
+        foreach (var c in Sable.Core.Settings.KeyCommands.Catalog)
+        {
+            var g = _settings.GestureFor(c.Id);
+            if (string.IsNullOrWhiteSpace(g)) continue;
+            try { _keyGestures.Add((Avalonia.Input.KeyGesture.Parse(g), c.Id)); }
+            catch { /* a malformed override just disables that binding */ }
+        }
+    }
+
+    /// <summary>Run a command by id (keymap dispatch). Unknown ids are ignored.</summary>
+    private void RunKeyCommand(string id)
+    {
+        if (KeyCommandRun.TryGetValue(id, out var run)) run();
+    }
+
+    private void OnToggleHistory(object? sender, RoutedEventArgs e)
+    {
+        if (_historyWindow is not null) { _historyWindow.Close(); return; }
+        var win = new HistoryWindow { DataContext = DataContext };
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        win.Closed += (_, _) => _historyWindow = null;
+        _historyWindow = win;
         win.Show(this);
     }
 
@@ -1518,6 +1841,89 @@ public partial class MainWindow : Window
             default:
                 return null;
         }
+    }
+
+    // ===== Transform / align (PLAN §16.9) =====
+
+    private void ApplyTransform(Action<Layer> mutate)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer?.Model is not { } l) return;
+        var before = Sable.Engine.Commands.LayerXform.From(l);
+        mutate(l);
+        vm.Undo.Execute(new Sable.Engine.Commands.TransformLayerCommand(doc, l, before, Sable.Engine.Commands.LayerXform.From(l)));
+    }
+
+    private void OnFlipH(object? sender, RoutedEventArgs e) => ApplyTransform(l => l.ScaleX = -l.ScaleX);
+    private void OnFlipV(object? sender, RoutedEventArgs e) => ApplyTransform(l => l.ScaleY = -l.ScaleY);
+    private void OnRotate90CW(object? sender, RoutedEventArgs e) => ApplyTransform(l => l.Rotation += 90);
+    private void OnRotate90CCW(object? sender, RoutedEventArgs e) => ApplyTransform(l => l.Rotation -= 90);
+    private void OnRotate180(object? sender, RoutedEventArgs e) => ApplyTransform(l => l.Rotation += 180);
+    private void OnResetTransform(object? sender, RoutedEventArgs e) => ApplyTransform(l =>
+    {
+        l.OffsetX = 0; l.OffsetY = 0; l.ScaleX = 1; l.ScaleY = 1; l.Rotation = 0; l.ShearX = 0; l.ShearY = 0;
+        l.Perspective = false; l.PerspCorners = null;
+    });
+
+    private void OnAlignLeft(object? sender, RoutedEventArgs e) => AlignSelected(0);
+    private void OnAlignCenterH(object? sender, RoutedEventArgs e) => AlignSelected(1);
+    private void OnAlignRight(object? sender, RoutedEventArgs e) => AlignSelected(2);
+    private void OnAlignTop(object? sender, RoutedEventArgs e) => AlignSelected(3);
+    private void OnAlignMiddle(object? sender, RoutedEventArgs e) => AlignSelected(4);
+    private void OnAlignBottom(object? sender, RoutedEventArgs e) => AlignSelected(5);
+    private void OnDistributeH(object? sender, RoutedEventArgs e) => AlignSelected(6);
+    private void OnDistributeV(object? sender, RoutedEventArgs e) => AlignSelected(7);
+
+    // mode: 0=L 1=centreH 2=R 3=T 4=middle 5=B 6=distributeH 7=distributeV
+    private void AlignSelected(int mode)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc) return;
+        var layers = vm.SelectionModels.ToList();
+        if (layers.Count < (mode >= 6 ? 3 : 2)) return;
+        var rects = layers.Select(l =>
+        {
+            var cb = l.ContentBounds(doc.Width, doc.Height);
+            return (l, x: cb.x + l.OffsetX, y: cb.y + l.OffsetY, w: cb.w, h: cb.h);
+        }).ToList();
+        var moves = new List<(Layer, int, int, int, int)>();
+
+        if (mode < 6)
+        {
+            double gMinX = rects.Min(r => r.x), gMaxX = rects.Max(r => r.x + r.w);
+            double gMinY = rects.Min(r => r.y), gMaxY = rects.Max(r => r.y + r.h);
+            double gcx = (gMinX + gMaxX) / 2, gcy = (gMinY + gMaxY) / 2;
+            foreach (var r in rects)
+            {
+                int nx = r.l.OffsetX, ny = r.l.OffsetY;
+                switch (mode)
+                {
+                    case 0: nx += (int)Math.Round(gMinX - r.x); break;
+                    case 1: nx += (int)Math.Round(gcx - (r.x + r.w / 2.0)); break;
+                    case 2: nx += (int)Math.Round(gMaxX - (r.x + r.w)); break;
+                    case 3: ny += (int)Math.Round(gMinY - r.y); break;
+                    case 4: ny += (int)Math.Round(gcy - (r.y + r.h / 2.0)); break;
+                    case 5: ny += (int)Math.Round(gMaxY - (r.y + r.h)); break;
+                }
+                moves.Add((r.l, r.l.OffsetX, r.l.OffsetY, nx, ny));
+            }
+        }
+        else
+        {
+            bool horiz = mode == 6;
+            var sorted = rects.OrderBy(r => horiz ? r.x + r.w / 2.0 : r.y + r.h / 2.0).ToList();
+            int n = sorted.Count;
+            double firstC = horiz ? sorted[0].x + sorted[0].w / 2.0 : sorted[0].y + sorted[0].h / 2.0;
+            double lastC = horiz ? sorted[^1].x + sorted[^1].w / 2.0 : sorted[^1].y + sorted[^1].h / 2.0;
+            for (int i = 0; i < n; i++)
+            {
+                var r = sorted[i];
+                double target = firstC + (lastC - firstC) * i / (n - 1);
+                int nx = r.l.OffsetX, ny = r.l.OffsetY;
+                if (horiz) nx += (int)Math.Round(target - (r.x + r.w / 2.0));
+                else ny += (int)Math.Round(target - (r.y + r.h / 2.0));
+                moves.Add((r.l, r.l.OffsetX, r.l.OffsetY, nx, ny));
+            }
+        }
+        vm.Undo.Execute(new Sable.Engine.Commands.AlignLayersCommand(doc, moves));
     }
 
     private void OnRasterise(object? sender, RoutedEventArgs e)

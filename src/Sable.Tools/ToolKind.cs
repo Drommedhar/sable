@@ -28,6 +28,11 @@ public enum ToolKind
     ShapeStar,    // n-point star
     ShapeArrow,   // arrow (line + head)
     CloneStamp,   // copy pixels from a sampled source point
+    Heal,         // clone source texture + match destination tone (healing brush)
+    SpotHeal,     // heal using an auto-picked nearby source (no Alt-click)
+    Patch,        // drag a selection to a clean source region, tone-matched
+    Liquify,      // push/bloat/pucker/twirl displacement brush
+    MeshWarp,     // deform through a draggable control-point grid
     Dodge,        // lighten
     Burn,         // darken
     Sponge,       // desaturate

@@ -108,7 +108,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.ShaderModuleRelease(module);
 
         _dimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _paramsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _paramsBuf = NewBuffer(64, BufferUsage.Uniform | BufferUsage.CopyDst);
         _adjParamsBuf = NewBuffer(64, BufferUsage.Uniform | BufferUsage.CopyDst);
         _curveLutBuf = NewBuffer(4 * 256 * 4, BufferUsage.Storage | BufferUsage.CopyDst); // 4ch×256×f32
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
@@ -494,27 +494,42 @@ public sealed unsafe class GpuCompositor : IDisposable
         return current;
     }
 
-    // write the 48B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask, pad
-    private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill, bool hasMask)
+    // write the 64B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask,
+    // perspective row h6,h7,h8 (affine → 0,0,1), 2 pad
+    private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill, bool hasMask,
+        ReadOnlySpan<float> perspRow = default)
     {
-        var prm = stackalloc float[12];
+        var prm = stackalloc float[16];
         ((uint*)prm)[0] = mode;
         prm[1] = opacity;
         prm[2] = clip;
         for (int i = 0; i < 6; i++) prm[3 + i] = inv[i];
         prm[9] = fill;
         prm[10] = hasMask ? 1f : 0f;
-        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 48);
+        prm[11] = perspRow.Length == 3 ? perspRow[0] : 0f;   // h6
+        prm[12] = perspRow.Length == 3 ? perspRow[1] : 0f;   // h7
+        prm[13] = perspRow.Length == 3 ? perspRow[2] : 1f;   // h8
+        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 64);
     }
 
     // blend src (a pixel layer or a group's result) onto the accumulator.
     // srcW/srcH = the source buffer's own size; the transform pivots about the source's centre,
     // and OffsetX/Y places the source's top-left in document space.
+    // inverse map (doc→layer) for a layer: affine (6 floats + identity persp row) or a full
+    // homography when the layer's perspective corners are active.
+    private static (float[] inv, float[] persp) LayerInverse(Layer layer, int srcW, int srcH)
+    {
+        if (layer.Perspective && layer.PerspCorners is { Length: 8 } pc)
+            return Homography.DocToLayerQuad(srcW, srcH, pc);
+        var inv = AffineMath.DocToLayer(srcW, srcH,
+            layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation, layer.ShearX, layer.ShearY);
+        return (inv, new[] { 0f, 0f, 1f });
+    }
+
     private void BlendInto(ref Buffer* current, ref Buffer* other, Buffer* src, Layer layer, Buffer* maskBuf, int srcW, int srcH)
     {
-        var inv = AffineMath.DocToLayer(srcW, srcH,
-            layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
-        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity, maskBuf is not null);
+        var (inv, persp) = LayerInverse(layer, srcW, srcH);
+        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity, maskBuf is not null, persp);
         DispatchBlend(current, src, other, maskBuf, srcW, srcH);
         var tmp = current; current = other; other = tmp;
     }
@@ -533,10 +548,9 @@ public sealed unsafe class GpuCompositor : IDisposable
     // render a content layer into doc space (offset/transform + mask applied) → _fxLdoc, for FX source
     private void RasterizeLayerToDoc(Buffer* layerBuf, Layer layer, Buffer* maskBuf, int srcW, int srcH)
     {
-        var inv = AffineMath.DocToLayer(srcW, srcH,
-            layer.OffsetX, layer.OffsetY, layer.ScaleX, layer.ScaleY, layer.Rotation);
+        var (inv, persp) = LayerInverse(layer, srcW, srcH);
         ClearBuffer(_fxTint);   // transparent backdrop
-        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null);
+        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null, persp);
         DispatchBlend(_fxTint, layerBuf, _fxLdoc, maskBuf, srcW, srcH);
     }
 
@@ -892,7 +906,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         var maskBuf = mask is not null ? mask : src;
         var bg = stackalloc BindGroupEntry[6];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
-        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 48 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 64 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = dst, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = srcBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };

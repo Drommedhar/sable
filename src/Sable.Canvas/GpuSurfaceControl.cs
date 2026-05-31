@@ -41,6 +41,25 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     {
         _pasteR = r / 255f; _pasteG = g / 255f; _pasteB = b / 255f;
     }
+
+    // customisable canvas-overlay colours (0..1), set from settings; defaults match the built-ins.
+    private bool _overlayColorsSet;
+    private float _guideR = 0f, _guideG = 0.63f, _guideB = 0.9f;
+    private float _smartR = 1f, _smartG = 0.2f, _smartB = 0.6f;
+    private float _gridR = 0.5f, _gridG = 0.5f, _gridB = 0.5f;
+    private float _qmR = 0.95f, _qmG = 0.1f, _qmB = 0.2f;
+
+    /// <summary>Sets the customisable overlay colours (guide / smart-guide / grid / quick-mask) from settings, 0..255.</summary>
+    public void SetOverlayColors(
+        (byte R, byte G, byte B) guide, (byte R, byte G, byte B) smart,
+        (byte R, byte G, byte B) grid, (byte R, byte G, byte B) quickMask)
+    {
+        _guideR = guide.R / 255f; _guideG = guide.G / 255f; _guideB = guide.B / 255f;
+        _smartR = smart.R / 255f; _smartG = smart.G / 255f; _smartB = smart.B / 255f;
+        _gridR = grid.R / 255f; _gridG = grid.G / 255f; _gridB = grid.B / 255f;
+        _qmR = quickMask.R / 255f; _qmG = quickMask.G / 255f; _qmB = quickMask.B / 255f;
+        _overlayColorsSet = true;
+    }
     private DispatcherTimer? _timer;
     private nint _hwnd;
     private uint _width = 1, _height = 1;
@@ -510,10 +529,11 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.RotateHandleDist = RotHandleDist;
             }
             else if (ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
-                                or Sable.Tools.ToolKind.CloneStamp or Sable.Tools.ToolKind.Dodge
+                                or Sable.Tools.ToolKind.CloneStamp or Sable.Tools.ToolKind.Heal
+                                or Sable.Tools.ToolKind.SpotHeal or Sable.Tools.ToolKind.Dodge
                                 or Sable.Tools.ToolKind.Burn or Sable.Tools.ToolKind.Sponge
                                 or Sable.Tools.ToolKind.BlurBrush or Sable.Tools.ToolKind.SharpenBrush
-                                or Sable.Tools.ToolKind.Smudge)
+                                or Sable.Tools.ToolKind.Smudge or Sable.Tools.ToolKind.Liquify)
             {
                 var vp = ComputeViewport();
                 ov.BrushOn = true;
@@ -535,6 +555,14 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
         ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.PixelGrid = ShowPixelGrid;
+        if (_overlayColorsSet)
+        {
+            ov.HasOverlayColors = true;
+            ov.GuideColR = _guideR; ov.GuideColG = _guideG; ov.GuideColB = _guideB;
+            ov.SmartColR = _smartR; ov.SmartColG = _smartG; ov.SmartColB = _smartB;
+            ov.GridColR = _gridR; ov.GridColG = _gridG; ov.GridColB = _gridB;
+            ov.QuickMaskColR = _qmR; ov.QuickMaskColG = _qmG; ov.QuickMaskColB = _qmB;
+        }
         if (_doc is { } gd)
         {
             if (gd.GuidesX.Count > 0) ov.GuidesX = gd.GuidesX.ToArray();
@@ -544,6 +572,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         if (_smartY.Count > 0) ov.SmartY = _smartY.ToArray();
         if (PenActive) BuildPenOverlay(ref ov);
         else if (ActiveTool == Sable.Tools.ToolKind.Node && SelLayer is Sable.Engine.Layers.PathLayer np) BuildNodeOverlay(ref ov, np);
+        else if (MeshActive) BuildMeshOverlay(ref ov);
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

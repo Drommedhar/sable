@@ -14,6 +14,21 @@ public sealed class UndoStack
     public bool CanUndo => _cursor > 0;
     public bool CanRedo => _cursor < _history.Count;
 
+    /// <summary>Applied + redoable commands (oldest first), for the History panel.</summary>
+    public IReadOnlyList<IUndoableCommand> History => _history;
+
+    /// <summary>Number of applied commands (0 = the initial state). History index = this value.</summary>
+    public int Cursor => _cursor;
+
+    /// <summary>Undo/redo until exactly <paramref name="target"/> commands are applied (History-panel jump).</summary>
+    public void JumpTo(int target)
+    {
+        target = Math.Clamp(target, 0, _history.Count);
+        while (_cursor > target) _history[--_cursor].Undo();
+        while (_cursor < target) _history[_cursor++].Do();
+        Changed?.Invoke();
+    }
+
     public event Action? Changed;
 
     /// <summary>Execute a command and record it.</summary>

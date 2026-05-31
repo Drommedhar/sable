@@ -12,7 +12,8 @@ struct Dims { width: u32, height: u32, srcW: u32, srcH: u32 };
 struct Params {
     mode: u32, opacity: f32, clip: f32,
     m00: f32, m01: f32, m10: f32, m11: f32, b0: f32, b1: f32,
-    fillOpacity: f32, hasMask: f32, _p2: f32,
+    fillOpacity: f32, hasMask: f32,
+    h6: f32, h7: f32, h8: f32, _p3: f32, _p4: f32,   // perspective row (affine → 0,0,1)
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -155,10 +156,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let d = unpack(dst[idx]);
 
-    // inverse-affine map this doc pixel into the layer, then bilinear sample
+    // inverse (homography) map this doc pixel into the layer, then bilinear sample.
+    // affine layers pass h6=h7=0,h8=1 → w=1 (no perspective divide).
     let dx = f32(gid.x); let dy = f32(gid.y);
-    let lx = params.m00 * dx + params.m01 * dy + params.b0;
-    let ly = params.m10 * dx + params.m11 * dy + params.b1;
+    let w = params.h6 * dx + params.h7 * dy + params.h8;
+    let iw = select(1.0, 1.0 / w, abs(w) > 1e-6);
+    let lx = (params.m00 * dx + params.m01 * dy + params.b0) * iw;
+    let ly = (params.m10 * dx + params.m11 * dy + params.b1) * iw;
     let x0 = i32(floor(lx)); let y0 = i32(floor(ly));
     let fx = lx - f32(x0); let fy = ly - f32(y0);
     let s = mix(mix(srcTexel(x0, y0), srcTexel(x0 + 1, y0), fx),

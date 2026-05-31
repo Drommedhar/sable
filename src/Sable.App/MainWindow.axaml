@@ -15,8 +15,7 @@
         Title="Sable">
 
     <Window.KeyBindings>
-        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoEditCommand}" />
-        <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoEditCommand}" />
+        <!-- Ctrl+Z / Ctrl+Y come from the rebindable keymap (PLAN §17.1); Shift+Z stays a fixed redo alt -->
         <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoEditCommand}" />
     </Window.KeyBindings>
 
@@ -84,6 +83,29 @@
                 <MenuItem Header="Merge Visible" Click="OnMergeVisible" InputGesture="Ctrl+Shift+E" />
                 <MenuItem Header="Stamp Visible" Click="OnStamp" InputGesture="Ctrl+Shift+Alt+E" />
                 <MenuItem Header="Flatten Image" Click="OnFlatten" />
+                <Separator />
+                <MenuItem Header="Transform">
+                    <MenuItem Header="Flip Horizontal" Click="OnFlipH" />
+                    <MenuItem Header="Flip Vertical" Click="OnFlipV" />
+                    <Separator />
+                    <MenuItem Header="Rotate 90° CW" Click="OnRotate90CW" />
+                    <MenuItem Header="Rotate 90° CCW" Click="OnRotate90CCW" />
+                    <MenuItem Header="Rotate 180°" Click="OnRotate180" />
+                    <Separator />
+                    <MenuItem Header="Reset Transform" Click="OnResetTransform" />
+                </MenuItem>
+                <MenuItem Header="Align">
+                    <MenuItem Header="Align Left" Click="OnAlignLeft" />
+                    <MenuItem Header="Align Center" Click="OnAlignCenterH" />
+                    <MenuItem Header="Align Right" Click="OnAlignRight" />
+                    <Separator />
+                    <MenuItem Header="Align Top" Click="OnAlignTop" />
+                    <MenuItem Header="Align Middle" Click="OnAlignMiddle" />
+                    <MenuItem Header="Align Bottom" Click="OnAlignBottom" />
+                    <Separator />
+                    <MenuItem Header="Distribute Horizontally" Click="OnDistributeH" />
+                    <MenuItem Header="Distribute Vertically" Click="OnDistributeV" />
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_Type">
                 <MenuItem Header="Convert to Curves" Click="OnTextToCurves" />
@@ -135,6 +157,8 @@
             <MenuItem Header="_Window" SubmenuOpened="OnWindowMenuOpened">
                 <MenuItem x:Name="AdjustmentsMenuItem" Header="Adjustments" Click="OnToggleAdjustments" />
                 <MenuItem x:Name="EffectsMenuItem" Header="Layer Effects" Click="OnToggleEffects" />
+                <MenuItem Header="History" Click="OnToggleHistory" />
+                <MenuItem Header="Command Palette" InputGesture="Ctrl+K" Click="OnCommandPalette" />
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="Check for Updates..." Click="OnCheckUpdatesMenu" />
@@ -246,6 +270,18 @@
                     </ComboBox>
                     <CheckBox Content="All layers" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="False" IsCheckedChanged="OnEyedropperAllLayersChanged" />
+                </StackPanel>
+
+                <!-- liquify: displacement mode -->
+                <StackPanel x:Name="LiquifyOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
+                    <TextBlock Text="Mode" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <ComboBox x:Name="LiquifyModeCombo" Width="92" SelectedIndex="0" SelectionChanged="OnLiquifyModeChanged">
+                        <ComboBoxItem>Push</ComboBoxItem>
+                        <ComboBoxItem>Bloat</ComboBoxItem>
+                        <ComboBoxItem>Pucker</ComboBoxItem>
+                        <ComboBoxItem>Twirl</ComboBoxItem>
+                    </ComboBox>
                 </StackPanel>
 
                 <!-- shape tools: fill / stroke / dash / per-kind params (draw-time defaults) -->
@@ -369,6 +405,12 @@
                             <TextBlock x:Name="DocInfoLabel" Text="—" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock x:Name="CursorLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="110" />
+                            <Border x:Name="InfoSwatch" Width="13" Height="13" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1"
+                                    Background="Transparent" VerticalAlignment="Center" />
+                            <TextBlock x:Name="InfoLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="150" />
+                            <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
+                            <TextBlock x:Name="SelSizeLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="90" />
+                            <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                         </StackPanel>
@@ -410,7 +452,70 @@
                                            TextWrapping="Wrap" Width="200" />
                             </StackPanel>
                         </StackPanel>
-                        <local:ColorPicker x:Name="BrushColorView" Margin="8,8,8,6" VerticalAlignment="Top" />
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8,8,8,6" Spacing="6">
+                            <local:ColorPicker x:Name="BrushColorView" />
+                            <!-- foreground/background swatches + swap/reset + alpha -->
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Grid Width="44" Height="40">
+                                    <Border x:Name="BgSwatch" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                            Background="White" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickBg" />
+                                    <Border x:Name="FgSwatch" Width="26" Height="26" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                            Background="Black" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickFg" />
+                                </Grid>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <Button Classes="iconbtn" Click="OnSwapColors" ToolTip.Tip="Swap foreground/background (X)">
+                                        <Path Classes="icon" Width="13" Height="13" Data="M16 3l4 4-4 4 M20 7H9 M8 21l-4-4 4-4 M4 17h11" />
+                                    </Button>
+                                    <Button Classes="iconbtn" Click="OnResetColors" ToolTip.Tip="Reset to black/white (D)">
+                                        <Path Classes="icon" Width="12" Height="12" Data="M4 4h16v16H4z" />
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel VerticalAlignment="Center" Width="110">
+                                    <TextBlock Text="Alpha" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" />
+                                    <Slider x:Name="AlphaSlider" Minimum="0" Maximum="100" Value="100" ValueChanged="OnAlphaChanged" />
+                                </StackPanel>
+                            </StackPanel>
+                            <!-- numeric colour editor: mode + 4 relabeling rows -->
+                            <ComboBox x:Name="ColorModeCombo" SelectedIndex="0" SelectionChanged="OnColorModeChanged" Width="84" HorizontalAlignment="Left" FontSize="11">
+                                <ComboBoxItem>RGB</ComboBoxItem>
+                                <ComboBoxItem>HSL</ComboBoxItem>
+                                <ComboBoxItem>CMYK</ComboBoxItem>
+                                <ComboBoxItem>LAB</ComboBoxItem>
+                            </ComboBox>
+                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow0" RowDefinitions="Auto">
+                                <TextBlock x:Name="CLbl0" Grid.Column="0" Text="R" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                <Slider x:Name="CSlider0" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
+                                <TextBox x:Name="CVal0" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                            </Grid>
+                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow1">
+                                <TextBlock x:Name="CLbl1" Grid.Column="0" Text="G" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                <Slider x:Name="CSlider1" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
+                                <TextBox x:Name="CVal1" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                            </Grid>
+                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow2">
+                                <TextBlock x:Name="CLbl2" Grid.Column="0" Text="B" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                <Slider x:Name="CSlider2" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
+                                <TextBox x:Name="CVal2" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                            </Grid>
+                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow3">
+                                <TextBlock x:Name="CLbl3" Grid.Column="0" Text="K" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                <Slider x:Name="CSlider3" Grid.Column="1" Minimum="0" Maximum="100" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
+                                <TextBox x:Name="CVal3" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                            </Grid>
+                            <!-- swatches palette -->
+                            <TextBlock Text="Swatches" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="0,2,0,0" />
+                            <ItemsControl x:Name="SwatchList">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <Button Classes="iconbtn" Content="+ Add swatch" FontSize="10" HorizontalAlignment="Left" Click="OnAddSwatch" />
+                            <!-- live histogram of the composite -->
+                            <TextBlock Text="Histogram" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="0,4,0,0" />
+                            <local:HistogramView x:Name="HistView" Height="68" />
+                        </StackPanel>
+                        </ScrollViewer>
                     </DockPanel>
 
                     <GridSplitter Grid.Row="1" Height="4" Background="{DynamicResource ChromeWindowBg}"
@@ -556,6 +661,19 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:LayerViewModel">
                                     <DockPanel Height="{StaticResource LayerRowHeight}" LastChildFill="True">
+                                        <DockPanel.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuItem Header="Duplicate" Click="OnDuplicate" />
+                                                <MenuItem Header="Delete" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Merge Down" Click="OnMergeDown" />
+                                                <MenuItem Header="Rasterise" Click="OnRasterise" />
+                                                <MenuItem Header="Add / Remove Mask" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Flip Horizontal" Click="OnFlipH" />
+                                                <MenuItem Header="Flip Vertical" Click="OnFlipV" />
+                                            </MenuFlyout>
+                                        </DockPanel.ContextFlyout>
                                         <!-- colour-tag strip (Affinity) -->
                                         <Border DockPanel.Dock="Left" Width="3" Margin="0,1,3,1" CornerRadius="1"
                                                 Background="{Binding TagBrush}" IsVisible="{Binding HasTag}" />

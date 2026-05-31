@@ -21,6 +21,13 @@ public sealed class SableSettings
     // --- User Interface ---
     public AppTheme Theme { get; set; } = AppTheme.Dark;
 
+    // --- User Interface: canvas-overlay appearance (PLAN §17.1) ---
+    // Hex "#RRGGBB" overlay colours. Defaults match the built-in shader constants.
+    public string GuideColor { get; set; } = "#00A0E6";        // guide lines (cyan)
+    public string SmartGuideColor { get; set; } = "#FF3399";   // smart-guide alignment lines (magenta)
+    public string GridColor { get; set; } = "#808080";         // document/pixel grid (grey)
+    public string QuickMaskColor { get; set; } = "#F21A33";    // quick-mask rubylith (red)
+
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity
 
@@ -30,6 +37,18 @@ public sealed class SableSettings
 
     // --- Updates ---
     public bool AutoCheckUpdates { get; set; } = true;     // consumed by UpdateService (Phase 2 #4)
+
+    /// <summary>Keyboard overrides: command id → gesture string (KeyGesture.Parse grammar). Absent =
+    /// the command's <see cref="KeyCommandInfo.DefaultGesture"/>. "" = explicitly unbound.</summary>
+    public Dictionary<string, string> KeyBindings { get; set; } = new();
+
+    /// <summary>Effective gesture for a command id: override if present, else the catalog default.</summary>
+    public string GestureFor(string id)
+    {
+        if (KeyBindings.TryGetValue(id, out var g)) return g ?? "";
+        foreach (var c in KeyCommands.Catalog) if (c.Id == id) return c.DefaultGesture;
+        return "";
+    }
 
     /// <summary>Most-recently-opened/saved file paths (newest first, capped).</summary>
     public List<string> RecentFiles { get; set; } = new();
@@ -45,6 +64,28 @@ public sealed class SableSettings
     public bool WinMaximized { get; set; }
 
     public const int MaxRecent = 12;
+
+    /// <summary>Parse a "#RRGGBB" (or "RRGGBB") hex colour to bytes; returns the fallback on failure.</summary>
+    public static (byte R, byte G, byte B) ParseHex(string? hex, (byte, byte, byte) fallback)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return fallback;
+        var s = hex.Trim().TrimStart('#');
+        if (s.Length == 8) s = s.Substring(2);   // tolerate #AARRGGBB
+        if (s.Length != 6) return fallback;
+        try
+        {
+            byte r = Convert.ToByte(s.Substring(0, 2), 16);
+            byte g = Convert.ToByte(s.Substring(2, 2), 16);
+            byte b = Convert.ToByte(s.Substring(4, 2), 16);
+            return (r, g, b);
+        }
+        catch { return fallback; }
+    }
+
+    public (byte, byte, byte) GuideRgb() => ParseHex(GuideColor, (0, 160, 230));
+    public (byte, byte, byte) SmartGuideRgb() => ParseHex(SmartGuideColor, (255, 51, 153));
+    public (byte, byte, byte) GridRgb() => ParseHex(GridColor, (128, 128, 128));
+    public (byte, byte, byte) QuickMaskRgb() => ParseHex(QuickMaskColor, (242, 26, 51));
 
     /// <summary>Push a path to the front of the recent list (de-duplicated, capped).</summary>
     public void AddRecent(string path)

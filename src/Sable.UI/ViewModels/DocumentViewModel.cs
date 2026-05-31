@@ -38,6 +38,21 @@ public sealed partial class DocumentViewModel : ObservableObject
 
     private int _newLayerCounter = 1;
 
+    /// <summary>Named full-document snapshots (History panel) — each keeps a deep clone of the layer tree.</summary>
+    public List<(string Name, List<Layer> Layers)> Snapshots { get; } = new();
+
+    /// <summary>Capture the current layer tree as a named snapshot.</summary>
+    public void CaptureSnapshot(string name)
+        => Snapshots.Add((name, Model.Layers.Select(l => l.Clone()).ToList()));
+
+    /// <summary>Restore a snapshot (undoable: swaps the whole layer list).</summary>
+    public void RestoreSnapshot(int index)
+    {
+        if (index < 0 || index >= Snapshots.Count) return;
+        var copy = Snapshots[index].Layers.Select(l => l.Clone()).ToList();
+        Undo.Execute(new Sable.Engine.Commands.RestoreSnapshotCommand(Model, copy));
+    }
+
     public DocumentViewModel(Document model)
     {
         Model = model;
