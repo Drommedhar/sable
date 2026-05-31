@@ -1031,9 +1031,16 @@ public partial class MainWindow : Window
 
     private void OnColorModeChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (ColorModeCombo is null || CSlider0 is null) return;   // init-time event before rows exist
-        _colorMode = Math.Max(0, ColorModeCombo.SelectedIndex);
-        SyncColorEditor(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+        if (ColorModeCombo is null || ColorSliderRows is null || BrushColorView is null) return;   // init-time event
+        int idx = Math.Max(0, ColorModeCombo.SelectedIndex);
+        bool wheel = idx == 0;                       // 0 = Wheel; 1..4 = RGB/HSL/CMYK/LAB sliders
+        BrushColorView.IsVisible = wheel;
+        ColorSliderRows.IsVisible = !wheel;
+        if (!wheel)
+        {
+            _colorMode = idx - 1;
+            SyncColorEditor(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+        }
     }
 
     // refresh the slider rows + boxes + swatches to show colour (r,g,b) in the current mode
@@ -1132,17 +1139,25 @@ public partial class MainWindow : Window
     }
 
     private void OnSelectColorTab(object? sender, TappedEventArgs e)
-        => SetColorTab((sender as Control)?.Tag as string == "grad");
+        => SetColorTab((sender as Control)?.Tag as string ?? "color");
 
-    private void SetColorTab(bool grad)
+    private void SetColorTab(string tab)
     {
-        if (GradientPanel is null) return;   // not initialized yet
-        _gradientTab = grad;
-        GradientPanel.IsVisible = grad;
-        TabColor.Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(grad ? "#FF666666" : "#FFAAAAAA"));
-        TabGrad.Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(grad ? "#FFAAAAAA" : "#FF666666"));
-        if (grad) SyncWheelToStop();
-        else SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
+        if (ColorTabPanel is null) return;   // not initialized yet
+        _gradientTab = tab == "grad";
+        ColorTabPanel.IsVisible = tab == "color";
+        GradientPanel.IsVisible = tab == "grad";
+        SwatchesTabPanel.IsVisible = tab == "swatch";
+        HistogramTabPanel.IsVisible = tab == "hist";
+
+        static Avalonia.Media.IBrush B(bool on) => new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(on ? "#FFAAAAAA" : "#FF666666"));
+        TabColor.Foreground = B(tab == "color");
+        TabGrad.Foreground = B(tab == "grad");
+        TabSwatches.Foreground = B(tab == "swatch");
+        TabHist.Foreground = B(tab == "hist");
+
+        if (tab == "grad") SyncWheelToStop();
+        else if (tab == "color") SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
     }
 
     private void OnGradAddStop(object? sender, RoutedEventArgs e) => GradBar.AddStop();
@@ -1377,7 +1392,7 @@ public partial class MainWindow : Window
             g.Button.Background = sel ? ToolSelBrush : Avalonia.Media.Brushes.Transparent;
         }
         // keep the colour panel in sync: Gradient tool → Gradients tab, everything else → Color
-        SetColorTab(kind == Sable.Tools.ToolKind.Gradient);
+        SetColorTab(kind == Sable.Tools.ToolKind.Gradient ? "grad" : "color");
         UpdateOptionsBar(kind);
         if (ToolHint is not null) ToolHint.Text = ToolHintFor(kind);
         if (kind == Sable.Tools.ToolKind.Transform) ShowTransformWindow();

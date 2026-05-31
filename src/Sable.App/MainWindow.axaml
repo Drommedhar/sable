@@ -5,6 +5,7 @@
         xmlns:canvas="clr-namespace:Sable.Canvas;assembly=Sable.Canvas"
         xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
         xmlns:eng="clr-namespace:Sable.Engine.Layers;assembly=Sable.Engine"
+        xmlns:ac="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         xmlns:local="clr-namespace:Sable.App"
         mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="760"
         x:Class="Sable.App.MainWindow"
@@ -436,97 +437,111 @@
             <Border Grid.Column="2" Background="{DynamicResource ChromePanel}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1,0,0,0">
                 <Grid RowDefinitions="Auto,Auto,*">
 
-                    <!-- (6) Color / Gradients / Swatches -->
+                    <!-- (6) Color / Gradients / Swatches / Histogram tabs -->
                     <DockPanel Grid.Row="0">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="Color"
-                                           Tapped="OnSelectColorTab" Tag="color" />
+                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="Color" Tapped="OnSelectColorTab" Tag="color" />
                                 <TextBlock x:Name="TabGrad" Classes="panelHeader" Text="Gradients"
                                            Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="grad" />
-                                <TextBlock Classes="panelHeader" Text="Swatches" Foreground="{DynamicResource ChromeTextFaint}" />
+                                <TextBlock x:Name="TabSwatches" Classes="panelHeader" Text="Swatches"
+                                           Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="swatch" />
+                                <TextBlock x:Name="TabHist" Classes="panelHeader" Text="Histogram"
+                                           Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="hist" />
                             </StackPanel>
                         </Border>
-                        <!-- gradient editor (Gradients tab): draggable stop bar + add/remove -->
-                        <StackPanel x:Name="GradientPanel" DockPanel.Dock="Bottom" IsVisible="False"
-                                    Margin="6,2,6,6" Spacing="4">
-                            <local:GradientBar x:Name="GradBar" Height="42" />
-                            <StackPanel Orientation="Horizontal" Spacing="2">
-                                <Button Classes="iconbtn" Click="OnGradAddStop" ToolTip.Tip="Add stop">
-                                    <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
-                                </Button>
-                                <Button Classes="iconbtn" Click="OnGradDelStop" ToolTip.Tip="Delete selected stop">
-                                    <Path Classes="icon" Width="14" Height="14" Data="M5 12h14" />
-                                </Button>
-                                <TextBlock Text="click bar = add · drag = move · wheel sets stop colour"
-                                           Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" VerticalAlignment="Center"
-                                           TextWrapping="Wrap" Width="200" />
-                            </StackPanel>
-                        </StackPanel>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="8,8,8,6" Spacing="6">
-                            <local:ColorPicker x:Name="BrushColorView" />
-                            <!-- foreground/background swatches + swap/reset + alpha -->
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Grid Width="44" Height="40">
-                                    <Border x:Name="BgSwatch" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                            Background="White" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickBg" />
-                                    <Border x:Name="FgSwatch" Width="26" Height="26" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                            Background="Black" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickFg" />
-                                </Grid>
-                                <StackPanel Spacing="3" VerticalAlignment="Center">
-                                    <Button Classes="iconbtn" Click="OnSwapColors" ToolTip.Tip="Swap foreground/background (X)">
-                                        <Path Classes="icon" Width="13" Height="13" Data="M16 3l4 4-4 4 M20 7H9 M8 21l-4-4 4-4 M4 17h11" />
-                                    </Button>
-                                    <Button Classes="iconbtn" Click="OnResetColors" ToolTip.Tip="Reset to black/white (D)">
-                                        <Path Classes="icon" Width="12" Height="12" Data="M4 4h16v16H4z" />
-                                    </Button>
+
+                        <Panel>
+                            <!-- COLOR tab: picker-mode dropdown (wheel OR sliders) + fg/bg + alpha -->
+                            <ScrollViewer x:Name="ColorTabPanel" VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="8,8,8,6" Spacing="6">
+                                    <ComboBox x:Name="ColorModeCombo" SelectedIndex="0" SelectionChanged="OnColorModeChanged" Width="100" HorizontalAlignment="Left" FontSize="11">
+                                        <ComboBoxItem>Wheel</ComboBoxItem>
+                                        <ComboBoxItem>RGB</ComboBoxItem>
+                                        <ComboBoxItem>HSL</ComboBoxItem>
+                                        <ComboBoxItem>CMYK</ComboBoxItem>
+                                        <ComboBoxItem>LAB</ComboBoxItem>
+                                    </ComboBox>
+                                    <local:ColorPicker x:Name="BrushColorView" />
+                                    <StackPanel x:Name="ColorSliderRows" Spacing="6" IsVisible="False">
+                                        <Grid ColumnDefinitions="22,*,42" x:Name="CRow0" RowDefinitions="Auto">
+                                            <TextBlock x:Name="CLbl0" Grid.Column="0" Text="R" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                            <Slider x:Name="CSlider0" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <TextBox x:Name="CVal0" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="22,*,42" x:Name="CRow1">
+                                            <TextBlock x:Name="CLbl1" Grid.Column="0" Text="G" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                            <Slider x:Name="CSlider1" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <TextBox x:Name="CVal1" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="22,*,42" x:Name="CRow2">
+                                            <TextBlock x:Name="CLbl2" Grid.Column="0" Text="B" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                            <Slider x:Name="CSlider2" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <TextBox x:Name="CVal2" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="22,*,42" x:Name="CRow3">
+                                            <TextBlock x:Name="CLbl3" Grid.Column="0" Text="K" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                                            <Slider x:Name="CSlider3" Grid.Column="1" Minimum="0" Maximum="100" ValueChanged="OnColorSlider" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <TextBox x:Name="CVal3" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <!-- foreground/background swatches + swap/reset + alpha -->
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Grid Width="44" Height="40">
+                                            <Border x:Name="BgSwatch" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                    Background="White" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickBg" />
+                                            <Border x:Name="FgSwatch" Width="26" Height="26" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                    Background="Black" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickFg" />
+                                        </Grid>
+                                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                                            <Button Classes="iconbtn" Click="OnSwapColors" ToolTip.Tip="Swap foreground/background (X)">
+                                                <Path Classes="icon" Width="13" Height="13" Data="M16 3l4 4-4 4 M20 7H9 M8 21l-4-4 4-4 M4 17h11" />
+                                            </Button>
+                                            <Button Classes="iconbtn" Click="OnResetColors" ToolTip.Tip="Reset to black/white (D)">
+                                                <Path Classes="icon" Width="12" Height="12" Data="M4 4h16v16H4z" />
+                                            </Button>
+                                        </StackPanel>
+                                        <StackPanel VerticalAlignment="Center" Width="110">
+                                            <TextBlock Text="Alpha" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" />
+                                            <Slider x:Name="AlphaSlider" Minimum="0" Maximum="100" Value="100" ValueChanged="OnAlphaChanged" />
+                                        </StackPanel>
+                                    </StackPanel>
                                 </StackPanel>
-                                <StackPanel VerticalAlignment="Center" Width="110">
-                                    <TextBlock Text="Alpha" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" />
-                                    <Slider x:Name="AlphaSlider" Minimum="0" Maximum="100" Value="100" ValueChanged="OnAlphaChanged" />
+                            </ScrollViewer>
+
+                            <!-- GRADIENTS tab: draggable stop bar + add/remove -->
+                            <StackPanel x:Name="GradientPanel" IsVisible="False" Margin="8,8,8,6" Spacing="4">
+                                <local:GradientBar x:Name="GradBar" Height="42" />
+                                <StackPanel Orientation="Horizontal" Spacing="2">
+                                    <Button Classes="iconbtn" Click="OnGradAddStop" ToolTip.Tip="Add stop">
+                                        <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
+                                    </Button>
+                                    <Button Classes="iconbtn" Click="OnGradDelStop" ToolTip.Tip="Delete selected stop">
+                                        <Path Classes="icon" Width="14" Height="14" Data="M5 12h14" />
+                                    </Button>
+                                    <TextBlock Text="click bar = add · drag = move · wheel sets stop colour"
+                                               Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" VerticalAlignment="Center"
+                                               TextWrapping="Wrap" Width="200" />
                                 </StackPanel>
                             </StackPanel>
-                            <!-- numeric colour editor: mode + 4 relabeling rows -->
-                            <ComboBox x:Name="ColorModeCombo" SelectedIndex="0" SelectionChanged="OnColorModeChanged" Width="84" HorizontalAlignment="Left" FontSize="11">
-                                <ComboBoxItem>RGB</ComboBoxItem>
-                                <ComboBoxItem>HSL</ComboBoxItem>
-                                <ComboBoxItem>CMYK</ComboBoxItem>
-                                <ComboBoxItem>LAB</ComboBoxItem>
-                            </ComboBox>
-                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow0" RowDefinitions="Auto">
-                                <TextBlock x:Name="CLbl0" Grid.Column="0" Text="R" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                                <Slider x:Name="CSlider0" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
-                                <TextBox x:Name="CVal0" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
-                            </Grid>
-                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow1">
-                                <TextBlock x:Name="CLbl1" Grid.Column="0" Text="G" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                                <Slider x:Name="CSlider1" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
-                                <TextBox x:Name="CVal1" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
-                            </Grid>
-                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow2">
-                                <TextBlock x:Name="CLbl2" Grid.Column="0" Text="B" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                                <Slider x:Name="CSlider2" Grid.Column="1" Minimum="0" Maximum="255" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
-                                <TextBox x:Name="CVal2" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
-                            </Grid>
-                            <Grid ColumnDefinitions="22,*,42" x:Name="CRow3">
-                                <TextBlock x:Name="CLbl3" Grid.Column="0" Text="K" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                                <Slider x:Name="CSlider3" Grid.Column="1" Minimum="0" Maximum="100" ValueChanged="OnColorSlider" VerticalAlignment="Center" />
-                                <TextBox x:Name="CVal3" Grid.Column="2" FontSize="11" Text="0" TextChanged="OnColorValBox" />
-                            </Grid>
-                            <!-- swatches palette -->
-                            <TextBlock Text="Swatches" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="0,2,0,0" />
-                            <ItemsControl x:Name="SwatchList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                            </ItemsControl>
-                            <Button Classes="iconbtn" Content="+ Add swatch" FontSize="10" HorizontalAlignment="Left" Click="OnAddSwatch" />
-                            <!-- live histogram of the composite -->
-                            <TextBlock Text="Histogram" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="0,4,0,0" />
-                            <local:HistogramView x:Name="HistView" Height="68" />
-                        </StackPanel>
-                        </ScrollViewer>
+
+                            <!-- SWATCHES tab -->
+                            <ScrollViewer x:Name="SwatchesTabPanel" IsVisible="False" VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="8" Spacing="6">
+                                    <ItemsControl x:Name="SwatchList">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <Button Classes="iconbtn" Content="+ Add swatch" FontSize="10" HorizontalAlignment="Left" Click="OnAddSwatch" />
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <!-- HISTOGRAM tab -->
+                            <StackPanel x:Name="HistogramTabPanel" IsVisible="False" Margin="8">
+                                <local:HistogramView x:Name="HistView" Height="120" />
+                            </StackPanel>
+                        </Panel>
                     </DockPanel>
 
                     <GridSplitter Grid.Row="1" Height="4" Background="{DynamicResource ChromeWindowBg}"
@@ -541,8 +556,9 @@
                                 <TextBlock Classes="panelHeader" Text="Paths" Foreground="{DynamicResource ChromeTextFaint}" />
                             </StackPanel>
                         </Border>
-                        <!-- blend mode + opacity row (bound to selected layer) -->
-                        <Border DockPanel.Dock="Top" Padding="8,4" Background="{DynamicResource ChromePanel3}">
+                        <!-- blend mode + opacity row (bound to selected layer; hidden when nothing is selected) -->
+                        <Border DockPanel.Dock="Top" Padding="8,4" Background="{DynamicResource ChromePanel3}"
+                                IsVisible="{Binding SelectedLayer, Converter={x:Static ac:ObjectConverters.IsNotNull}}">
                             <StackPanel Spacing="4">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <ComboBox Width="130" FontSize="11"

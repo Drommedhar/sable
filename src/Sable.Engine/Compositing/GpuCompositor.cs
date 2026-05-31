@@ -1150,6 +1150,27 @@ public sealed unsafe class GpuCompositor : IDisposable
             fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)layerBytes);
         }
 
+        // Coherence: this monolithic (preview) path is about to clear px.Dirty/DirtyTiles. Mirror the
+        // edit into the atlas residency so a later non-preview frame's GetLayerTiles doesn't reuse stale
+        // resident tiles (symmetric to GetLayerTiles dropping the stale monolithic buffer). Without this
+        // the canvas flickers between new (monolithic) and old (atlas) as the brush preview toggles.
+        if (_residency is not null && (px.Dirty || px.DirtyTiles.Count > 0))
+        {
+            if (px.DirtyTiles.Count > 0)
+            {
+                foreach (var (tx, ty) in px.DirtyTiles)
+                {
+                    _residency.Invalidate(new TileResidency.Key(px, tx, ty));
+                    _emptyTiles.Remove((px, tx, ty));
+                }
+            }
+            else
+            {
+                _residency.ReleaseOwner(px);   // bulk change, no tile info → drop all resident tiles
+                RemoveEmpties(px);
+            }
+        }
+
         px.DirtyTiles.Clear();
         px.Dirty = false;
         return buf;
