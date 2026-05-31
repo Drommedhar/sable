@@ -284,6 +284,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _input = null;
         if (_selMaskView is not null) { _gpu?.Api.TextureViewRelease(_selMaskView); _selMaskView = null; }
         if (_selMaskTex is not null) { _gpu?.Api.TextureRelease(_selMaskTex); _selMaskTex = null; }
+        ReleaseSmartSelect();
         _compositor?.Dispose();
         _compositor = null;
         _blitter?.Dispose();
@@ -577,6 +578,15 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         if (PenActive) BuildPenOverlay(ref ov);
         else if (ActiveTool == Sable.Tools.ToolKind.Node && SelLayer is Sable.Engine.Layers.PathLayer np) BuildNodeOverlay(ref ov, np);
         else if (MeshActive) BuildMeshOverlay(ref ov);
+
+        // AI hover-select preview: striped object highlight under the cursor
+        if (ActiveTool == Sable.Tools.ToolKind.SmartSelect && _previewMode > 0f && _previewCov is not null)
+        {
+            UpdatePreviewTexture();
+            ov.PreviewMaskView = _previewView;
+            ov.PreviewMode = _previewMode;
+        }
+
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

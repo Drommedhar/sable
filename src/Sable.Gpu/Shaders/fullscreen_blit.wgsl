@@ -31,7 +31,8 @@ struct Viewport {
     smartR: f32, smartG: f32, smartB: f32,                 // smart-guide alignment lines
     gridR: f32, gridG: f32, gridB: f32,                    // document/pixel grid
     qmR: f32, qmG: f32, qmB: f32,                          // quick-mask (rubylith) fill
-    _pad0: f32, _pad1: f32, _pad2: f32,
+    previewMode: f32,                                      // AI hover-select: 0 off, 1 blue(replace), 2 green(add), 3 red(subtract)
+    _pad1: f32, _pad2: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -41,6 +42,7 @@ struct Viewport {
 @group(0) @binding(4) var<storage, read> guides: array<f32>;   // [countX, countY, _, _, Xs..., Ys...] doc px
 @group(0) @binding(5) var<storage, read> smart: array<f32>;    // smart-guide alignment lines (same layout)
 @group(0) @binding(6) var<storage, read> pen: array<f32>;      // [nodeN, activeIdx, flatN, _, (ax,ay,inx,iny,outx,outy)×nodeN, (x,y)×flatN] surface px
+@group(0) @binding(7) var previewTex: texture_2d<f32>;         // AI hover-select object preview coverage (R8, doc UV)
 
 @vertex
 fn vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
@@ -176,6 +178,21 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         if (c && (!cl || !cr || !ct || !cb)) {
             let on = ((i32(floor((frag.x + frag.y) / 6.0))) & 1) == 0;
             outc = select(vec3<f32>(0.0), vec3<f32>(1.0), on);
+        }
+    }
+
+    // AI hover-select object preview: diagonal stripes over the hovered object,
+    // blue = replace/first, green = add, red = subtract (PHASE8_AI §8.3b).
+    if (vp.previewMode > 0.5 && u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
+        let cov = textureSample(previewTex, samp, vec2<f32>(u, v)).r;
+        if (cov > 0.5) {
+            let on = ((i32(floor((frag.x + frag.y) / 9.0))) & 1) == 0;
+            if (on) {
+                var col = vec3<f32>(0.12, 0.5, 1.0);                         // blue (replace)
+                if (vp.previewMode > 2.5) { col = vec3<f32>(1.0, 0.25, 0.3); }      // red (subtract)
+                else if (vp.previewMode > 1.5) { col = vec3<f32>(0.2, 0.9, 0.3); }  // green (add)
+                outc = mix(outc, col, 0.6);
+            }
         }
     }
 

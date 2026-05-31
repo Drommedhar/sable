@@ -76,6 +76,11 @@ public struct BlitOverlay
     public float[]? PenFlat;    // flattened spine polyline, length = 2 × pointCount (surface px)
     public int PenActive;
 
+    // AI hover-select object preview (PHASE8_AI §8.3b): a doc-sized R8 coverage of the hovered object,
+    // drawn as diagonal stripes. PreviewMode: 0 off, 1 blue (replace), 2 green (add), 3 red (subtract).
+    public unsafe TextureView* PreviewMaskView;
+    public float PreviewMode;
+
     // customisable overlay colours (0..1). When HasOverlayColors is false the blitter
     // uses built-in defaults (cyan guides / magenta smart-guides / grey grid / red quick-mask).
     public bool HasOverlayColors;

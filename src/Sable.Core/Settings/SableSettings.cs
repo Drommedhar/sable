@@ -28,6 +28,11 @@ public sealed class SableSettings
     public string GridColor { get; set; } = "#808080";         // document/pixel grid (grey)
     public string QuickMaskColor { get; set; } = "#F21A33";    // quick-mask rubylith (red)
 
+    // --- Machine Learning (PLAN §6 / Phase 8) ---
+    /// <summary>On-device AI opt-in. Off by default; the AI menu is hidden until enabled, and enabling
+    /// prompts to download the model set. No AI runs (and no models download) unless the user turns this on.</summary>
+    public bool AiEnabled { get; set; }
+
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity
 

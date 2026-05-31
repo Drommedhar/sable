@@ -155,6 +155,7 @@ public partial class MainWindow : Window
         if (_settings.WinMaximized) WindowState = WindowState.Maximized;
         ApplyTheme(_settings.Theme);
         ApplyOverlayColors();
+        ApplyAiVisibility();
         RebuildRecentMenu();
     }
 
@@ -278,18 +279,195 @@ public partial class MainWindow : Window
 
     private async void OnPreferences(object? sender, RoutedEventArgs e)
     {
-        var dlg = new SettingsWindow(_settings, GpuName);
-        if (await dlg.ShowDialog<bool>(this))
+        var dlg = new SettingsWindow(_settings, GpuName, Ai.Registry);
+        bool ok = await dlg.ShowDialog<bool>(this);
+        if (ok)
         {
             ApplyTheme(_settings.Theme);
             ApplyOverlayColors();
             RebuildKeyGestures();   // pick up any rebound hotkeys
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
-            Sable.Core.Settings.SettingsService.Save(_settings);
         }
+        // AI enable + model installs happen LIVE inside the ML panel, so always re-apply + persist.
+        ApplyAiVisibility();
+        Sable.Core.Settings.SettingsService.Save(_settings);
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
+
+    // --- AI (Phase 8 §8.0): menu present, pre-flight readiness explains why an op is unavailable.
+    // The actual ops (segment/matte/upscale/inpaint) + their ONNX backend land in slices 8.1+.
+    private Sable.Ai.AiService? _aiService;
+    private Sable.Ai.AiService Ai => _aiService ??= CreateAi();
+
+    private Sable.Ai.AiService CreateAi()
+    {
+        var folder = System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Sable", "models");
+        var reg = new Sable.Ai.Models.ModelRegistry(folder);
+        try { reg.Load(); } catch { /* no models yet */ }
+        var svc = new Sable.Ai.AiService(reg);
+        try { svc.AddBackend(new Sable.Ai.Backends.OnnxBackend()); } catch { /* ORT/DML unavailable → readiness reports NoGpu */ }
+        return svc;
+    }
+
+    private async void RunAiTask(Sable.Core.Ai.AiTaskKind task, string title)
+    {
+        var r = Ai.CheckReadiness(task);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+        // model + GPU ready but no backend wired yet in 8.0
+        await ConfirmWindow.Ask(this, title, $"{title}: model ready — inference lands in the next slice.");
+    }
+
+    /// <summary>Show the AI menu only when enabled, and each feature only when its model is installed
+    /// (so the user never sees an action they can't actually run).</summary>
+    private void ApplyAiVisibility()
+    {
+        AiMenu.IsVisible = _settings.AiEnabled;
+        if (!_settings.AiEnabled) return;
+        bool Has(Sable.Core.Ai.AiTaskKind t) => Ai.Registry.DefaultFor(t) is not null;
+        AiRemoveBgItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Matte);
+        AiSelectItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Segment);
+        AiSmartSelectItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Segment);
+        AiUpscaleItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Upscale);
+        AiRemoveObjItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Inpaint);
+        AiGenFillItem.IsVisible = false;     // generative tier — opt-in sidecar (later)
+        AiGenSep.IsVisible = false;
+    }
+
+    private async void OnAiRemoveBackground(object? sender, RoutedEventArgs e)
+    {
+        const string title = "Remove Background";
+        if (Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+
+        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Matte);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Removing background…", cts);
+        System.Exception? error = null;
+        try
+        {
+            var cmd = await Ai.RemoveBackgroundAsync(px, cts.Token);
+            Doc!.Undo.Execute(cmd);
+            Doc.SelectedLayer?.RefreshThumbnail();
+        }
+        catch (System.OperationCanceledException) { /* user cancelled */ }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+    }
+    private async void OnAiSelectSubject(object? sender, RoutedEventArgs e)
+    {
+        const string title = "Select Subject";
+        if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+
+        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Selecting subject…", cts);
+        System.Exception? error = null;
+        try
+        {
+            var mask = await Ai.SelectSubjectAsync(px, prompts: null, cts.Token);   // one-click = centre point
+            doc.SetMaskSelection(mask.Coverage);
+        }
+        catch (System.OperationCanceledException) { /* user cancelled */ }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+    }
+    // AI menu entry just activates the tool; OnToolChanged runs the precompute.
+    private void OnAiSmartSelect(object? sender, RoutedEventArgs e) => Canvas.ActiveTool = Sable.Tools.ToolKind.SmartSelect;
+
+    /// <summary>Precompute the active layer's objects (SAM2 AMG, 32×32) for hover-to-select.</summary>
+    private async System.Threading.Tasks.Task StartSmartSelect()
+    {
+        const string title = "Smart Select";
+        if (Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+
+        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Analysing objects…", cts);
+        System.Collections.Generic.IReadOnlyList<Sable.Core.Ai.ObjectMask>? objs = null;
+        System.Exception? error = null;
+        try { objs = await Ai.SegmentEverythingAsync(px, 32, busy.Progress, cts.Token); }   // 32×32 grid (thorough)
+        catch (System.OperationCanceledException) { busy.Done(); return; }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+
+        Canvas.SetSmartObjects(objs);
+        _smartLayer = px;
+        if (objs is { Count: 0 }) await ConfirmWindow.Ask(this, title, "No objects found in this layer.");
+    }
+
+    private async void OnAiUpscale(object? sender, RoutedEventArgs e)
+    {
+        const string title = "Upscale";
+        if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+
+        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Upscale);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Upscaling…", cts);
+        System.Exception? error = null;
+        try
+        {
+            var cmd = await Ai.UpscaleAsync(doc, px, busy.Progress, cts.Token);
+            Doc!.Undo.Execute(cmd);
+        }
+        catch (System.OperationCanceledException) { /* user cancelled */ }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+    }
+    private async void OnAiRemoveObject(object? sender, RoutedEventArgs e)
+    {
+        const string title = "Remove Object";
+        if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        if (doc.SelectionMask is not { } selMask)
+        { await ConfirmWindow.Ask(this, title, "Select the object to remove first (e.g. Smart Select), then run this."); return; }
+        if (px.Width != doc.Width || px.Height != doc.Height)
+        { await ConfirmWindow.Ask(this, title, "Object removal currently works on a full-canvas layer."); return; }
+
+        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Inpaint);
+        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
+
+        var mask = new Sable.Core.Ai.AiMask(selMask, doc.Width, doc.Height);
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Removing object…", cts);
+        byte[]? result = null; System.Exception? error = null;
+        try { result = await Ai.RemoveObjectAsync(px, mask, cts.Token); }
+        catch (System.OperationCanceledException) { busy.Done(); return; }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+
+        var before = Sable.Tools.RasterState.Capture(px);
+        px.SetBuffer(px.Width, px.Height, result!);
+        px.Dirty = true;
+        var cmd = new Sable.Tools.RasterStateCommand(px, before, Sable.Tools.RasterState.Capture(px), () => px.Dirty = true);
+        Doc!.Undo.Execute(cmd);
+        Doc.SelectedLayer?.RefreshThumbnail();
+        doc.ClearSelection();
+    }
+    private void OnAiGenerativeFill(object? sender, RoutedEventArgs e) => RunAiTask(Sable.Core.Ai.AiTaskKind.Inpaint, "Generative Fill");
+
+    private async void OnAiModels(object? sender, RoutedEventArgs e)
+    {
+        await new ModelsWindow(Ai.Registry) { WindowStartupLocation = WindowStartupLocation.CenterOwner }.ShowDialog(this);
+        ApplyAiVisibility();   // installs/removals in the manager change which features are available
+    }
 
     // --- custom title bar (menu-in-header, client-side decorations) ---
     private void OnMinimizeWindow(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
@@ -1004,6 +1182,8 @@ public partial class MainWindow : Window
         const string ellip  = "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z";
         const string lasso  = "M7 22a5 5 0 0 1-2-4 M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1 M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z";
         const string wand   = "M15 4V2 M15 16v-2 M8 9h2 M20 9h2 M17.8 11.8 19 13 M17.8 6.2 19 5 M3 21l9-9 M12.2 6.2 11 5";
+        const string colRng = "M9 3a6 6 0 1 0 0 12A6 6 0 1 0 9 3z M15 9a6 6 0 1 0 0 12 6 6 0 1 0 0-12z";
+        const string smartS = "M13 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z M5 3v4 M3 5h4 M6 17v3 M4.5 18.5h3";
         const string brush  = "M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08 M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z";
         const string eraser = "M7 21l-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21 M22 21H7 M5 11l9 9";
         const string pencil = "M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z";
@@ -1045,7 +1225,8 @@ public partial class MainWindow : Window
             ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso),
                           new ToolDef(lasso, "Polygonal Lasso", Sable.Tools.ToolKind.PolyLasso) }),
             ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand),
-                          new ToolDef(wand, "Colour Range", Sable.Tools.ToolKind.ColorRange) }),
+                          new ToolDef(colRng, "Colour Range", Sable.Tools.ToolKind.ColorRange),
+                          new ToolDef(smartS, "Smart Select (AI)", Sable.Tools.ToolKind.SmartSelect) }),
             ("B", new[] { new ToolDef(brush, "Brush", Sable.Tools.ToolKind.Brush),
                           new ToolDef(pencil, "Pencil", Sable.Tools.ToolKind.Pencil),
                           new ToolDef(eraser, "Eraser", Sable.Tools.ToolKind.Eraser) }),
@@ -1173,8 +1354,16 @@ public partial class MainWindow : Window
         SelectMember(g, active ? (g.Current + 1) % g.Tools.Length : g.Current);
     }
 
+    private object? _smartLayer;   // the layer SAM2 objects were precomputed for
+
     private void OnToolChanged(Sable.Tools.ToolKind kind)
     {
+        // entering Smart Select → precompute the active layer's objects (once per layer)
+        if (kind == Sable.Tools.ToolKind.SmartSelect)
+        {
+            var layer = Doc?.SelectedLayer?.Model;
+            if (!Canvas.HasSmartObjects || !ReferenceEquals(layer, _smartLayer)) _ = StartSmartSelect();
+        }
         foreach (var g in _groups)
         {
             int idx = Array.FindIndex(g.Tools, t => t.Kind == kind);

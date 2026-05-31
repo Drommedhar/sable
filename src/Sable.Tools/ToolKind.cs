@@ -14,6 +14,7 @@ public enum ToolKind
     PolyLasso,    // polygonal selection (click vertices, double-click/Enter to close)
     MagicWand,    // contiguous-color selection
     ColorRange,   // global colour-similarity selection (non-contiguous)
+    SmartSelect,  // AI hover-to-select (SAM2 automatic mask generation) — PHASE8_AI §8.3b
     Brush,
     Pencil,       // hard-edged aliased brush
     Eraser,

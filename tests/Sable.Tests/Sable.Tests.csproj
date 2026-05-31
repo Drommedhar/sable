@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\Sable.Format\Sable.Format.csproj" />
     <ProjectReference Include="..\..\src\Sable.Imaging\Sable.Imaging.csproj" />
     <ProjectReference Include="..\..\src\Sable.Gpu\Sable.Gpu.csproj" />
+    <ProjectReference Include="..\..\src\Sable.Ai\Sable.Ai.csproj" />
   </ItemGroup>
 
 </Project>

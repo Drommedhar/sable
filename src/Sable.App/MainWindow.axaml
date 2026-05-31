@@ -154,6 +154,17 @@
                 <MenuItem x:Name="SnapMenuItem" Header="Snap to Guides/Grid" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
                 <MenuItem Header="Clear Guides" Click="OnClearGuides" />
             </MenuItem>
+            <MenuItem Header="_AI" x:Name="AiMenu" IsVisible="False">
+                <MenuItem x:Name="AiRemoveBgItem" Header="Remove Background" Click="OnAiRemoveBackground" />
+                <MenuItem x:Name="AiSelectItem" Header="Select Subject" Click="OnAiSelectSubject" />
+                <MenuItem x:Name="AiSmartSelectItem" Header="Smart Select (hover)" Click="OnAiSmartSelect" />
+                <MenuItem x:Name="AiUpscaleItem" Header="Upscale..." Click="OnAiUpscale" />
+                <MenuItem x:Name="AiRemoveObjItem" Header="Remove Object" Click="OnAiRemoveObject" />
+                <Separator x:Name="AiGenSep" />
+                <MenuItem x:Name="AiGenFillItem" Header="Generative Fill..." Click="OnAiGenerativeFill" />
+                <Separator />
+                <MenuItem Header="Models..." Click="OnAiModels" />
+            </MenuItem>
             <MenuItem Header="_Window" SubmenuOpened="OnWindowMenuOpened">
                 <MenuItem x:Name="AdjustmentsMenuItem" Header="Adjustments" Click="OnToggleAdjustments" />
                 <MenuItem x:Name="EffectsMenuItem" Header="Layer Effects" Click="OnToggleEffects" />

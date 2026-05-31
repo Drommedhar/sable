@@ -45,7 +45,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         };
         _sampler = api.DeviceCreateSampler(gpu.Device, in samplerDesc);
 
-        var bglEntries = stackalloc BindGroupLayoutEntry[7];
+        var bglEntries = stackalloc BindGroupLayoutEntry[8];
         bglEntries[0] = new BindGroupLayoutEntry
         {
             Binding = 0, Visibility = ShaderStage.Fragment,
@@ -89,7 +89,16 @@ public sealed unsafe class SurfaceBlitter : IDisposable
             Binding = 6, Visibility = ShaderStage.Fragment,
             Buffer = new BufferBindingLayout { Type = BufferBindingType.ReadOnlyStorage }
         };
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 7, Entries = bglEntries };
+        bglEntries[7] = new BindGroupLayoutEntry   // AI hover-select object preview coverage (R8)
+        {
+            Binding = 7, Visibility = ShaderStage.Fragment,
+            Texture = new TextureBindingLayout
+            {
+                SampleType = TextureSampleType.Float,
+                ViewDimension = TextureViewDimension.Dimension2D
+            }
+        };
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 8, Entries = bglEntries };
         _bgl = api.DeviceCreateBindGroupLayout(gpu.Device, in bglDesc);
 
         // 1×1 R8 placeholder bound when no mask selection is active (binding must be satisfied)
@@ -188,6 +197,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
             u[63] = 0.5f; u[64] = 0.5f; u[65] = 0.5f;    // grid grey
             u[66] = 0.95f; u[67] = 0.1f; u[68] = 0.2f;   // quick-mask red
         }
+        u[69] = ov.PreviewMode;   // AI hover-select stripe colour: 0 off, 1 blue, 2 green, 3 red
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, (uint)(VpFloats * 4));
 
         // pack guide positions: [countX, countY, _, _, Xs..., Ys...] (doc px)
@@ -227,7 +237,8 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         api.QueueWriteBuffer(_gpu.Queue, _penBuf, 0, pbuf, PenFloats * 4);
 
         var maskView = maskOn ? ov.MaskView : _dummyMaskView;
-        var bgEntries = stackalloc BindGroupEntry[7];
+        var previewView = ov.PreviewMaskView is not null ? ov.PreviewMaskView : _dummyMaskView;
+        var bgEntries = stackalloc BindGroupEntry[8];
         bgEntries[0] = new BindGroupEntry { Binding = 0, TextureView = source };
         bgEntries[1] = new BindGroupEntry { Binding = 1, Sampler = _sampler };
         bgEntries[2] = new BindGroupEntry { Binding = 2, Buffer = _vpBuf, Size = (uint)(VpFloats * 4) };
@@ -235,7 +246,8 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         bgEntries[4] = new BindGroupEntry { Binding = 4, Buffer = _guidesBuf, Size = GuidesFloats * 4 };
         bgEntries[5] = new BindGroupEntry { Binding = 5, Buffer = _smartBuf, Size = GuidesFloats * 4 };
         bgEntries[6] = new BindGroupEntry { Binding = 6, Buffer = _penBuf, Size = PenFloats * 4 };
-        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 7, Entries = bgEntries };
+        bgEntries[7] = new BindGroupEntry { Binding = 7, TextureView = previewView };
+        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 8, Entries = bgEntries };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var color = new RenderPassColorAttachment

@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.BusyWindow"
+        Background="Transparent"
+        CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="Manual"
+        SystemDecorations="None" Title="Working">
+    <!-- full-window scrim (dims + visually locks the main window); centred card on top -->
+    <Panel Background="#99000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="340"
+                Background="{DynamicResource ChromePanel}" BorderBrush="{DynamicResource ChromeBorder2}"
+                BorderThickness="1" CornerRadius="8" Padding="24,20">
+            <StackPanel Spacing="14">
+                <TextBlock x:Name="MessageText" Foreground="{DynamicResource ChromeText}" FontSize="14"
+                           HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                <ProgressBar x:Name="Bar" IsIndeterminate="True" Minimum="0" Maximum="1" Height="6" />
+                <Button x:Name="CancelBtn" Content="Cancel" Classes="opt" Padding="20,0"
+                        HorizontalAlignment="Center" Click="OnCancel" />
+            </StackPanel>
+        </Border>
+    </Panel>
+</Window>

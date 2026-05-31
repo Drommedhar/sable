@@ -26,6 +26,25 @@ public sealed class AddLayerCommand : IUndoableCommand
     public void Undo() { _parent.Remove(_layer); _doc.MarkStructureChanged(); }
 }
 
+/// <summary>Replace a layer's whole mask (e.g. AI background removal). Undo restores the prior mask.</summary>
+public sealed class SetMaskCommand : IUndoableCommand
+{
+    private readonly Layer _layer;
+    private readonly byte[]? _before;
+    private readonly byte[]? _after;
+
+    public SetMaskCommand(Layer layer, byte[]? after)
+    {
+        _layer = layer;
+        _before = layer.Mask;
+        _after = after;
+    }
+
+    public string Name => "Set Mask";
+    public void Do() { _layer.Mask = _after; _layer.MaskDirty = true; _layer.Dirty = true; }
+    public void Undo() { _layer.Mask = _before; _layer.MaskDirty = true; _layer.Dirty = true; }
+}
+
 /// <summary>
 /// Replace a set of layers in one parent list with a single new layer (merge-down /
 /// flatten / merge-visible / rasterise). Undo restores the removed layers at their

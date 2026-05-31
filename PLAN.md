@@ -728,11 +728,13 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 - ✅ **Rebindable hotkeys (keymap settings page)** — command actions (`KeyCommands` catalog + `SableSettings.KeyBindings`); steal+warn. ⬜ tool letters + presets.
 - ✅ **Customisable canvas-overlay appearance** — guide/smart/grid/quick-mask colours (blit uniform 60→72 floats). ⬜ widths/dash/opacity/spacing/ruler-unit.
 - ✅ **Composite-cache** (cache backdrop below active layer) — brush strokes re-blend only active→top (`GpuCompositor.CompositeRoot`/`_backdropCache`; GPU smoke fast==full). ⬜ follow-up: region/dirty-tile recompositing + viewport-tile culling.
-- ⬜ **HiDPI / per-monitor DPI**.
-- ⬜ **Dock.Avalonia docking** + saved workspaces + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
+- ⏭️ **HiDPI / per-monitor DPI** — DEFERRED (user call: small real-world gain; canvas stays 1:1 for now).
+- ⏸️ **Dock.Avalonia docking** — PARKED (user call; revisit as a focused live-verification session). Spike findings for next time: deps = `Dock.Avalonia` + `Dock.Model.Avalonia` (controls/XAML layout, keeps panel `x:Name`s in MainWindow namescope — avoids extracting handlers) + theme is a SEPARATE pkg `Dock.Avalonia.Themes.Fluent` whose entry is the **`DockFluentTheme` Styles class** (`xmlns clr-namespace:Dock.Avalonia.Themes.Fluent;assembly=...` → `<DockFluentTheme/>` in `Application.Styles`; the old `avares://Dock.Avalonia/Themes/*.axaml` StyleInclude path is gone). `DockControl InitializeLayout="True" InitializeFactory="True"` self-wires a factory. **Blocker that parked it:** floating a `Tool` re-parents it into a separate HostWindow → Window-relative `DocumentViewModel` bindings on the Colour/Layers panels break SILENTLY (empty list / dead editor, no crash) → needs per-Tool DataContext re-pointed on each tab switch, and is only live-verifiable (headless launch can't catch silent binding failures). Keep canvas fixed-centre (native HWND airspace) regardless.
+- ⬜ **Saved workspaces / macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels** (§16.13, §16.14).
 
-### Phase 8 — AI (was M3)
+### Phase 8 — AI (was M3)  ·  **detailed plan: [PHASE8_AI.md](PHASE8_AI.md)**
 - ONNX light tier in-process: SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal. Then Diffusers **sidecar** (uv venv, IPC) for generative fill/expand + **model manager + VRAM gating** (§6, §16.15).
+- Sub-phases 8.0 infra/seams → 8.1 bg-removal → 8.2 upscale+tiling → 8.3 SAM2 → 8.4 LaMa → **8.5 model-mgr UI = light tier ships (no Python)** → 8.6 sidecar provision+IPC → 8.7 gen-fill → 8.8 outpaint+txt2img → 8.9 contention/polish. See [PHASE8_AI.md](PHASE8_AI.md) for seams, EP matrix, VRAM gating, verification strategy.
 
 ### Phase 9 — Cross-platform
 - Real **Linux** (Xlib/Wayland) + **macOS** (CAMetalLayer) backends (surface + input) — seam ready (`IPlatformBackend`/`IInputSource`). Per-OS packaging.

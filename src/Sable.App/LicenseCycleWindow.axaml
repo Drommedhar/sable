@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Sable.App.LicenseCycleWindow"
+        Width="660" Height="600"
+        Background="{DynamicResource ChromePanel}"
+        WindowStartupLocation="CenterOwner"
+        Title="AI model licences">
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" x:Name="HeaderText" FontSize="16" Foreground="{DynamicResource ChromeText}" />
+        <TextBlock DockPanel.Dock="Top" x:Name="HintText" Classes="settingHint" Margin="0,2,0,8"
+                   Text="Scroll to the bottom of the licence to accept it." TextWrapping="Wrap" />
+
+        <Border DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ProgressBar x:Name="InstallBar" Width="180" Height="6" Minimum="0" Maximum="1" IsVisible="False" />
+                    <TextBlock x:Name="StatusText" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button x:Name="DeclineBtn" Content="Decline" Classes="opt" Padding="16,0" Click="OnDecline" />
+                    <Button x:Name="AcceptBtn" Content="Accept" Classes="opt" Padding="20,0" IsEnabled="False" Click="OnAccept" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Background="{DynamicResource ChromePanel2}" CornerRadius="4" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1">
+            <ScrollViewer x:Name="LicScroll" Padding="10" ScrollChanged="OnScroll">
+                <SelectableTextBlock x:Name="LicText" TextWrapping="Wrap" FontSize="11"
+                                     Foreground="{DynamicResource ChromeText}" Text="Loading licence…" />
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>

@@ -231,6 +231,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _lastMouseX = sx; _lastMouseY = sy;
         if (CursorDocMoved is not null) { var (cdx, cdy) = MapToDoc(sx, sy); CursorDocMoved(cdx, cdy); }
 
+        // AI hover-select: highlight the object under the cursor (no drag/paint for this tool).
+        // Don't intercept while middle-drag panning so the canvas can still move.
+        if (ActiveTool == Sable.Tools.ToolKind.SmartSelect && HasSmartObjects && _guideAxis == 0 && !_panningMouse)
+        {
+            var (mdx, mdy) = MapToDoc(sx, sy);
+            UpdateSmartHover(mdx, mdy, mods);
+            return;
+        }
+
         if (_guideAxis != 0 && _doc is { } gd)
         {
             var (gdx, gdy) = MapToDoc(sx, sy);
@@ -588,6 +597,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
         // grab a guide line first (works under any tool)
         if (TryGrabGuide(dx, dy)) { _input?.Capture(); return; }
+
+        // AI hover-select: click commits the hovered object to the selection
+        if (ActiveTool == ToolKind.SmartSelect)
+        {
+            if (HasSmartObjects) SmartSelectClick(dx, dy, mods);
+            return;
+        }
+
         bool brushy = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
             or ToolKind.CloneStamp or ToolKind.Heal or ToolKind.SpotHeal or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
             or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;

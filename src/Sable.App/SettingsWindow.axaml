@@ -88,11 +88,13 @@
                     </local:SettingRow>
                 </StackPanel>
 
-                <!-- Machine Learning (placeholder for Phase 8 AI) -->
-                <StackPanel x:Name="PanelAI" Spacing="6" IsVisible="False">
+                <!-- Machine Learning (Phase 8 AI) -->
+                <StackPanel x:Name="PanelAI" Spacing="2" IsVisible="False">
                     <TextBlock Text="Machine Learning" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
-                    <TextBlock Classes="settingHint"
-                               Text="On-device AI models (SAM2 smart-select, background removal, upscale, repair) and the generative Diffusers sidecar are planned (PLAN §6 / Phase 8). The model manager + VRAM gating will live here. Nothing to install yet." />
+                    <local:SettingRow Label="Enable on-device AI"><ToggleSwitch x:Name="AiEnabledSwitch" IsCheckedChanged="OnAiEnabledChanged" /></local:SettingRow>
+                    <TextBlock Classes="settingHint" Margin="0,2,0,0"
+                               Text="GPU-only, no CPU fallback. The features below each need a model (downloaded from the source). View and accept each licence to install it; declined models stay listed here to install later." />
+                    <StackPanel x:Name="AiModelRows" Spacing="8" Margin="0,10,0,0" IsVisible="False" />
                 </StackPanel>
 
                 <!-- Updates -->

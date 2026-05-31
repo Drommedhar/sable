@@ -1,10 +1,19 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Sable.Ai.Download;
+using Sable.Ai.Models;
+using Sable.Core.Ai;
 using Sable.Core.Settings;
 
 namespace Sable.App;
@@ -17,18 +26,22 @@ namespace Sable.App;
 public partial class SettingsWindow : Window
 {
     private readonly SableSettings _s;
+    private readonly ModelRegistry? _registry;
+    private readonly ModelDownloader? _downloader;
     private StackPanel[] _panels = System.Array.Empty<StackPanel>();
 
     // keyboard page working state: command id → current gesture, plus the per-row display boxes
     private readonly Dictionary<string, string> _workKeys = new();
     private readonly Dictionary<string, TextBox> _keyBoxes = new();
 
-    public SettingsWindow() : this(new SableSettings(), "—") { }
+    public SettingsWindow() : this(new SableSettings(), "—", null) { }
 
-    public SettingsWindow(SableSettings settings, string gpuName)
+    public SettingsWindow(SableSettings settings, string gpuName, ModelRegistry? registry)
     {
         InitializeComponent();
         _s = settings;
+        _registry = registry;
+        _downloader = registry is not null ? new ModelDownloader(registry) : null;
         _panels = new[] { PanelGeneral, PanelUI, PanelPerf, PanelColor, PanelAI, PanelUpdates, PanelKeys, PanelAbout };
 
         // General
@@ -45,6 +58,8 @@ public partial class SettingsWindow : Window
         UndoSlider.Value = _s.UndoLimit;
         UndoLabel.Text = _s.UndoLimit.ToString();
         RendererLabel.Text = gpuName;
+        // Machine Learning
+        AiEnabledSwitch.IsChecked = _s.AiEnabled;
         // Updates
         AutoUpdateSwitch.IsChecked = _s.AutoCheckUpdates;
         // Keyboard
@@ -52,6 +67,8 @@ public partial class SettingsWindow : Window
         // About
         var ver = typeof(SettingsWindow).Assembly.GetName().Version;
         VersionLabel.Text = $"Version {ver?.ToString(3) ?? "0.1.0"}  ·  net10.0  ·  Avalonia + wgpu";
+
+        _aiInitializing = false;   // from here, toggling AI on triggers the licence cycle
     }
 
     private void OnCategory(object? sender, SelectionChangedEventArgs e)
@@ -116,6 +133,90 @@ public partial class SettingsWindow : Window
         if (UndoLabel is not null) UndoLabel.Text = ((int)UndoSlider.Value).ToString();
     }
 
+    // ===== Machine Learning: enable → auto licence-cycle + install (PHASE8_AI) =====
+
+    private bool _aiInitializing = true;   // suppress the auto-cycle when restoring the saved toggle state
+    private readonly Dictionary<string, Button> _aiInstallBtns = new();
+
+    private void OnAiEnabledChanged(object? sender, RoutedEventArgs e)
+    {
+        if (AiModelRows is null) return;   // fires during InitializeComponent before fields are wired
+        bool on = AiEnabledSwitch.IsChecked == true;
+        _s.AiEnabled = on;                 // live: persists even if the dialog is cancelled (install is a live action)
+        AiModelRows.IsVisible = on;
+        if (!on)
+        {
+            // disabling AI auto-deletes all downloaded models (user requirement)
+            if (!_aiInitializing) _registry?.RemoveAll();
+            AiModelRows.Children.Clear();
+            _aiInstallBtns.Clear();
+            return;
+        }
+        if (AiModelRows.Children.Count == 0) BuildAiRows(); else RefreshAiRows();
+        // user just turned it ON → auto-cycle each licence + install the accepted (not on ctor restore)
+        if (!_aiInitializing) _ = RunCycle(NotInstalled());
+    }
+
+    private IReadOnlyList<RecommendedModel> NotInstalled()
+        => RecommendedModels.DefaultSet.Where(m => _registry?.IsInstalled(m.Id) != true).ToList();
+
+    /// <summary>Open the sequential licence-cycle dialog (scroll-to-accept) which installs the accepted models.</summary>
+    private async Task RunCycle(IReadOnlyList<RecommendedModel> models)
+    {
+        if (_downloader is null || models.Count == 0) { RefreshAiRows(); return; }
+        var win = new LicenseCycleWindow(models, _downloader) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        await win.ShowDialog<List<RecommendedModel>?>(this);
+        RefreshAiRows();
+    }
+
+    private void BuildAiRows()
+    {
+        AiModelRows.Children.Clear();
+        _aiInstallBtns.Clear();
+        foreach (var m in RecommendedModels.DefaultSet)
+        {
+            var install = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(14, 0), Tag = m.Id, VerticalAlignment = VerticalAlignment.Center };
+            install.Click += OnInstallModel;
+            _aiInstallBtns[m.Id] = install;
+            DockPanel.SetDock(install, Dock.Right);
+
+            var left = new StackPanel { Spacing = 1 };
+            left.Children.Add(AiText(m.Name, "ChromeText", 13));
+            left.Children.Add(AiText($"Licence: {m.License}", "ChromeTextDim", 11, wrap: true));
+
+            var top = new DockPanel();
+            top.Children.Add(install);
+            top.Children.Add(left);
+            var border = new Border { CornerRadius = new Avalonia.CornerRadius(4), Padding = new Avalonia.Thickness(10, 8), Child = top };
+            border.Bind(Border.BackgroundProperty, this.GetResourceObservable("ChromePanel2"));
+            AiModelRows.Children.Add(border);
+        }
+        RefreshAiRows();
+    }
+
+    private void RefreshAiRows()
+    {
+        foreach (var (id, btn) in _aiInstallBtns)
+        {
+            bool installed = _registry?.IsInstalled(id) == true;
+            btn.Content = installed ? "Installed" : "Install";
+            btn.IsEnabled = !installed && _downloader is not null;
+        }
+    }
+
+    private void OnInstallModel(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id } && RecommendedModels.ById(id) is { } m && _registry?.IsInstalled(id) != true)
+            _ = RunCycle(new[] { m });
+    }
+
+    private TextBlock AiText(string text, string fgKey, double size, bool wrap = false)
+    {
+        var tb = new TextBlock { Text = text, FontSize = size, TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap };
+        tb.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable(fgKey));
+        return tb;
+    }
+
     private void OnOk(object? sender, RoutedEventArgs e)
     {
         _s.ReopenOnStartup = ReopenSwitch.IsChecked == true;
@@ -127,6 +228,7 @@ public partial class SettingsWindow : Window
         _s.GridColor = NormHex(GridColorField.Hex, _s.GridColor);
         _s.QuickMaskColor = NormHex(QuickMaskColorField.Hex, _s.QuickMaskColor);
         _s.UndoLimit = (int)UndoSlider.Value;
+        _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.AutoCheckUpdates = AutoUpdateSwitch.IsChecked == true;
         // keyboard: store only the overrides that differ from the catalog default (keeps JSON small)
         _s.KeyBindings.Clear();
