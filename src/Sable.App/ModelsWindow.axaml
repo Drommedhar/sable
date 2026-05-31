@@ -1,34 +1,35 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         x:Class="Sable.App.ModelsWindow"
         Width="660" Height="560"
         Background="{DynamicResource ChromePanel}"
         WindowStartupLocation="CenterOwner"
-        Title="Models">
+        Title="{loc:Loc modelsWindow.models}">
     <DockPanel Margin="14">
-        <TextBlock DockPanel.Dock="Top" Text="Models" FontSize="16" Foreground="{DynamicResource ChromeText}" />
+        <TextBlock DockPanel.Dock="Top" Text="{loc:Loc modelsWindow.models}" FontSize="16" Foreground="{DynamicResource ChromeText}" />
         <TextBlock DockPanel.Dock="Top" x:Name="FolderLabel" Classes="settingHint" Margin="0,2,0,8" TextWrapping="Wrap" />
 
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
-            <TextBox x:Name="UrlBox" Watermark="Direct URL, or HuggingFace owner/repo/path/file.onnx" />
-            <Button Grid.Column="1" Content="Download" Classes="opt" Padding="14,0" Margin="6,0,0,0" Click="OnDownloadUrl" />
+            <TextBox x:Name="UrlBox" Watermark="{loc:Loc modelsWindow.directURLOrHuggingFaceOwner}" />
+            <Button Grid.Column="1" Content="{loc:Loc modelsWindow.download}" Classes="opt" Padding="14,0" Margin="6,0,0,0" Click="OnDownloadUrl" />
         </Grid>
-        <Button DockPanel.Dock="Top" x:Name="DownloadSetBtn" Content="Download recommended set (light AI)"
+        <Button DockPanel.Dock="Top" x:Name="DownloadSetBtn" Content="{loc:Loc modelsWindow.downloadRecommendedSetLightAI}"
                 Classes="opt" HorizontalAlignment="Left" Padding="14,0" Margin="0,0,0,6" Click="OnDownloadSet" />
         <TextBlock DockPanel.Dock="Top" x:Name="Status" Classes="settingHint" Foreground="{DynamicResource ChromeWarn}"
                    IsVisible="False" Margin="0,0,0,6" TextWrapping="Wrap" />
 
         <Border DockPanel.Dock="Bottom" Margin="0,8,0,0" HorizontalAlignment="Right">
-            <Button Content="Close" Classes="opt" Padding="18,0" Click="OnClose" />
+            <Button Content="{loc:Loc modelsWindow.close}" Classes="opt" Padding="18,0" Click="OnClose" />
         </Border>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="4">
-                <TextBlock Text="Recommended (downloads from the source; licence shown per model)" Classes="settingHeader" />
+                <TextBlock Text="{loc:Loc modelsWindow.recommendedDownloadsFromTheSource}" Classes="settingHeader" />
                 <StackPanel x:Name="RecoRows" Spacing="6" />
-                <TextBlock x:Name="DefaultsHeader" Text="Default model per task" Classes="settingHeader" Margin="0,12,0,0" IsVisible="False" />
+                <TextBlock x:Name="DefaultsHeader" Text="{loc:Loc modelsWindow.defaultModelPerTask}" Classes="settingHeader" Margin="0,12,0,0" IsVisible="False" />
                 <StackPanel x:Name="DefaultRows" Spacing="4" />
-                <TextBlock Text="Installed" Classes="settingHeader" Margin="0,12,0,0" />
+                <TextBlock Text="{loc:Loc modelsWindow.installed}" Classes="settingHeader" Margin="0,12,0,0" />
                 <StackPanel x:Name="InstalledRows" Spacing="3" />
             </StackPanel>
         </ScrollViewer>

@@ -676,7 +676,7 @@ Not in the §16 feature comparison but needed. ⬜ all not started.
 - **Doc-swap GPU buffer leak** (already noted §15) — must fix before multi-tab (each tab swap currently leaks).
 
 ### 17.4 Maybe / TBD
-- **Localization / i18n** (CLAUDE.md references locale JSON — decide if Sable ships localizable strings).
+- **Localization / i18n — IMPLEMENTED** (Novalist system ported): JSON locales (`src/Sable.App/Assets/Locales/en.json`, nested→dotted keys, `{0}` args, en fallback) + `Loc` singleton (`Loc.T(key,args)` / indexer / `LanguageChanged`) + `{loc:Loc key}` markup ext (`Sable.App/Localization/`) + `SableSettings.Language`. **All 347 `.axaml` user strings migrated** (`tools/i18n-migrate.py` one-shot). **Build gate**: `tools/locale-doctor.py --strict` runs as the `LocaleDoctor` MSBuild target → build FAILS on any unlocalized `.axaml` literal or missing key (verified). English-only content for v1. Details: [docs/i18n-decision.md](docs/i18n-decision.md). Remaining: code-behind literals + a 2nd locale + live language picker.
 - Accessibility (keyboard nav, screen-reader labels).
 
 ---
@@ -741,7 +741,9 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 - Real **Linux** (Xlib/Wayland) + **macOS** (CAMetalLayer) backends (surface + input) — seam ready (`IPlatformBackend`/`IInputSource`). Per-OS packaging.
 
 ### Phase 10 — Polish & release (was M5)
-- Tablet pressure/tilt, telemetry/crash (opt-in), perf pass (brush latency, large docs), packaging/signing/**notarisation** (MSIX/MSI · AppImage/Flatpak · .app), docs, i18n decision, accessibility.
+- ✅ **Packaging/signing** (`.github/workflows/release.yml`, all 3 OSes, tag-driven): Windows self-contained single-file → **Inno Setup** installer (`.sable` file association); macOS `.app` + generated `.icns` → **ad-hoc-signed** DMG (x64 + arm64); Linux → **AppImage**. Signing = macOS ad-hoc, Windows/Linux unsigned (real cert/notarisation later) — mirrors the Novalist pipeline.
+- ✅ **Docs**: README, [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), MIT [LICENSE](LICENSE). ✅ **i18n decision** (English-only v1; JSON-locale plan — [docs/i18n-decision.md](docs/i18n-decision.md), §17.4).
+- ⬜ Remaining: tablet pressure/tilt, telemetry/crash (opt-in), perf pass (brush latency, large docs), accessibility, real code-signing + macOS notarisation, Linux Flatpak.
 
 ### Deferred — Generative AI tier (opt-in Diffusers sidecar)  ·  **detailed plan: [PHASE8_AI.md](PHASE8_AI.md) §8.6–8.9**
 Pulled out of the Phase 8 critical path: the light tier (8.0–8.5) ships with zero Python, and the generative tier is the opt-in, decoupled half. Not scheduled until the light tier is shipped and validated.

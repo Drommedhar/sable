@@ -21,6 +21,9 @@ public sealed class SableSettings
     // --- User Interface ---
     public AppTheme Theme { get; set; } = AppTheme.Dark;
 
+    // UI language code (matches a Locales/<code>.json; "en" is the always-present fallback).
+    public string Language { get; set; } = "en";
+
     // --- User Interface: canvas-overlay appearance (PLAN §17.1) ---
     // Hex "#RRGGBB" overlay colours. Defaults match the built-in shader constants.
     public string GuideColor { get; set; } = "#00A0E6";        // guide lines (cyan)

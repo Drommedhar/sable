@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
         xmlns:local="clr-namespace:Sable.App"
         x:Class="Sable.App.TransformWindow"
@@ -8,7 +9,7 @@
         Background="{DynamicResource ChromePanel}"
         CanResize="True"
         ShowInTaskbar="False"
-        Title="Transform">
+        Title="{loc:Loc transformWindow.transform}">
 
     <Window.Resources>
         <LinearGradientBrush x:Key="GreyTrack" StartPoint="0%,0%" EndPoint="100%,0%">
@@ -21,11 +22,11 @@
         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="10,7">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding SelectedLayer.Name}" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="Reset" Click="OnReset" />
+                <Button Grid.Column="1" Content="{loc:Loc transformWindow.reset}" Click="OnReset" />
             </Grid>
         </Border>
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="10,8">
-            <Button Content="Close" HorizontalAlignment="Right" Click="OnClose" />
+            <Button Content="{loc:Loc transformWindow.close}" HorizontalAlignment="Right" Click="OnClose" />
         </Border>
 
         <ScrollViewer>

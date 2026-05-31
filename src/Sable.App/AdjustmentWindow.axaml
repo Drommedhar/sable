@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
         xmlns:local="clr-namespace:Sable.App"
         x:Class="Sable.App.AdjustmentWindow"
@@ -8,7 +9,7 @@
         Background="{DynamicResource ChromePanel}"
         CanResize="True"
         ShowInTaskbar="False"
-        Title="Adjustment">
+        Title="{loc:Loc adjustmentWindow.adjustment}">
 
     <Window.Resources>
         <!-- Affinity-style gradient tracks -->
@@ -58,7 +59,7 @@
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding SelectedLayer.Name}" Classes="panelHeader" Padding="0"
                            VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="Reset" Classes="opt" Padding="8,0" Click="OnReset"
+                <Button Grid.Column="1" Content="{loc:Loc adjustmentWindow.reset}" Classes="opt" Padding="8,0" Click="OnReset"
                         IsVisible="{Binding SelectedLayer.IsAdjustment}" />
             </Grid>
         </Border>
@@ -67,7 +68,7 @@
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeHeaderBg}" Padding="10,6"
                 IsVisible="{Binding SelectedLayer.IsEffect}">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
-                <TextBlock Grid.Column="0" Text="Opacity" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="0" Text="{loc:Loc adjustmentWindow.opacity}" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
                 <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.OpacityPercent, Mode=TwoWay}" />
                 <TextBox Grid.Column="2" Width="46" Text="{Binding SelectedLayer.OpacityPercent, Mode=TwoWay, StringFormat={}{0:0}}" />
                 <ComboBox Grid.Column="3" Width="96" ItemsSource="{Binding BlendModes}"
@@ -78,7 +79,7 @@
         <ScrollViewer>
             <StackPanel Spacing="8" Margin="10">
 
-                <TextBlock Text="Select an adjustment or filter layer to edit its parameters."
+                <TextBlock Text="{loc:Loc adjustmentWindow.selectAnAdjustmentOrFilter}"
                            Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" TextWrapping="Wrap"
                            IsVisible="{Binding !SelectedLayer.IsEffect}" />
 
@@ -108,19 +109,19 @@
                 <!-- Curves -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsCurves}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <ToggleButton x:Name="ChRgb" Content="RGB" Classes="opt" Padding="8,0" Click="OnCurveChannel" Tag="0" IsChecked="True" />
+                        <ToggleButton x:Name="ChRgb" Content="{loc:Loc adjustmentWindow.rgb}" Classes="opt" Padding="8,0" Click="OnCurveChannel" Tag="0" IsChecked="True" />
                         <ToggleButton x:Name="ChR" Content="R" Classes="opt" Width="28" Click="OnCurveChannel" Tag="1" />
                         <ToggleButton x:Name="ChG" Content="G" Classes="opt" Width="28" Click="OnCurveChannel" Tag="2" />
                         <ToggleButton x:Name="ChB" Content="B" Classes="opt" Width="28" Click="OnCurveChannel" Tag="3" />
                     </StackPanel>
                     <local:CurveEditor x:Name="Curve" Height="240" />
-                    <TextBlock Text="Click to add a point. Drag to shape. Right-click a point to delete."
+                    <TextBlock Text="{loc:Loc adjustmentWindow.clickToAddAPoint}"
                                Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <!-- Exposure -->
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsExposure}">
-                    <TextBlock Text="Exposure (stops)" Classes="adjLabel" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.exposureStops}" Classes="adjLabel" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                         <local:GradientSlider Grid.Column="0" Minimum="-3" Maximum="3"
                                               TrackBrush="{StaticResource GrayBrush}"
@@ -159,15 +160,15 @@
 
                 <!-- Colour Balance -->
                 <StackPanel Spacing="5" IsVisible="{Binding SelectedLayer.IsColorBalance}">
-                    <TextBlock Text="Shadows" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.shadows}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource RBalBrush}" Value="{Binding SelectedLayer.CbShadowR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource GBalBrush}" Value="{Binding SelectedLayer.CbShadowG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource BBalBrush}" Value="{Binding SelectedLayer.CbShadowB, Mode=TwoWay}" />
-                    <TextBlock Text="Midtones" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.midtones}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource RBalBrush}" Value="{Binding SelectedLayer.CbMidR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource GBalBrush}" Value="{Binding SelectedLayer.CbMidG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource BBalBrush}" Value="{Binding SelectedLayer.CbMidB, Mode=TwoWay}" />
-                    <TextBlock Text="Highlights" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.highlights}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource RBalBrush}" Value="{Binding SelectedLayer.CbHighR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource GBalBrush}" Value="{Binding SelectedLayer.CbHighG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-100" Maximum="100" TrackBrush="{StaticResource BBalBrush}" Value="{Binding SelectedLayer.CbHighB, Mode=TwoWay}" />
@@ -175,15 +176,15 @@
 
                 <!-- Channel Mixer -->
                 <StackPanel Spacing="5" IsVisible="{Binding SelectedLayer.IsChannelMixer}">
-                    <TextBlock Text="Red output (R / G / B)" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.redOutputRGB}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmRR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmRG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmRB, Mode=TwoWay}" />
-                    <TextBlock Text="Green output (R / G / B)" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.greenOutputRGB}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmGR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmGG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmGB, Mode=TwoWay}" />
-                    <TextBlock Text="Blue output (R / G / B)" Classes="panelHeader" Padding="0" />
+                    <TextBlock Text="{loc:Loc adjustmentWindow.blueOutputRGB}" Classes="panelHeader" Padding="0" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmBR, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmBG, Mode=TwoWay}" />
                     <local:GradientSlider Minimum="-200" Maximum="200" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.CmBB, Mode=TwoWay}" />
@@ -196,7 +197,7 @@
                 </StackPanel>
 
                 <!-- Invert (no options) -->
-                <TextBlock Text="Invert has no options — it flips colours." Classes="adjLabel"
+                <TextBlock Text="{loc:Loc adjustmentWindow.invertHasNoOptionsIt}" Classes="adjLabel"
                            TextWrapping="Wrap" IsVisible="{Binding SelectedLayer.IsInvert}" />
 
                 <!-- Live filters (Radius / Amount / Angle shown per filter kind) -->
@@ -205,7 +206,7 @@
                         <local:LabeledSlider Label="Radius" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BlurRadius, Mode=TwoWay}" />
                     </StackPanel>
                     <StackPanel Spacing="4" IsVisible="{Binding SelectedLayer.FilterUsesAmount}">
-                        <TextBlock Text="Amount" Classes="adjLabel" />
+                        <TextBlock Text="{loc:Loc adjustmentWindow.amount}" Classes="adjLabel" />
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                             <local:GradientSlider Grid.Column="0" Minimum="0" Maximum="3" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.FilterAmount, Mode=TwoWay}" />
                             <TextBox Grid.Column="1" Width="52" Text="{Binding SelectedLayer.FilterAmount, Mode=TwoWay, StringFormat={}{0:0.00}}" />

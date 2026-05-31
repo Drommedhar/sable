@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         xmlns:local="clr-namespace:Sable.App"
         x:Class="Sable.App.NewDocumentWindow"
         x:DataType="local:NewDocumentWindow"
@@ -7,7 +8,7 @@
         Background="{DynamicResource ChromePanel}"
         CanResize="True"
         WindowStartupLocation="CenterOwner"
-        Title="New Document">
+        Title="{loc:Loc newDocumentWindow.newDocument}">
 
     <Window.Resources>
         <DataTemplate x:Key="PresetTemplate" x:DataType="local:DocPreset">
@@ -31,8 +32,8 @@
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}"
                 BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="12,8">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="Cancel" Classes="opt" Padding="16,0" Click="OnCancel" />
-                <Button Content="Create Document" Classes="opt" Padding="16,0" Click="OnCreate" />
+                <Button Content="{loc:Loc newDocumentWindow.cancel}" Classes="opt" Padding="16,0" Click="OnCancel" />
+                <Button Content="{loc:Loc newDocumentWindow.createDocument}" Classes="opt" Padding="16,0" Click="OnCreate" />
             </StackPanel>
         </Border>
 
@@ -40,7 +41,7 @@
         <Border DockPanel.Dock="Right" Width="264" Background="{DynamicResource ChromeFooter}"
                 BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1,0,0,0" Padding="14,12">
             <StackPanel Spacing="2">
-                <TextBlock x:Name="SelName" Text="Custom" FontSize="15"
+                <TextBlock x:Name="SelName" Text="{loc:Loc newDocumentWindow.custom}" FontSize="15"
                            Foreground="{DynamicResource ChromeText}" Margin="0,0,0,10" />
 
                 <local:SettingRow Label="Units">
@@ -58,7 +59,7 @@
                 <local:SettingRow Label="Width">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBox x:Name="WBox" Width="74" Text="1920" TextAlignment="Right" TextChanged="OnFieldChanged" />
-                        <TextBlock x:Name="WUnit" Text="px" Width="22" VerticalAlignment="Center"
+                        <TextBlock x:Name="WUnit" Text="{loc:Loc newDocumentWindow.px}" Width="22" VerticalAlignment="Center"
                                    Foreground="{DynamicResource ChromeTextDim}" />
                     </StackPanel>
                 </local:SettingRow>
@@ -66,18 +67,18 @@
                 <local:SettingRow Label="Height">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBox x:Name="HBox" Width="74" Text="1080" TextAlignment="Right" TextChanged="OnFieldChanged" />
-                        <TextBlock x:Name="HUnit" Text="px" Width="22" VerticalAlignment="Center"
+                        <TextBlock x:Name="HUnit" Text="{loc:Loc newDocumentWindow.px}" Width="22" VerticalAlignment="Center"
                                    Foreground="{DynamicResource ChromeTextDim}" />
                     </StackPanel>
                 </local:SettingRow>
 
                 <local:SettingRow Label="Orientation">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <Button x:Name="PortraitBtn" Classes="iconbtn" Width="28" Height="24" Click="OnPortrait" ToolTip.Tip="Portrait">
+                        <Button x:Name="PortraitBtn" Classes="iconbtn" Width="28" Height="24" Click="OnPortrait" ToolTip.Tip="{loc:Loc newDocumentWindow.portrait}">
                             <Path Classes="icon" Width="11" Height="14" Stretch="Uniform"
                                   Data="M3 1 H13 V19 H3 Z" />
                         </Button>
-                        <Button x:Name="LandscapeBtn" Classes="iconbtn" Width="28" Height="24" Click="OnLandscape" ToolTip.Tip="Landscape">
+                        <Button x:Name="LandscapeBtn" Classes="iconbtn" Width="28" Height="24" Click="OnLandscape" ToolTip.Tip="{loc:Loc newDocumentWindow.landscape}">
                             <Path Classes="icon" Width="14" Height="11" Stretch="Uniform"
                                   Data="M1 3 H19 V13 H1 Z" />
                         </Button>
@@ -99,7 +100,7 @@
         <!-- left: search + preset grid -->
         <DockPanel LastChildFill="True">
             <Border DockPanel.Dock="Top" Padding="12,10,12,6">
-                <TextBox x:Name="SearchBox" PlaceholderText="Search presets..." TextChanged="OnSearch" />
+                <TextBox x:Name="SearchBox" PlaceholderText="{loc:Loc newDocumentWindow.searchPresets}" TextChanged="OnSearch" />
             </Border>
             <ScrollViewer Padding="12,0,12,10">
                 <StackPanel x:Name="Sections" Spacing="6" />

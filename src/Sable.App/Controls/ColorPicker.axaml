@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
              xmlns:local="clr-namespace:Sable.App"
              x:Class="Sable.App.ColorPicker">
     <StackPanel Spacing="8">
@@ -7,7 +8,7 @@
                           MaxWidth="{StaticResource ColorWheelMaxSize}" />
         <StackPanel Orientation="Horizontal" Spacing="6">
             <TextBlock Text="#" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="12" />
-            <TextBox x:Name="HexBox" Width="92" Text="FFFFFF" TextChanged="OnHexChanged" />
+            <TextBox x:Name="HexBox" Width="92" Text="{loc:Loc colorPicker.ffffff}" TextChanged="OnHexChanged" />
             <TextBlock x:Name="Readout" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
         </StackPanel>
     </StackPanel>

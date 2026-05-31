@@ -1,11 +1,12 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         x:Class="Sable.App.ExportDialog"
         Width="460" Height="380"
         Background="{DynamicResource ChromePanel}"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Title="Export">
+        Title="{loc:Loc exportDialog.export}">
     <Border Padding="14">
         <Grid ColumnDefinitions="200,*" ColumnSpacing="14">
             <!-- preview -->
@@ -15,10 +16,10 @@
 
             <!-- options -->
             <StackPanel Grid.Column="1" Spacing="10">
-                <TextBlock Text="Export" Classes="panelHeader" Padding="0" />
+                <TextBlock Text="{loc:Loc exportDialog.export}" Classes="panelHeader" Padding="0" />
 
                 <StackPanel Spacing="4">
-                    <TextBlock Text="Format" Classes="adjLabel" />
+                    <TextBlock Text="{loc:Loc exportDialog.format}" Classes="adjLabel" />
                     <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="OnChanged">
                         <ComboBoxItem>PNG</ComboBoxItem>
                         <ComboBoxItem>JPEG</ComboBoxItem>
@@ -27,12 +28,12 @@
                 </StackPanel>
 
                 <StackPanel x:Name="QualityRow" Spacing="4" IsVisible="False">
-                    <TextBlock x:Name="QualityLabel" Text="Quality 90%" Classes="adjLabel" />
+                    <TextBlock x:Name="QualityLabel" Text="{loc:Loc exportDialog.quality90}" Classes="adjLabel" />
                     <Slider x:Name="QualitySlider" Minimum="1" Maximum="100" Value="90" ValueChanged="OnChanged" />
                 </StackPanel>
 
                 <StackPanel Spacing="4">
-                    <TextBlock x:Name="ScaleLabel" Text="Scale 100%" Classes="adjLabel" />
+                    <TextBlock x:Name="ScaleLabel" Text="{loc:Loc exportDialog.scale100}" Classes="adjLabel" />
                     <Slider x:Name="ScaleSlider" Minimum="5" Maximum="200" Value="100" ValueChanged="OnChanged" />
                     <TextBlock x:Name="DimsLabel" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
                 </StackPanel>
@@ -40,8 +41,8 @@
                 <TextBlock x:Name="SizeLabel" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                    <Button Content="Cancel" Classes="opt" Padding="14,0" Click="OnCancel" />
-                    <Button Content="Export…" Classes="opt" Padding="14,0" Click="OnExport" />
+                    <Button Content="{loc:Loc exportDialog.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" />
+                    <Button Content="{loc:Loc exportDialog.export2}" Classes="opt" Padding="14,0" Click="OnExport" />
                 </StackPanel>
             </StackPanel>
         </Grid>

@@ -1,18 +1,19 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         x:Class="Sable.App.ResizeDocumentWindow"
         Width="380" Height="270" CanResize="False"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource ChromePanel}"
-        Title="Resize Document">
+        Title="{loc:Loc resizeDocumentWindow.resizeDocument}">
     <StackPanel Margin="16" Spacing="12">
 
         <Grid ColumnDefinitions="64,*,30,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Size:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="{loc:Loc resizeDocumentWindow.size}" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <NumericUpDown Grid.Column="1" x:Name="WBox" Minimum="1" Maximum="32768" Increment="1"
                            FormatString="0" ValueChanged="OnWidthChanged" />
             <ToggleButton Grid.Column="2" x:Name="LinkBtn" IsChecked="True" Margin="3,0"
-                          Padding="3" ToolTip.Tip="Lock aspect ratio">
+                          Padding="3" ToolTip.Tip="{loc:Loc resizeDocumentWindow.lockAspectRatio}">
                 <Path Classes="icon" Width="14" Height="14"
                       Data="M9 17H7A5 5 0 0 1 7 7h2 M15 7h2a5 5 0 0 1 0 10h-2 M8 12h8" />
             </ToggleButton>
@@ -21,33 +22,33 @@
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Units:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="{loc:Loc resizeDocumentWindow.units}" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" SelectedIndex="0">
                 <ComboBoxItem>Pixels</ComboBoxItem>
             </ComboBox>
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="DPI:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="{loc:Loc resizeDocumentWindow.dpi}" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <NumericUpDown Grid.Column="1" x:Name="DpiBox" Minimum="1" Maximum="2400" Increment="1" FormatString="0" />
         </Grid>
 
         <Grid ColumnDefinitions="64,*" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Resample:" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="0" Text="{loc:Loc resizeDocumentWindow.resample}" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" x:Name="ResampleCombo" SelectedIndex="0">
                 <ComboBoxItem>Bilinear</ComboBoxItem>
                 <ComboBoxItem>Nearest</ComboBoxItem>
             </ComboBox>
         </Grid>
 
-        <CheckBox x:Name="ResampleCheck" Content="Resample" IsChecked="True"
+        <CheckBox x:Name="ResampleCheck" Content="{loc:Loc resizeDocumentWindow.resample2}" IsChecked="True"
                   Foreground="{DynamicResource ChromeText}" IsCheckedChanged="OnResampleToggled" />
 
         <TextBlock x:Name="DescText" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button Content="Resize" Click="OnResize" Width="80" />
-            <Button Content="Cancel" Click="OnCancel" Width="80" />
+            <Button Content="{loc:Loc resizeDocumentWindow.resize}" Click="OnResize" Width="80" />
+            <Button Content="{loc:Loc resizeDocumentWindow.cancel}" Click="OnCancel" Width="80" />
         </StackPanel>
     </StackPanel>
 </Window>

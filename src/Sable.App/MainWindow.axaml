@@ -7,13 +7,14 @@
         xmlns:eng="clr-namespace:Sable.Engine.Layers;assembly=Sable.Engine"
         xmlns:ac="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         xmlns:local="clr-namespace:Sable.App"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="760"
         x:Class="Sable.App.MainWindow"
         x:DataType="vm:DocumentViewModel"
         Width="1280" Height="760"
         Background="{DynamicResource ChromeWindowBg}"
         Icon="avares://Sable.App/Assets/sable.ico"
-        Title="Sable">
+        Title="{loc:Loc mainWindow.sable}">
 
     <Window.KeyBindings>
         <!-- Ctrl+Z / Ctrl+Y come from the rebindable keymap (PLAN §17.1); Shift+Z stays a fixed redo alt -->
@@ -31,151 +32,151 @@
         <Image DockPanel.Dock="Left" Source="avares://Sable.App/Assets/logo_only.png"
                Height="18" Stretch="Uniform" Margin="12,5,12,5" VerticalAlignment="Center"
                RenderOptions.BitmapInterpolationMode="HighQuality"
-               ToolTip.Tip="Sable" />
+               ToolTip.Tip="{loc:Loc mainWindow.sable}" />
         <!-- window caption buttons (right) -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Stretch">
-            <Button Classes="winbtn" Click="OnMinimizeWindow" ToolTip.Tip="Minimise">
+            <Button Classes="winbtn" Click="OnMinimizeWindow" ToolTip.Tip="{loc:Loc mainWindow.minimise}">
                 <Border Width="11" Height="1.5" Background="{DynamicResource ChromeText}"
                         HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Button>
-            <Button x:Name="MaxRestoreBtn" Classes="winbtn" Click="OnMaxRestoreWindow" ToolTip.Tip="Maximise">
+            <Button x:Name="MaxRestoreBtn" Classes="winbtn" Click="OnMaxRestoreWindow" ToolTip.Tip="{loc:Loc mainWindow.maximise}">
                 <Path Classes="icon" Width="10" Height="10" Data="M4 4h16v16H4z" />
             </Button>
-            <Button Classes="winbtn winclose" Click="OnCloseWindow" ToolTip.Tip="Close">
+            <Button Classes="winbtn winclose" Click="OnCloseWindow" ToolTip.Tip="{loc:Loc mainWindow.close}">
                 <Path Classes="icon" Width="11" Height="11" Data="M5 5l14 14 M19 5l-14 14" />
             </Button>
         </StackPanel>
         <Menu x:Name="MainMenu" DockPanel.Dock="Left">
-            <MenuItem Header="_File">
-                <MenuItem Header="New..." Click="OnNewMenu" InputGesture="Ctrl+N" />
-                <MenuItem Header="New from Clipboard" Click="OnNewFromClipboard" />
+            <MenuItem Header="{loc:Loc menu.file}">
+                <MenuItem Header="{loc:Loc menu.file.new}" Click="OnNewMenu" InputGesture="Ctrl+N" />
+                <MenuItem Header="{loc:Loc menu.file.newFromClipboard}" Click="OnNewFromClipboard" />
                 <Separator />
-                <MenuItem Header="Open..." Click="OnOpenSable" InputGesture="Ctrl+O" />
-                <MenuItem Header="Open Image..." Click="OnOpenImage" />
-                <MenuItem Header="Open Recent" x:Name="RecentMenu" />
+                <MenuItem Header="{loc:Loc menu.file.open}" Click="OnOpenSable" InputGesture="Ctrl+O" />
+                <MenuItem Header="{loc:Loc menu.file.openImage}" Click="OnOpenImage" />
+                <MenuItem Header="{loc:Loc menu.file.openRecent}" x:Name="RecentMenu" />
                 <Separator />
-                <MenuItem Header="Save" Click="OnSaveSable" InputGesture="Ctrl+S" />
-                <MenuItem Header="Save As..." Click="OnSaveAsSable" />
+                <MenuItem Header="{loc:Loc menu.file.save}" Click="OnSaveSable" InputGesture="Ctrl+S" />
+                <MenuItem Header="{loc:Loc menu.file.saveAs}" Click="OnSaveAsSable" />
                 <Separator />
-                <MenuItem Header="Export..." Click="OnExport" />
+                <MenuItem Header="{loc:Loc menu.file.export}" Click="OnExport" />
             </MenuItem>
-            <MenuItem Header="_Edit">
-                <MenuItem Header="Undo" Command="{Binding UndoEditCommand}" InputGesture="Ctrl+Z" />
-                <MenuItem Header="Redo" Command="{Binding RedoEditCommand}" InputGesture="Ctrl+Y" />
+            <MenuItem Header="{loc:Loc menu.edit}">
+                <MenuItem Header="{loc:Loc menu.edit.undo}" Command="{Binding UndoEditCommand}" InputGesture="Ctrl+Z" />
+                <MenuItem Header="{loc:Loc menu.edit.redo}" Command="{Binding RedoEditCommand}" InputGesture="Ctrl+Y" />
                 <Separator />
-                <MenuItem Header="Cut" Click="OnCut" InputGesture="Ctrl+X" />
-                <MenuItem Header="Copy" Click="OnCopy" InputGesture="Ctrl+C" />
-                <MenuItem Header="Copy Merged" Click="OnCopyMerged" InputGesture="Ctrl+Shift+C" />
-                <MenuItem Header="Paste" Click="OnPaste" InputGesture="Ctrl+V" />
-                <MenuItem Header="Paste Into" Click="OnPasteInto" InputGesture="Ctrl+Shift+V" />
-                <MenuItem Header="Duplicate Layer" Click="OnDuplicate" InputGesture="Ctrl+J" />
+                <MenuItem Header="{loc:Loc menu.edit.cut}" Click="OnCut" InputGesture="Ctrl+X" />
+                <MenuItem Header="{loc:Loc menu.edit.copy}" Click="OnCopy" InputGesture="Ctrl+C" />
+                <MenuItem Header="{loc:Loc menu.edit.copyMerged}" Click="OnCopyMerged" InputGesture="Ctrl+Shift+C" />
+                <MenuItem Header="{loc:Loc menu.edit.paste}" Click="OnPaste" InputGesture="Ctrl+V" />
+                <MenuItem Header="{loc:Loc menu.edit.pasteInto}" Click="OnPasteInto" InputGesture="Ctrl+Shift+V" />
+                <MenuItem Header="{loc:Loc menu.edit.duplicateLayer}" Click="OnDuplicate" InputGesture="Ctrl+J" />
                 <Separator />
-                <MenuItem Header="Preferences..." Click="OnPreferences" />
+                <MenuItem Header="{loc:Loc menu.edit.preferences}" Click="OnPreferences" />
             </MenuItem>
-            <MenuItem Header="_Image">
-                <MenuItem Header="Resize Document..." Click="OnResizeDocument" />
-                <MenuItem Header="Resize Canvas..." Click="OnResizeCanvas" />
+            <MenuItem Header="{loc:Loc menu.image}">
+                <MenuItem Header="{loc:Loc menu.image.resizeDocument}" Click="OnResizeDocument" />
+                <MenuItem Header="{loc:Loc menu.image.resizeCanvas}" Click="OnResizeCanvas" />
             </MenuItem>
-            <MenuItem Header="_Layer">
-                <MenuItem Header="Duplicate" Click="OnDuplicate" InputGesture="Ctrl+J" />
-                <MenuItem Header="Rasterise" Click="OnRasterise" />
+            <MenuItem Header="{loc:Loc mainWindow.layer}">
+                <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" InputGesture="Ctrl+J" />
+                <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
                 <Separator />
-                <MenuItem Header="Merge Down" Click="OnMergeDown" InputGesture="Ctrl+E" />
-                <MenuItem Header="Merge Visible" Click="OnMergeVisible" InputGesture="Ctrl+Shift+E" />
-                <MenuItem Header="Stamp Visible" Click="OnStamp" InputGesture="Ctrl+Shift+Alt+E" />
-                <MenuItem Header="Flatten Image" Click="OnFlatten" />
+                <MenuItem Header="{loc:Loc mainWindow.mergeDown}" Click="OnMergeDown" InputGesture="Ctrl+E" />
+                <MenuItem Header="{loc:Loc mainWindow.mergeVisible}" Click="OnMergeVisible" InputGesture="Ctrl+Shift+E" />
+                <MenuItem Header="{loc:Loc mainWindow.stampVisible}" Click="OnStamp" InputGesture="Ctrl+Shift+Alt+E" />
+                <MenuItem Header="{loc:Loc mainWindow.flattenImage}" Click="OnFlatten" />
                 <Separator />
-                <MenuItem Header="Transform">
-                    <MenuItem Header="Flip Horizontal" Click="OnFlipH" />
-                    <MenuItem Header="Flip Vertical" Click="OnFlipV" />
+                <MenuItem Header="{loc:Loc mainWindow.transform}">
+                    <MenuItem Header="{loc:Loc mainWindow.flipHorizontal}" Click="OnFlipH" />
+                    <MenuItem Header="{loc:Loc mainWindow.flipVertical}" Click="OnFlipV" />
                     <Separator />
-                    <MenuItem Header="Rotate 90° CW" Click="OnRotate90CW" />
-                    <MenuItem Header="Rotate 90° CCW" Click="OnRotate90CCW" />
-                    <MenuItem Header="Rotate 180°" Click="OnRotate180" />
+                    <MenuItem Header="{loc:Loc mainWindow.rotate90CW}" Click="OnRotate90CW" />
+                    <MenuItem Header="{loc:Loc mainWindow.rotate90CCW}" Click="OnRotate90CCW" />
+                    <MenuItem Header="{loc:Loc mainWindow.rotate180}" Click="OnRotate180" />
                     <Separator />
-                    <MenuItem Header="Reset Transform" Click="OnResetTransform" />
+                    <MenuItem Header="{loc:Loc mainWindow.resetTransform}" Click="OnResetTransform" />
                 </MenuItem>
-                <MenuItem Header="Align">
-                    <MenuItem Header="Align Left" Click="OnAlignLeft" />
-                    <MenuItem Header="Align Center" Click="OnAlignCenterH" />
-                    <MenuItem Header="Align Right" Click="OnAlignRight" />
+                <MenuItem Header="{loc:Loc mainWindow.align}">
+                    <MenuItem Header="{loc:Loc mainWindow.alignLeft}" Click="OnAlignLeft" />
+                    <MenuItem Header="{loc:Loc mainWindow.alignCenter}" Click="OnAlignCenterH" />
+                    <MenuItem Header="{loc:Loc mainWindow.alignRight}" Click="OnAlignRight" />
                     <Separator />
-                    <MenuItem Header="Align Top" Click="OnAlignTop" />
-                    <MenuItem Header="Align Middle" Click="OnAlignMiddle" />
-                    <MenuItem Header="Align Bottom" Click="OnAlignBottom" />
+                    <MenuItem Header="{loc:Loc mainWindow.alignTop}" Click="OnAlignTop" />
+                    <MenuItem Header="{loc:Loc mainWindow.alignMiddle}" Click="OnAlignMiddle" />
+                    <MenuItem Header="{loc:Loc mainWindow.alignBottom}" Click="OnAlignBottom" />
                     <Separator />
-                    <MenuItem Header="Distribute Horizontally" Click="OnDistributeH" />
-                    <MenuItem Header="Distribute Vertically" Click="OnDistributeV" />
+                    <MenuItem Header="{loc:Loc mainWindow.distributeHorizontally}" Click="OnDistributeH" />
+                    <MenuItem Header="{loc:Loc mainWindow.distributeVertically}" Click="OnDistributeV" />
                 </MenuItem>
             </MenuItem>
-            <MenuItem Header="_Type">
-                <MenuItem Header="Convert to Curves" Click="OnTextToCurves" />
+            <MenuItem Header="{loc:Loc mainWindow.type}">
+                <MenuItem Header="{loc:Loc mainWindow.convertToCurves}" Click="OnTextToCurves" />
                 <Separator />
-                <MenuItem Header="Fit Text to Path" Click="OnTextToPath" />
-                <MenuItem Header="Detach Text from Path" Click="OnTextDetachPath" />
+                <MenuItem Header="{loc:Loc mainWindow.fitTextToPath}" Click="OnTextToPath" />
+                <MenuItem Header="{loc:Loc mainWindow.detachTextFromPath}" Click="OnTextDetachPath" />
             </MenuItem>
-            <MenuItem Header="_Select">
-                <MenuItem Header="Select All" Click="OnSelectAll" InputGesture="Ctrl+A" />
-                <MenuItem Header="Deselect" Click="OnDeselect" InputGesture="Ctrl+D" />
-                <MenuItem Header="Invert" Click="OnInvertSelection" InputGesture="Ctrl+Shift+I" />
+            <MenuItem Header="{loc:Loc mainWindow.select}">
+                <MenuItem Header="{loc:Loc mainWindow.selectAll}" Click="OnSelectAll" InputGesture="Ctrl+A" />
+                <MenuItem Header="{loc:Loc mainWindow.deselect}" Click="OnDeselect" InputGesture="Ctrl+D" />
+                <MenuItem Header="{loc:Loc mainWindow.invert}" Click="OnInvertSelection" InputGesture="Ctrl+Shift+I" />
                 <Separator />
-                <MenuItem Header="Grow (4px)" Click="OnGrowSelection" />
-                <MenuItem Header="Shrink (4px)" Click="OnShrinkSelection" />
-                <MenuItem Header="Smooth (4px)" Click="OnSmoothSelection" />
-                <MenuItem Header="Border (4px)" Click="OnBorderSelection" />
-                <MenuItem Header="Feather (4px)" Click="OnFeatherSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.grow4px}" Click="OnGrowSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.shrink4px}" Click="OnShrinkSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.smooth4px}" Click="OnSmoothSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.border4px}" Click="OnBorderSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.feather4px}" Click="OnFeatherSelection" />
                 <Separator />
-                <MenuItem Header="Save Selection" Click="OnSaveSelection" />
-                <MenuItem Header="Load Selection" Click="OnLoadSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.saveSelection}" Click="OnSaveSelection" />
+                <MenuItem Header="{loc:Loc mainWindow.loadSelection}" Click="OnLoadSelection" />
             </MenuItem>
-            <MenuItem Header="_Filter">
-                <MenuItem Header="Gaussian Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
-                <MenuItem Header="Box Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />
-                <MenuItem Header="Motion Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.MotionBlur}" />
-                <MenuItem Header="Zoom Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.ZoomBlur}" />
+            <MenuItem Header="{loc:Loc mainWindow.filter}">
+                <MenuItem Header="{loc:Loc mainWindow.gaussianBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
+                <MenuItem Header="{loc:Loc mainWindow.boxBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />
+                <MenuItem Header="{loc:Loc mainWindow.motionBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.MotionBlur}" />
+                <MenuItem Header="{loc:Loc mainWindow.zoomBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.ZoomBlur}" />
                 <Separator />
-                <MenuItem Header="Sharpen" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Sharpen}" />
-                <MenuItem Header="Unsharp Mask" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.UnsharpMask}" />
-                <MenuItem Header="High Pass" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.HighPass}" />
-                <MenuItem Header="Clarity" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Clarity}" />
+                <MenuItem Header="{loc:Loc mainWindow.sharpen}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Sharpen}" />
+                <MenuItem Header="{loc:Loc mainWindow.unsharpMask}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.UnsharpMask}" />
+                <MenuItem Header="{loc:Loc mainWindow.highPass}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.HighPass}" />
+                <MenuItem Header="{loc:Loc mainWindow.clarity}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Clarity}" />
                 <Separator />
-                <MenuItem Header="Add Noise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.AddNoise}" />
-                <MenuItem Header="Denoise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
+                <MenuItem Header="{loc:Loc mainWindow.addNoise}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.AddNoise}" />
+                <MenuItem Header="{loc:Loc mainWindow.denoise}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
             </MenuItem>
-            <MenuItem Header="_View">
-                <MenuItem Header="Zoom In" Click="OnZoomInMenu" InputGesture="Ctrl+OemPlus" />
-                <MenuItem Header="Zoom Out" Click="OnZoomOutMenu" InputGesture="Ctrl+OemMinus" />
-                <MenuItem Header="Fit to Window" Click="OnZoomFit" InputGesture="Ctrl+D0" />
-                <MenuItem Header="Actual Pixels (100%)" Click="OnZoomActual" InputGesture="Ctrl+D1" />
+            <MenuItem Header="{loc:Loc mainWindow.view}">
+                <MenuItem Header="{loc:Loc mainWindow.zoomIn}" Click="OnZoomInMenu" InputGesture="Ctrl+OemPlus" />
+                <MenuItem Header="{loc:Loc mainWindow.zoomOut}" Click="OnZoomOutMenu" InputGesture="Ctrl+OemMinus" />
+                <MenuItem Header="{loc:Loc mainWindow.fitToWindow}" Click="OnZoomFit" InputGesture="Ctrl+D0" />
+                <MenuItem Header="{loc:Loc mainWindow.actualPixels100}" Click="OnZoomActual" InputGesture="Ctrl+D1" />
                 <Separator />
-                <MenuItem x:Name="RulersMenuItem" Header="Show Rulers" ToggleType="CheckBox" IsChecked="True" Click="OnToggleRulers" />
-                <MenuItem x:Name="GridMenuItem" Header="Show Grid" ToggleType="CheckBox" Click="OnToggleGrid" />
-                <MenuItem x:Name="PixelGridMenuItem" Header="Show Pixel Grid" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
+                <MenuItem x:Name="RulersMenuItem" Header="{loc:Loc mainWindow.showRulers}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleRulers" />
+                <MenuItem x:Name="GridMenuItem" Header="{loc:Loc mainWindow.showGrid}" ToggleType="CheckBox" Click="OnToggleGrid" />
+                <MenuItem x:Name="PixelGridMenuItem" Header="{loc:Loc mainWindow.showPixelGrid}" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
                 <Separator />
-                <MenuItem x:Name="SnapMenuItem" Header="Snap to Guides/Grid" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
-                <MenuItem Header="Clear Guides" Click="OnClearGuides" />
+                <MenuItem x:Name="SnapMenuItem" Header="{loc:Loc mainWindow.snapToGuidesGrid}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
+                <MenuItem Header="{loc:Loc mainWindow.clearGuides}" Click="OnClearGuides" />
             </MenuItem>
-            <MenuItem Header="_AI" x:Name="AiMenu" IsVisible="False">
-                <MenuItem x:Name="AiRemoveBgItem" Header="Remove Background" Click="OnAiRemoveBackground" />
-                <MenuItem x:Name="AiSelectItem" Header="Select Subject" Click="OnAiSelectSubject" />
-                <MenuItem x:Name="AiSmartSelectItem" Header="Smart Select (hover)" Click="OnAiSmartSelect" />
-                <MenuItem x:Name="AiUpscaleItem" Header="Upscale..." Click="OnAiUpscale" />
-                <MenuItem x:Name="AiRemoveObjItem" Header="Remove Object" Click="OnAiRemoveObject" />
+            <MenuItem Header="{loc:Loc mainWindow.ai}" x:Name="AiMenu" IsVisible="False">
+                <MenuItem x:Name="AiRemoveBgItem" Header="{loc:Loc mainWindow.removeBackground}" Click="OnAiRemoveBackground" />
+                <MenuItem x:Name="AiSelectItem" Header="{loc:Loc mainWindow.selectSubject}" Click="OnAiSelectSubject" />
+                <MenuItem x:Name="AiSmartSelectItem" Header="{loc:Loc mainWindow.smartSelectHover}" Click="OnAiSmartSelect" />
+                <MenuItem x:Name="AiUpscaleItem" Header="{loc:Loc mainWindow.upscale}" Click="OnAiUpscale" />
+                <MenuItem x:Name="AiRemoveObjItem" Header="{loc:Loc mainWindow.removeObject}" Click="OnAiRemoveObject" />
                 <Separator x:Name="AiGenSep" />
-                <MenuItem x:Name="AiGenFillItem" Header="Generative Fill..." Click="OnAiGenerativeFill" />
+                <MenuItem x:Name="AiGenFillItem" Header="{loc:Loc mainWindow.generativeFill}" Click="OnAiGenerativeFill" />
                 <Separator />
-                <MenuItem Header="Models..." Click="OnAiModels" />
+                <MenuItem Header="{loc:Loc mainWindow.models}" Click="OnAiModels" />
             </MenuItem>
-            <MenuItem Header="_Window" SubmenuOpened="OnWindowMenuOpened">
-                <MenuItem x:Name="AdjustmentsMenuItem" Header="Adjustments" Click="OnToggleAdjustments" />
-                <MenuItem x:Name="EffectsMenuItem" Header="Layer Effects" Click="OnToggleEffects" />
-                <MenuItem Header="History" Click="OnToggleHistory" />
-                <MenuItem Header="Command Palette" InputGesture="Ctrl+K" Click="OnCommandPalette" />
+            <MenuItem Header="{loc:Loc mainWindow.window}" SubmenuOpened="OnWindowMenuOpened">
+                <MenuItem x:Name="AdjustmentsMenuItem" Header="{loc:Loc mainWindow.adjustments}" Click="OnToggleAdjustments" />
+                <MenuItem x:Name="EffectsMenuItem" Header="{loc:Loc mainWindow.layerEffects}" Click="OnToggleEffects" />
+                <MenuItem Header="{loc:Loc mainWindow.history}" Click="OnToggleHistory" />
+                <MenuItem Header="{loc:Loc mainWindow.commandPalette}" InputGesture="Ctrl+K" Click="OnCommandPalette" />
             </MenuItem>
-            <MenuItem Header="_Help">
-                <MenuItem Header="Check for Updates..." Click="OnCheckUpdatesMenu" />
+            <MenuItem Header="{loc:Loc mainWindow.help}">
+                <MenuItem Header="{loc:Loc mainWindow.checkForUpdates}" Click="OnCheckUpdatesMenu" />
                 <Separator />
-                <MenuItem Header="About Sable" Click="OnAbout" />
+                <MenuItem Header="{loc:Loc mainWindow.aboutSable}" Click="OnAbout" />
             </MenuItem>
         </Menu>
         <!-- draggable empty area (last child fills; double-click toggles maximise) -->
@@ -186,24 +187,24 @@
         <!-- (3) Context / options bar -->
         <Border Grid.Row="1" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,0,1" Height="{StaticResource OptionsBarHeight}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Spacing="8">
-                <TextBlock x:Name="ToolStatus" Text="Brush" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" Width="76" />
+                <TextBlock x:Name="ToolStatus" Text="{loc:Loc mainWindow.brush}" Foreground="{DynamicResource ChromeText}" VerticalAlignment="Center" Width="76" />
 
                 <!-- brush/eraser/clone/shape-line: stroke size -->
                 <StackPanel x:Name="SizeOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Size" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.size}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="BrushSizeSlider" Width="120" Minimum="1" Maximum="200" Value="16"
                             ValueChanged="OnBrushSizeChanged" VerticalAlignment="Center" />
-                    <TextBlock x:Name="BrushSizeLabel" Text="16 px" Foreground="{DynamicResource ChromeTextDim}"
+                    <TextBlock x:Name="BrushSizeLabel" Text="{loc:Loc mainWindow.16Px}" Foreground="{DynamicResource ChromeTextDim}"
                                VerticalAlignment="Center" FontSize="11" Width="44" />
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Hardness" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.hardness}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="BrushHardnessSlider" Width="90" Minimum="0" Maximum="100" Value="50"
                             ValueChanged="OnBrushHardnessChanged" VerticalAlignment="Center" />
                     <TextBlock x:Name="BrushHardnessLabel" Text="50%" Foreground="{DynamicResource ChromeTextDim}"
                                VerticalAlignment="Center" FontSize="11" Width="36" />
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Flow" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.flow}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="BrushFlowSlider" Width="90" Minimum="1" Maximum="100" Value="100"
                             ValueChanged="OnBrushFlowChanged" VerticalAlignment="Center" />
                     <TextBlock x:Name="BrushFlowLabel" Text="100%" Foreground="{DynamicResource ChromeTextDim}"
@@ -213,7 +214,7 @@
                 <!-- retouch brushes: effect strength -->
                 <StackPanel x:Name="StrengthOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Strength" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.strength}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="StrengthSlider" Width="120" Minimum="1" Maximum="100" Value="50"
                             ValueChanged="OnStrengthChanged" VerticalAlignment="Center" />
                     <TextBlock x:Name="StrengthLabel" Text="50%" Foreground="{DynamicResource ChromeTextDim}"
@@ -223,10 +224,10 @@
                 <!-- selection tools: feather -->
                 <StackPanel x:Name="SelectOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Feather" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.feather}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="FeatherSlider" Width="110" Minimum="0" Maximum="50" Value="0"
                             ValueChanged="OnFeatherChanged" VerticalAlignment="Center" />
-                    <TextBlock x:Name="FeatherLabel" Text="0 px" Foreground="{DynamicResource ChromeTextDim}"
+                    <TextBlock x:Name="FeatherLabel" Text="{loc:Loc mainWindow.0Px}" Foreground="{DynamicResource ChromeTextDim}"
                                VerticalAlignment="Center" FontSize="11" Width="40" />
                 </StackPanel>
 
@@ -236,58 +237,58 @@
                     <ComboBox x:Name="FontCombo" Width="150" FontSize="11" VerticalAlignment="Center"
                               SelectionChanged="OnFontChanged" />
                     <ToggleButton Classes="opt" x:Name="BoldBtn" Content="B" Width="26" Height="24" FontWeight="Bold"
-                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="Bold" />
+                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="{loc:Loc mainWindow.bold}" />
                     <ToggleButton Classes="opt" x:Name="ItalicBtn" Content="I" Width="26" Height="24" FontStyle="Italic"
-                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="Italic" />
+                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="{loc:Loc mainWindow.italic}" />
                     <ToggleButton Classes="opt" x:Name="UnderlineBtn" Content="U" Width="26" Height="24"
-                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="Underline" />
+                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="{loc:Loc mainWindow.underline}" />
                     <ToggleButton Classes="opt" x:Name="StrikeBtn" Content="S" Width="26" Height="24"
-                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="Strikethrough" />
+                                  VerticalAlignment="Center" Click="OnFontStyleChanged" ToolTip.Tip="{loc:Loc mainWindow.strikethrough}" />
                     <TextBox x:Name="TypeSizeBox" Width="48" Text="48" TextAlignment="Center"
                              TextChanged="OnTypeSizeChanged"
-                             VerticalAlignment="Center" ToolTip.Tip="Font size" />
+                             VerticalAlignment="Center" ToolTip.Tip="{loc:Loc mainWindow.fontSize}" />
                     <ToggleButton Classes="opt" x:Name="AlignLeftBtn" Width="26" Height="24" VerticalAlignment="Center"
-                                  Click="OnAlignChanged" Tag="0" ToolTip.Tip="Align left">
+                                  Click="OnAlignChanged" Tag="0" ToolTip.Tip="{loc:Loc mainWindow.alignLeft2}">
                         <Path Classes="icon" Width="14" Height="14" Data="M3 6h18 M3 12h12 M3 18h15" />
                     </ToggleButton>
                     <ToggleButton Classes="opt" x:Name="AlignCenterBtn" Width="26" Height="24" VerticalAlignment="Center"
-                                  Click="OnAlignChanged" Tag="1" ToolTip.Tip="Align center">
+                                  Click="OnAlignChanged" Tag="1" ToolTip.Tip="{loc:Loc mainWindow.alignCenter2}">
                         <Path Classes="icon" Width="14" Height="14" Data="M3 6h18 M6 12h12 M4 18h16" />
                     </ToggleButton>
                     <ToggleButton Classes="opt" x:Name="AlignRightBtn" Width="26" Height="24" VerticalAlignment="Center"
-                                  Click="OnAlignChanged" Tag="2" ToolTip.Tip="Align right">
+                                  Click="OnAlignChanged" Tag="2" ToolTip.Tip="{loc:Loc mainWindow.alignRight2}">
                         <Path Classes="icon" Width="14" Height="14" Data="M3 6h18 M9 12h12 M6 18h15" />
                     </ToggleButton>
                     <TextBox x:Name="LineSpacingBox" Width="48" Text="100" TextAlignment="Center"
                              TextChanged="OnLineSpacingChanged"
-                             VerticalAlignment="Center" ToolTip.Tip="Line spacing %" />
-                    <TextBlock Text="Box W" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                             VerticalAlignment="Center" ToolTip.Tip="{loc:Loc mainWindow.lineSpacing}" />
+                    <TextBlock Text="{loc:Loc mainWindow.boxW}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <TextBox x:Name="BoxWidthBox" Width="48" Text="0" TextAlignment="Center"
                              TextChanged="OnBoxWidthChanged"
-                             VerticalAlignment="Center" ToolTip.Tip="Area-text wrap width (0 = point text)" />
-                    <TextBlock Text="Tracking" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                             VerticalAlignment="Center" ToolTip.Tip="{loc:Loc mainWindow.areaTextWrapWidth0}" />
+                    <TextBlock Text="{loc:Loc mainWindow.tracking}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <TextBox x:Name="TrackingBox" Width="44" Text="0" TextAlignment="Center"
                              TextChanged="OnTrackingChanged"
-                             VerticalAlignment="Center" ToolTip.Tip="Letter spacing (px)" />
+                             VerticalAlignment="Center" ToolTip.Tip="{loc:Loc mainWindow.letterSpacingPx}" />
                 </StackPanel>
 
                 <!-- eyedropper: sample size + source -->
                 <StackPanel x:Name="EyedropperOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Sample" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.sample}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <ComboBox x:Name="EyedropperSampleCombo" Width="84" SelectedIndex="0" SelectionChanged="OnEyedropperSampleChanged">
                         <ComboBoxItem>Point</ComboBoxItem>
                         <ComboBoxItem>3 x 3</ComboBoxItem>
                         <ComboBoxItem>5 x 5</ComboBoxItem>
                     </ComboBox>
-                    <CheckBox Content="All layers" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                    <CheckBox Content="{loc:Loc mainWindow.allLayers}" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="False" IsCheckedChanged="OnEyedropperAllLayersChanged" />
                 </StackPanel>
 
                 <!-- liquify: displacement mode -->
                 <StackPanel x:Name="LiquifyOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="Mode" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.mode}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <ComboBox x:Name="LiquifyModeCombo" Width="92" SelectedIndex="0" SelectionChanged="OnLiquifyModeChanged">
                         <ComboBoxItem>Push</ComboBoxItem>
                         <ComboBoxItem>Bloat</ComboBoxItem>
@@ -299,29 +300,29 @@
                 <!-- shape tools: fill / stroke / dash / per-kind params (draw-time defaults) -->
                 <StackPanel x:Name="ShapeOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <CheckBox x:Name="ShapeFillChk" Content="Fill" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                    <CheckBox x:Name="ShapeFillChk" Content="{loc:Loc mainWindow.fill}" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="True" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
-                    <CheckBox x:Name="ShapeStrokeChk" Content="Stroke" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                    <CheckBox x:Name="ShapeStrokeChk" Content="{loc:Loc mainWindow.stroke}" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="False" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
                     <TextBlock Text="W" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                     <Slider x:Name="ShapeStrokeWidth" Width="80" Minimum="1" Maximum="50" Value="3"
                             ValueChanged="OnShapeWidthChanged" VerticalAlignment="Center" />
-                    <TextBlock x:Name="ShapeStrokeWidthLabel" Text="3 px" Foreground="{DynamicResource ChromeTextDim}"
+                    <TextBlock x:Name="ShapeStrokeWidthLabel" Text="{loc:Loc mainWindow.3Px}" Foreground="{DynamicResource ChromeTextDim}"
                                VerticalAlignment="Center" FontSize="11" Width="36" />
-                    <CheckBox x:Name="ShapeDashChk" Content="Dash" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                    <CheckBox x:Name="ShapeDashChk" Content="{loc:Loc mainWindow.dash}" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="False" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
                     <StackPanel x:Name="ShapeSidesOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <TextBlock Text="Sides" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBlock Text="{loc:Loc mainWindow.sides}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                         <TextBox x:Name="ShapeSidesBox" Width="40" Text="5" TextAlignment="Center"
                                  TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel x:Name="ShapeInnerOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <TextBlock Text="Inner %" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBlock Text="{loc:Loc mainWindow.inner}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                         <TextBox x:Name="ShapeInnerBox" Width="44" Text="50" TextAlignment="Center"
                                  TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel x:Name="ShapeCornerOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <TextBlock Text="Radius" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBlock Text="{loc:Loc mainWindow.radius}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
                         <TextBox x:Name="ShapeCornerBox" Width="44" Text="12" TextAlignment="Center"
                                  TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
                     </StackPanel>
@@ -330,7 +331,7 @@
                 <!-- brush/eraser: mask-edit hint -->
                 <StackPanel x:Name="MaskHint" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="(K = edit mask)" Foreground="{DynamicResource ChromeTextFaint}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Text="{loc:Loc mainWindow.kEditMask}" Foreground="{DynamicResource ChromeTextFaint}" VerticalAlignment="Center" FontSize="11" />
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -361,7 +362,7 @@
                                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding DisplayTitle}" Foreground="{DynamicResource ChromeText}" FontSize="12" VerticalAlignment="Center" />
                                             <Button Classes="iconbtn" Width="14" Height="14" Padding="0" Click="OnCloseTab" Tag="{Binding}"
-                                                    ToolTip.Tip="Close tab" VerticalAlignment="Center">
+                                                    ToolTip.Tip="{loc:Loc mainWindow.closeTab}" VerticalAlignment="Center">
                                                 <TextBlock Text="×" FontSize="13" Foreground="{DynamicResource ChromeTextDim}" />
                                             </Button>
                                         </StackPanel>
@@ -369,7 +370,7 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <Button Classes="iconbtn" Width="22" Click="OnNewTabButton" ToolTip.Tip="New document" VerticalAlignment="Center" Margin="4,0,0,0">
+                        <Button Classes="iconbtn" Width="22" Click="OnNewTabButton" ToolTip.Tip="{loc:Loc mainWindow.newDocument}" VerticalAlignment="Center" Margin="4,0,0,0">
                             <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
                         </Button>
                     </StackPanel>
@@ -394,8 +395,8 @@
                         <!-- empty / welcome state (no open document) -->
                         <StackPanel x:Name="EmptyState" IsVisible="False" Spacing="10"
                                     HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
-                            <TextBlock Text="No document open" Foreground="{DynamicResource ChromeTextFaint}" FontSize="16" HorizontalAlignment="Center" />
-                            <TextBlock Text="File ▸ New (Ctrl+N) · Open · New from Clipboard · or drop an image"
+                            <TextBlock Text="{loc:Loc mainWindow.noDocumentOpen}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="16" HorizontalAlignment="Center" />
+                            <TextBlock Text="{loc:Loc mainWindow.fileNewCtrlNOpen}"
                                        Foreground="#FF5A5A5A" FontSize="12" HorizontalAlignment="Center" />
                         </StackPanel>
                     </Panel>
@@ -405,14 +406,14 @@
                 <Border Grid.Row="2" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0">
                     <DockPanel Margin="8,0" LastChildFill="True">
                         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
-                            <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomFit" ToolTip.Tip="Fit (0)">
+                            <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomFit" ToolTip.Tip="{loc:Loc mainWindow.fit0}">
                                 <Path Classes="icon" Width="13" Height="13" Data="M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5" />
                             </Button>
                             <Button Classes="iconbtn" Width="24" Height="20" Click="OnZoomActual" ToolTip.Tip="100%">
                                 <TextBlock Text="1:1" FontSize="10" Foreground="{DynamicResource ChromeText}" />
                             </Button>
                             <TextBox x:Name="ZoomBox" Width="54" Text="100%" FontSize="11" TextAlignment="Center"
-                                     VerticalContentAlignment="Center" KeyDown="OnZoomBoxKey" ToolTip.Tip="Zoom level" />
+                                     VerticalContentAlignment="Center" KeyDown="OnZoomBoxKey" ToolTip.Tip="{loc:Loc mainWindow.zoomLevel}" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock x:Name="DocInfoLabel" Text="—" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
@@ -423,7 +424,7 @@
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock x:Name="SelSizeLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="90" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
-                            <TextBlock Text="RGBA/16f linear" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Text="{loc:Loc mainWindow.rgba16fLinear}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                         </StackPanel>
                         <!-- active-tool modifier hints (Affinity-style) -->
@@ -441,12 +442,12 @@
                     <DockPanel Grid.Row="0">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="Color" Tapped="OnSelectColorTab" Tag="color" />
-                                <TextBlock x:Name="TabGrad" Classes="panelHeader" Text="Gradients"
+                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="{loc:Loc mainWindow.color}" Tapped="OnSelectColorTab" Tag="color" />
+                                <TextBlock x:Name="TabGrad" Classes="panelHeader" Text="{loc:Loc mainWindow.gradients}"
                                            Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="grad" />
-                                <TextBlock x:Name="TabSwatches" Classes="panelHeader" Text="Swatches"
+                                <TextBlock x:Name="TabSwatches" Classes="panelHeader" Text="{loc:Loc mainWindow.swatches}"
                                            Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="swatch" />
-                                <TextBlock x:Name="TabHist" Classes="panelHeader" Text="Histogram"
+                                <TextBlock x:Name="TabHist" Classes="panelHeader" Text="{loc:Loc mainWindow.histogram}"
                                            Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="hist" />
                             </StackPanel>
                         </Border>
@@ -494,15 +495,15 @@
                                                     Background="Black" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Tapped="OnPickFg" />
                                         </Grid>
                                         <StackPanel Spacing="3" VerticalAlignment="Center">
-                                            <Button Classes="iconbtn" Click="OnSwapColors" ToolTip.Tip="Swap foreground/background (X)">
+                                            <Button Classes="iconbtn" Click="OnSwapColors" ToolTip.Tip="{loc:Loc mainWindow.swapForegroundBackgroundX}">
                                                 <Path Classes="icon" Width="13" Height="13" Data="M16 3l4 4-4 4 M20 7H9 M8 21l-4-4 4-4 M4 17h11" />
                                             </Button>
-                                            <Button Classes="iconbtn" Click="OnResetColors" ToolTip.Tip="Reset to black/white (D)">
+                                            <Button Classes="iconbtn" Click="OnResetColors" ToolTip.Tip="{loc:Loc mainWindow.resetToBlackWhiteD}">
                                                 <Path Classes="icon" Width="12" Height="12" Data="M4 4h16v16H4z" />
                                             </Button>
                                         </StackPanel>
                                         <StackPanel VerticalAlignment="Center" Width="110">
-                                            <TextBlock Text="Alpha" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" />
+                                            <TextBlock Text="{loc:Loc mainWindow.alpha}" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" />
                                             <Slider x:Name="AlphaSlider" Minimum="0" Maximum="100" Value="100" ValueChanged="OnAlphaChanged" />
                                         </StackPanel>
                                     </StackPanel>
@@ -513,13 +514,13 @@
                             <StackPanel x:Name="GradientPanel" IsVisible="False" Margin="8,8,8,6" Spacing="4">
                                 <local:GradientBar x:Name="GradBar" Height="42" />
                                 <StackPanel Orientation="Horizontal" Spacing="2">
-                                    <Button Classes="iconbtn" Click="OnGradAddStop" ToolTip.Tip="Add stop">
+                                    <Button Classes="iconbtn" Click="OnGradAddStop" ToolTip.Tip="{loc:Loc mainWindow.addStop}">
                                         <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
                                     </Button>
-                                    <Button Classes="iconbtn" Click="OnGradDelStop" ToolTip.Tip="Delete selected stop">
+                                    <Button Classes="iconbtn" Click="OnGradDelStop" ToolTip.Tip="{loc:Loc mainWindow.deleteSelectedStop}">
                                         <Path Classes="icon" Width="14" Height="14" Data="M5 12h14" />
                                     </Button>
-                                    <TextBlock Text="click bar = add · drag = move · wheel sets stop colour"
+                                    <TextBlock Text="{loc:Loc mainWindow.clickBarAddDragMove}"
                                                Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" VerticalAlignment="Center"
                                                TextWrapping="Wrap" Width="200" />
                                 </StackPanel>
@@ -533,7 +534,7 @@
                                             <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
                                     </ItemsControl>
-                                    <Button Classes="iconbtn" Content="+ Add swatch" FontSize="10" HorizontalAlignment="Left" Click="OnAddSwatch" />
+                                    <Button Classes="iconbtn" Content="{loc:Loc mainWindow.addSwatch}" FontSize="10" HorizontalAlignment="Left" Click="OnAddSwatch" />
                                 </StackPanel>
                             </ScrollViewer>
 
@@ -551,9 +552,9 @@
                     <DockPanel Grid.Row="2">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Classes="panelHeader" Text="Layers" />
-                                <TextBlock Classes="panelHeader" Text="Channels" Foreground="{DynamicResource ChromeTextFaint}" />
-                                <TextBlock Classes="panelHeader" Text="Paths" Foreground="{DynamicResource ChromeTextFaint}" />
+                                <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.layers}" />
+                                <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.channels}" Foreground="{DynamicResource ChromeTextFaint}" />
+                                <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.paths}" Foreground="{DynamicResource ChromeTextFaint}" />
                             </StackPanel>
                         </Border>
                         <!-- blend mode + opacity row (bound to selected layer; hidden when nothing is selected) -->
@@ -573,19 +574,19 @@
                                            Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
                                 <Slider Minimum="0" Maximum="100"
                                         Value="{Binding SelectedLayer.FillOpacityPercent, Mode=TwoWay}" />
-                                <CheckBox Content="Clip to layer below" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                                <CheckBox Content="{loc:Loc mainWindow.clipToLayerBelow}" FontSize="11" Foreground="{DynamicResource ChromeText}"
                                           IsChecked="{Binding SelectedLayer.ClipToBelow, Mode=TwoWay}" />
                                 <!-- locks + colour tag (act on the selected layer) -->
                                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                    <TextBlock Text="Lock:" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" VerticalAlignment="Center" />
-                                    <ToggleButton Classes="opt" Width="26" Content="Pos" FontSize="10"
-                                                  ToolTip.Tip="Lock position / transform"
+                                    <TextBlock Text="{loc:Loc mainWindow.lock}" Foreground="{DynamicResource ChromeTextDim}" FontSize="10" VerticalAlignment="Center" />
+                                    <ToggleButton Classes="opt" Width="26" Content="{loc:Loc mainWindow.pos}" FontSize="10"
+                                                  ToolTip.Tip="{loc:Loc mainWindow.lockPositionTransform}"
                                                   IsChecked="{Binding SelectedLayer.LockPosition, Mode=TwoWay}" />
-                                    <ToggleButton Classes="opt" Width="26" Content="Pix" FontSize="10"
-                                                  ToolTip.Tip="Lock pixels"
+                                    <ToggleButton Classes="opt" Width="26" Content="{loc:Loc mainWindow.pix}" FontSize="10"
+                                                  ToolTip.Tip="{loc:Loc mainWindow.lockPixels}"
                                                   IsChecked="{Binding SelectedLayer.LockPixels, Mode=TwoWay}" />
                                     <ToggleButton Classes="opt" Width="22" Content="α" FontSize="11"
-                                                  ToolTip.Tip="Lock transparency (preserve alpha)"
+                                                  ToolTip.Tip="{loc:Loc mainWindow.lockTransparencyPreserveAlpha}"
                                                   IsChecked="{Binding SelectedLayer.LockAlpha, Mode=TwoWay}" />
                                     <Border Width="8" />
                                     <ItemsControl ItemsSource="{Binding TagSwatches}">
@@ -596,7 +597,7 @@
                                             <DataTemplate x:DataType="vm:TagSwatch">
                                                 <Button Width="14" Height="14" Padding="0" CornerRadius="7"
                                                         Background="{Binding Brush}" BorderBrush="#FF555555" BorderThickness="1"
-                                                        Click="OnSetTag" Tag="{Binding Index}" ToolTip.Tip="Colour tag" />
+                                                        Click="OnSetTag" Tag="{Binding Index}" ToolTip.Tip="{loc:Loc mainWindow.colourTag}" />
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -611,69 +612,69 @@
                             <Grid ColumnDefinitions="Auto,*,Auto">
                                 <!-- left cluster: add layer / mask / adjustments / live filters / group -->
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
-                                    <Button Classes="iconbtn" Command="{Binding NewLayerCommand}" ToolTip.Tip="New pixel layer">
+                                    <Button Classes="iconbtn" Command="{Binding NewLayerCommand}" ToolTip.Tip="{loc:Loc mainWindow.newPixelLayer}">
                                         <Path Classes="icon" Width="14" Height="14" Data="M12 5v14 M5 12h14" />
                                     </Button>
-                                    <Button Classes="iconbtn" Command="{Binding ToggleMaskCommand}" ToolTip.Tip="Add / remove mask">
+                                    <Button Classes="iconbtn" Command="{Binding ToggleMaskCommand}" ToolTip.Tip="{loc:Loc mainWindow.addRemoveMask}">
                                         <Path Classes="icon" Width="14" Height="14"
                                               Data="M4 4h16v16H4z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
                                     </Button>
                                     <!-- adjustments flyout (Affinity half-circle) -->
-                                    <Button Classes="iconbtn" ToolTip.Tip="Add adjustment">
+                                    <Button Classes="iconbtn" ToolTip.Tip="{loc:Loc mainWindow.addAdjustment}">
                                         <Button.Flyout>
                                             <MenuFlyout>
-                                                <MenuItem Header="Brightness / Contrast" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.BrightnessContrast}" />
-                                                <MenuItem Header="Levels" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Levels}" />
-                                                <MenuItem Header="Curves" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Curves}" />
-                                                <MenuItem Header="HSL" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Hsl}" />
-                                                <MenuItem Header="White Balance" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.WhiteBalance}" />
-                                                <MenuItem Header="Black &amp; White" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.BlackWhite}" />
-                                                <MenuItem Header="Colour Balance" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ColorBalance}" />
-                                                <MenuItem Header="Channel Mixer" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ChannelMixer}" />
-                                                <MenuItem Header="Shadows / Highlights" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ShadowsHighlights}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.brightnessContrast}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.BrightnessContrast}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.levels}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Levels}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.curves}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Curves}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.hsl}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Hsl}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.whiteBalance}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.WhiteBalance}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.blackWhite}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.BlackWhite}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.colourBalance}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ColorBalance}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.channelMixer}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ChannelMixer}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.shadowsHighlights}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.ShadowsHighlights}" />
                                                 <Separator />
-                                                <MenuItem Header="Exposure" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Exposure}" />
-                                                <MenuItem Header="Vibrance" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Vibrance}" />
-                                                <MenuItem Header="Threshold" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Threshold}" />
-                                                <MenuItem Header="Posterise" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Posterize}" />
-                                                <MenuItem Header="Invert" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Invert}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.exposure}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Exposure}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.vibrance}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Vibrance}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.threshold}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Threshold}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.posterise}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Posterize}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.invert}" Command="{Binding NewAdjustmentCommand}" CommandParameter="{x:Static eng:AdjustmentKind.Invert}" />
                                             </MenuFlyout>
                                         </Button.Flyout>
                                         <Path Classes="icon" Width="14" Height="14"
                                               Data="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 3v18" />
                                     </Button>
                                     <!-- live filters flyout -->
-                                    <Button Classes="iconbtn" ToolTip.Tip="Add live filter">
+                                    <Button Classes="iconbtn" ToolTip.Tip="{loc:Loc mainWindow.addLiveFilter}">
                                         <Button.Flyout>
                                             <MenuFlyout>
-                                                <MenuItem Header="Gaussian Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
-                                                <MenuItem Header="Box Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />
-                                                <MenuItem Header="Motion Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.MotionBlur}" />
-                                                <MenuItem Header="Zoom Blur" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.ZoomBlur}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.gaussianBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.boxBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.motionBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.MotionBlur}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.zoomBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.ZoomBlur}" />
                                                 <Separator />
-                                                <MenuItem Header="Sharpen" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Sharpen}" />
-                                                <MenuItem Header="Unsharp Mask" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.UnsharpMask}" />
-                                                <MenuItem Header="High Pass" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.HighPass}" />
-                                                <MenuItem Header="Clarity" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Clarity}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.sharpen}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Sharpen}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.unsharpMask}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.UnsharpMask}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.highPass}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.HighPass}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.clarity}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Clarity}" />
                                                 <Separator />
-                                                <MenuItem Header="Add Noise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.AddNoise}" />
-                                                <MenuItem Header="Denoise" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.addNoise}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.AddNoise}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.denoise}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
                                             </MenuFlyout>
                                         </Button.Flyout>
                                         <Path Classes="icon" Width="14" Height="14"
                                               Data="M12 2.7s5 5.3 5 9.3a5 5 0 0 1-10 0c0-4 5-9.3 5-9.3z" />
                                     </Button>
-                                    <Button Classes="iconbtn" Click="OnFxButton" ToolTip.Tip="Layer Effects">
+                                    <Button Classes="iconbtn" Click="OnFxButton" ToolTip.Tip="{loc:Loc mainWindow.layerEffects}">
                                         <TextBlock Text="fx" FontStyle="Italic" FontSize="13" Foreground="{DynamicResource ChromeText}"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Button>
-                                    <Button Classes="iconbtn" Command="{Binding GroupCommand}" ToolTip.Tip="Group selected">
+                                    <Button Classes="iconbtn" Command="{Binding GroupCommand}" ToolTip.Tip="{loc:Loc mainWindow.groupSelected}">
                                         <Path Classes="icon" Width="14" Height="14"
                                               Data="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z M12 10v6 M9 13h6" />
                                     </Button>
                                 </StackPanel>
                                 <!-- right: delete (Affinity puts trash far right) -->
-                                <Button Grid.Column="2" Classes="iconbtn" Command="{Binding DeleteLayerCommand}" ToolTip.Tip="Delete layer">
+                                <Button Grid.Column="2" Classes="iconbtn" Command="{Binding DeleteLayerCommand}" ToolTip.Tip="{loc:Loc mainWindow.deleteLayer}">
                                     <Path Classes="icon" Width="14" Height="14"
                                           Data="M3 6h18 M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                 </Button>
@@ -690,15 +691,15 @@
                                     <DockPanel Height="{StaticResource LayerRowHeight}" LastChildFill="True">
                                         <DockPanel.ContextFlyout>
                                             <MenuFlyout>
-                                                <MenuItem Header="Duplicate" Click="OnDuplicate" />
-                                                <MenuItem Header="Delete" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" />
+                                                <MenuItem Header="{loc:Loc mainWindow.delete}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="Merge Down" Click="OnMergeDown" />
-                                                <MenuItem Header="Rasterise" Click="OnRasterise" />
-                                                <MenuItem Header="Add / Remove Mask" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.mergeDown}" Click="OnMergeDown" />
+                                                <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
+                                                <MenuItem Header="{loc:Loc mainWindow.addRemoveMask2}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="Flip Horizontal" Click="OnFlipH" />
-                                                <MenuItem Header="Flip Vertical" Click="OnFlipV" />
+                                                <MenuItem Header="{loc:Loc mainWindow.flipHorizontal}" Click="OnFlipH" />
+                                                <MenuItem Header="{loc:Loc mainWindow.flipVertical}" Click="OnFlipV" />
                                             </MenuFlyout>
                                         </DockPanel.ContextFlyout>
                                         <!-- colour-tag strip (Affinity) -->
@@ -707,7 +708,7 @@
                                         <!-- visibility eye (far right, Affinity-style) -->
                                         <ToggleButton Classes="eye" DockPanel.Dock="Right"
                                                       IsChecked="{Binding IsVisible, Mode=TwoWay}"
-                                                      ToolTip.Tip="Toggle visibility">
+                                                      ToolTip.Tip="{loc:Loc mainWindow.toggleVisibility}">
                                             <Panel>
                                                 <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsVisible}"
                                                       Data="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z" />
@@ -718,7 +719,7 @@
                                         <!-- clip-to-below indicator -->
                                         <Path Classes="icon" DockPanel.Dock="Right" Width="12" Height="12"
                                               Margin="2,0,4,0" VerticalAlignment="Center"
-                                              IsVisible="{Binding ClipToBelow}" ToolTip.Tip="Clipped to layer below"
+                                              IsVisible="{Binding ClipToBelow}" ToolTip.Tip="{loc:Loc mainWindow.clippedToLayerBelow}"
                                               Data="M9 10l-5 5 5 5 M20 4v7a4 4 0 0 1-4 4H4" />
                                         <!-- thumbnail + name (indented by tree depth) -->
                                         <StackPanel Orientation="Horizontal" Spacing="6"

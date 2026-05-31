@@ -34,6 +34,10 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, string> _workKeys = new();
     private readonly Dictionary<string, TextBox> _keyBoxes = new();
 
+    // language picker working state
+    private List<string> _langCodes = new();
+    private bool _loadingLang;
+
     public SettingsWindow() : this(new SableSettings(), "—", null) { }
 
     public SettingsWindow(SableSettings settings, string gpuName, ModelRegistry? registry)
@@ -50,6 +54,14 @@ public partial class SettingsWindow : Window
         DpiBox.Text = ((int)_s.DefaultDpi).ToString();
         // UI
         ThemeCombo.SelectedIndex = (int)_s.Theme;
+        // Language (discovered from the Locales folder; switching re-translates live)
+        _langCodes = Sable.App.Localization.Loc.Instance.GetAvailableLanguages();
+        _loadingLang = true;
+        foreach (var code in _langCodes)
+            LanguageCombo.Items.Add(new ComboBoxItem { Content = Sable.App.Localization.Loc.Instance.GetLanguageDisplayName(code) });
+        int li = _langCodes.FindIndex(c => string.Equals(c, _s.Language, StringComparison.OrdinalIgnoreCase));
+        LanguageCombo.SelectedIndex = li < 0 ? 0 : li;
+        _loadingLang = false;
         GuideColorField.Hex = _s.GuideColor;
         SmartColorField.Hex = _s.SmartGuideColor;
         GridColorField.Hex = _s.GridColor;
@@ -69,6 +81,16 @@ public partial class SettingsWindow : Window
         VersionLabel.Text = $"Version {ver?.ToString(3) ?? "0.1.0"}  ·  net10.0  ·  Avalonia + wgpu";
 
         _aiInitializing = false;   // from here, toggling AI on triggers the licence cycle
+    }
+
+    private void OnLanguageChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingLang || LanguageCombo is null) return;
+        int i = LanguageCombo.SelectedIndex;
+        if (i < 0 || i >= _langCodes.Count) return;
+        var code = _langCodes[i];
+        _s.Language = code;
+        Sable.App.Localization.Loc.Instance.CurrentLanguage = code;   // live re-translate, no restart
     }
 
     private void OnCategory(object? sender, SelectionChangedEventArgs e)

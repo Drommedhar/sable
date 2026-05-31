@@ -1,25 +1,26 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
         xmlns:local="clr-namespace:Sable.App"
         x:Class="Sable.App.SettingsWindow"
         Width="780" Height="560"
         Background="{DynamicResource ChromePanel}"
         WindowStartupLocation="CenterOwner"
-        Title="Settings">
+        Title="{loc:Loc settingsWindow.settings}">
     <DockPanel LastChildFill="True">
 
         <!-- bottom bar -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="12,8">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="Cancel" Classes="opt" Padding="16,0" Click="OnCancel" />
-                <Button Content="OK" Classes="opt" Padding="20,0" Click="OnOk" />
+                <Button Content="{loc:Loc settingsWindow.cancel}" Classes="opt" Padding="16,0" Click="OnCancel" />
+                <Button Content="{loc:Loc settingsWindow.ok}" Classes="opt" Padding="20,0" Click="OnOk" />
             </StackPanel>
         </Border>
 
         <!-- left: search + category list -->
         <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource ChromeFooter}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,0">
             <DockPanel LastChildFill="True">
-                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" PlaceholderText="Search" Margin="8" TextChanged="OnSearch" />
+                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" PlaceholderText="{loc:Loc settingsWindow.search}" Margin="8" TextChanged="OnSearch" />
                 <ListBox x:Name="CatList" Classes="settingsCats" Background="Transparent" Padding="0"
                          SelectionChanged="OnCategory" SelectedIndex="0">
                     <ListBoxItem Tag="0">General</ListBoxItem>
@@ -39,8 +40,8 @@
             <Panel>
                 <!-- General -->
                 <StackPanel x:Name="PanelGeneral" Spacing="2">
-                    <TextBlock Text="General" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
-                    <TextBlock Text="Document" Classes="settingHeader" />
+                    <TextBlock Text="{loc:Loc settingsWindow.general}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.document}" Classes="settingHeader" />
                     <local:SettingRow Label="Reopen documents on startup"><ToggleSwitch x:Name="ReopenSwitch" /></local:SettingRow>
                     <local:SettingRow Label="Limit initial zoom to a maximum of 100%"><ToggleSwitch x:Name="LimitZoomSwitch" /></local:SettingRow>
                     <local:SettingRow Label="Default DPI for new documents"><TextBox Width="80" x:Name="DpiBox" TextAlignment="Center" /></local:SettingRow>
@@ -48,27 +49,32 @@
 
                 <!-- User Interface -->
                 <StackPanel x:Name="PanelUI" Spacing="2" IsVisible="False">
-                    <TextBlock Text="User Interface" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
-                    <TextBlock Text="Appearance" Classes="settingHeader" />
+                    <TextBlock Text="{loc:Loc settingsWindow.userInterface}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.appearance}" Classes="settingHeader" />
                     <local:SettingRow Label="UI style">
                         <ComboBox Width="120" x:Name="ThemeCombo" SelectedIndex="0">
                             <ComboBoxItem>Dark</ComboBoxItem><ComboBoxItem>Gray</ComboBoxItem><ComboBoxItem>Light</ComboBoxItem>
                         </ComboBox>
                     </local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,4"
-                               Text="Dark and Gray are complete. Light is in progress (some panels still tune their contrast)." />
-                    <TextBlock Text="Canvas overlays" Classes="settingHeader" Margin="0,10,0,0" />
+                               Text="{loc:Loc settingsWindow.darkAndGrayAreComplete}" />
+                    <local:SettingRow Label="{loc:Loc settingsWindow.language}">
+                        <ComboBox Width="160" x:Name="LanguageCombo" SelectionChanged="OnLanguageChanged" />
+                    </local:SettingRow>
+                    <TextBlock Classes="settingHint" Margin="0,2,0,4"
+                               Text="{loc:Loc settingsWindow.languageHint}" />
+                    <TextBlock Text="{loc:Loc settingsWindow.canvasOverlays}" Classes="settingHeader" Margin="0,10,0,0" />
                     <local:SettingRow Label="Guide colour"><local:HexColorField x:Name="GuideColorField" /></local:SettingRow>
                     <local:SettingRow Label="Smart-guide colour"><local:HexColorField x:Name="SmartColorField" /></local:SettingRow>
                     <local:SettingRow Label="Grid colour"><local:HexColorField x:Name="GridColorField" /></local:SettingRow>
                     <local:SettingRow Label="Quick-mask colour"><local:HexColorField x:Name="QuickMaskColorField" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,4"
-                               Text="Colours for the on-canvas guides, smart-guide alignment lines, grid, and quick-mask overlay." />
+                               Text="{loc:Loc settingsWindow.coloursForTheOnCanvas}" />
                 </StackPanel>
 
                 <!-- Performance -->
                 <StackPanel x:Name="PanelPerf" Spacing="2" IsVisible="False">
-                    <TextBlock Text="Performance" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.performance}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <local:SettingRow Label="Undo limit">
                         <StackPanel Orientation="Horizontal" Spacing="8" Width="260">
                             <Slider x:Name="UndoSlider" Width="180" Minimum="16" Maximum="2048" ValueChanged="OnUndoSlider" />
@@ -82,42 +88,42 @@
 
                 <!-- Colour -->
                 <StackPanel x:Name="PanelColor" Spacing="2" IsVisible="False">
-                    <TextBlock Text="Colour" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.colour}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <local:SettingRow Label="Working space">
-                        <TextBlock Classes="settingLabel" Foreground="{DynamicResource ChromeTextDim}" Text="Linear RGBA16F" />
+                        <TextBlock Classes="settingLabel" Foreground="{DynamicResource ChromeTextDim}" Text="{loc:Loc settingsWindow.linearRGBA16F}" />
                     </local:SettingRow>
                 </StackPanel>
 
                 <!-- Machine Learning (Phase 8 AI) -->
                 <StackPanel x:Name="PanelAI" Spacing="2" IsVisible="False">
-                    <TextBlock Text="Machine Learning" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.machineLearning}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <local:SettingRow Label="Enable on-device AI"><ToggleSwitch x:Name="AiEnabledSwitch" IsCheckedChanged="OnAiEnabledChanged" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,0"
-                               Text="GPU-only, no CPU fallback. The features below each need a model (downloaded from the source). View and accept each licence to install it; declined models stay listed here to install later." />
+                               Text="{loc:Loc settingsWindow.gpuOnlyNoCPUFallback}" />
                     <StackPanel x:Name="AiModelRows" Spacing="8" Margin="0,10,0,0" IsVisible="False" />
                 </StackPanel>
 
                 <!-- Updates -->
                 <StackPanel x:Name="PanelUpdates" Spacing="2" IsVisible="False">
-                    <TextBlock Text="Updates" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.updates}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <local:SettingRow Label="Check for updates on launch"><ToggleSwitch x:Name="AutoUpdateSwitch" /></local:SettingRow>
                 </StackPanel>
 
                 <!-- Keyboard (rebindable command hotkeys, PLAN §17.1) -->
                 <StackPanel x:Name="PanelKeys" Spacing="2" IsVisible="False">
-                    <TextBlock Text="Keyboard" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <TextBlock Text="{loc:Loc settingsWindow.keyboard}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <TextBlock Classes="settingHint" Margin="0,0,0,6"
-                               Text="Click a shortcut, then press the key combination. Backspace clears it; Reset restores the default. Tool letters (B/V/M…) and navigation keys are fixed." />
+                               Text="{loc:Loc settingsWindow.clickAShortcutThenPress}" />
                     <TextBlock x:Name="KeyWarn" Classes="settingHint" Foreground="{DynamicResource ChromeWarn}" IsVisible="False" Margin="0,0,0,4" />
                     <StackPanel x:Name="KeyRows" Spacing="2" />
                 </StackPanel>
 
                 <!-- About -->
                 <StackPanel x:Name="PanelAbout" Spacing="4" IsVisible="False">
-                    <TextBlock Text="Sable" FontSize="18" Foreground="{DynamicResource ChromeText}" />
+                    <TextBlock Text="{loc:Loc settingsWindow.sable}" FontSize="18" Foreground="{DynamicResource ChromeText}" />
                     <TextBlock x:Name="VersionLabel" Classes="settingLabel" Foreground="{DynamicResource ChromeTextDim}" />
                     <TextBlock Classes="settingHint" Margin="0,6,0,0"
-                               Text="Cross-platform GPU-first raster editor. MIT licence. Third-party notices in THIRD_PARTY_NOTICES.md." />
+                               Text="{loc:Loc settingsWindow.crossPlatformGPUFirstRaster}" />
                 </StackPanel>
             </Panel>
         </ScrollViewer>
