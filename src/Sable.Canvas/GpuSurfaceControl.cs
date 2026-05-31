@@ -435,7 +435,11 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         var dab = _compositor.Preview;
         bool dabChanged = !Nullable.Equals(dab, _lastPreview);
         if (_compositeView is null || _doc.NeedsComposite || dabChanged)
+        {
+            // composite-cache hint: the edited layer → backdrop below it is reused (PLAN §7 hot-path)
+            _compositor.CacheHintLayer = ActiveLayer;
             _compositeView = _compositor.Composite(_doc);
+        }
         _lastPreview = dab;
 
         var api = _gpu.Api;

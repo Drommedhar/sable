@@ -44,6 +44,14 @@ public sealed unsafe class GpuCompositor : IDisposable
     private readonly Dictionary<(Layer, int, int), bool> _emptyTiles = new();   // tile transparency cache
     private readonly Dictionary<Layer, (int w, int h)> _layerTileDims = new();   // detect a layer resize → reset tiles
 
+    // --- composite-cache (PLAN §7 hot-path): cached accumulator below the active (edited) layer ---
+    /// <summary>The layer currently being edited; the backdrop below it is reused while painting.</summary>
+    public Layer? CacheHintLayer { get; set; }
+    private Buffer* _backdropCache;        // doc-sized snapshot of the accumulator below the active layer
+    private bool _cacheValid;
+    private Layer? _cacheActive;           // the active layer the snapshot was built for
+    private Layer[]? _cachePrefix;         // the layers below active, to detect a structural change
+
     /// <summary>Live brush-preview dab composited into the stack after its target layer (null = none).</summary>
     public PreviewDab? Preview { get; set; }
 
@@ -362,6 +370,8 @@ public sealed unsafe class GpuCompositor : IDisposable
         _fxLdoc = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _fxTint = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _fxBlur = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _backdropCache = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _cacheValid = false;   // size changed → old snapshot invalid
         _zero = new byte[_imgBytes];
 
         // shared "fully revealing" white mask for layers without a mask
@@ -445,6 +455,10 @@ public sealed unsafe class GpuCompositor : IDisposable
         _residency?.Clear();
         _emptyTiles.Clear();
         _layerTileDims.Clear();
+        // composite-cache belongs to the old doc's layers
+        _cacheValid = false;
+        _cacheActive = null;
+        _cachePrefix = null;
     }
 
     /// <summary>Composite the document and return the result texture view.</summary>
@@ -452,7 +466,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     {
         EnsureSize(doc);
 
-        var result = CompositeList(doc.Layers, 0);
+        var result = CompositeRoot(doc);
 
         // copy result buffer -> composite storage texture (no row-alignment limit)
         _lastResult = result;
@@ -461,18 +475,83 @@ public sealed unsafe class GpuCompositor : IDisposable
         return _compositeView;
     }
 
+    /// <summary>
+    /// Composite the root layer list, reusing a cached backdrop below the active (edited) layer when
+    /// nothing under it changed (PLAN §7 hot-path). On a brush stroke only the active layer + the
+    /// layers above it are re-blended; everything below is the unchanged <see cref="_backdropCache"/>.
+    /// </summary>
+    private Buffer* CompositeRoot(Document doc)
+    {
+        var layers = doc.Layers;
+        int ai = CacheHintLayer is null ? -1 : layers.IndexOf(CacheHintLayer);
+        bool canCache = ai >= 1 && _backdropCache is not null;
+
+        // fast path: the prefix (layers below active) is identical + clean → reuse the snapshot
+        if (canCache && _cacheValid && ReferenceEquals(_cacheActive, CacheHintLayer)
+            && PrefixMatches(layers, ai) && !PrefixDirty(layers, ai))
+        {
+            ScratchPair(0, out Buffer* cur, out Buffer* oth);
+            CopyBuffer(_backdropCache, cur, _imgBytes);
+            for (int i = ai; i < layers.Count; i++) BlendOneLayer(layers[i], ref cur, ref oth, 0);
+            return cur;
+        }
+
+        // full walk; snapshot the backdrop the moment we reach the active layer
+        ScratchPair(0, out Buffer* current, out Buffer* other);
+        ClearBuffer(current);
+        for (int i = 0; i < layers.Count; i++)
+        {
+            if (canCache && i == ai)
+            {
+                CopyBuffer(current, _backdropCache, _imgBytes);
+                _cacheActive = CacheHintLayer;
+                _cachePrefix = layers.GetRange(0, ai).ToArray();
+                _cacheValid = true;
+            }
+            BlendOneLayer(layers[i], ref current, ref other, 0);
+        }
+        if (!canCache) _cacheValid = false;
+        return current;
+    }
+
+    private bool PrefixMatches(List<Layer> layers, int ai)
+    {
+        if (_cachePrefix is null || _cachePrefix.Length != ai) return false;
+        for (int i = 0; i < ai; i++) if (!ReferenceEquals(_cachePrefix[i], layers[i])) return false;
+        return true;
+    }
+
+    // any layer below the active one changed (param/mask/structure of a group) → cache stale
+    private static bool PrefixDirty(List<Layer> layers, int ai)
+    {
+        for (int i = 0; i < ai; i++) if (SubtreeDirty(layers[i])) return true;
+        return false;
+    }
+
+    private static bool SubtreeDirty(Layer l)
+    {
+        if (l.Dirty || l.MaskDirty) return true;
+        if (l is GroupLayer g) foreach (var c in g.Children) if (SubtreeDirty(c)) return true;
+        return false;
+    }
+
     /// <summary>Composite a layer list (bottom→top) over transparent; returns the result buffer.</summary>
     private Buffer* CompositeList(List<Layer> layers, int depth)
     {
-        var api = _gpu.Api;
         ScratchPair(depth, out Buffer* current, out Buffer* other);
         ClearBuffer(current);
+        foreach (var layer in layers) BlendOneLayer(layer, ref current, ref other, depth);
+        return current;
+    }
 
-        foreach (var layer in layers)
+    /// <summary>Blend one layer onto the accumulator (ping-pongs current/other). No-op if hidden.</summary>
+    private void BlendOneLayer(Layer layer, ref Buffer* current, ref Buffer* other, int depth)
+    {
+        if (!layer.Visible || layer.Opacity <= 0f) return;
+        var api = _gpu.Api;
+        var maskBuf = GetMaskBuffer(layer);
+
         {
-            if (!layer.Visible || layer.Opacity <= 0f) continue;
-            var maskBuf = GetMaskBuffer(layer);
-
             if (layer is PixelLayer px)
             {
                 bool previewing = Preview is { } pv0 && ReferenceEquals(pv0.Layer, layer);
@@ -542,7 +621,6 @@ public sealed unsafe class GpuCompositor : IDisposable
                 BlendBufferInto(ref current, ref other, _fxTint, BlendMode.Normal, layer.Opacity, 0f, 0f, maskBuf);
             }
         }
-        return current;
     }
 
     // write the 64B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask,
@@ -1298,6 +1376,8 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_fxLdoc is not null) { api.BufferRelease(_fxLdoc); _fxLdoc = null; }
         if (_fxTint is not null) { api.BufferRelease(_fxTint); _fxTint = null; }
         if (_fxBlur is not null) { api.BufferRelease(_fxBlur); _fxBlur = null; }
+        if (_backdropCache is not null) { api.BufferRelease(_backdropCache); _backdropCache = null; }
+        _cacheValid = false;
         _lastResult = null;
     }
 

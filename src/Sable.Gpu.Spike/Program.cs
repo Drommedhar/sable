@@ -317,6 +317,35 @@ unsafe
             $"green=({t1[c]},{t1[c+1]},{t1[c+2]},{t1[c+3]}) midA={t1[e+3]} ok={emptyOk && paintOk}");
     }
 
+    // --- composite-cache: fast path (cached backdrop below active) == full recomposite ---
+    {
+        var cdoc = new Sable.Engine.Document(64, 64);
+        Sable.Engine.Layers.PixelLayer Mk(string n, byte r, byte g, byte b, byte a)
+        {
+            var l = new Sable.Engine.Layers.PixelLayer(64, 64, n);
+            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r; l.Pixels[i+1] = g; l.Pixels[i+2] = b; l.Pixels[i+3] = a; }
+            return l;
+        }
+        var L0 = Mk("bg", 200, 30, 30, 255);
+        var L1 = Mk("mid", 30, 200, 30, 128);
+        var L2 = Mk("top", 30, 30, 200, 128);
+        cdoc.Layers.Add(L0); cdoc.Layers.Add(L1); cdoc.Layers.Add(L2);
+        using var cc = new Sable.Engine.Compositing.GpuCompositor(gpu);
+
+        cc.CacheHintLayer = null;                          // reference: always full walk
+        var refB = (byte[])cc.CompositeToBytes(cdoc).Clone();
+
+        cc.CacheHintLayer = L2;                            // build the backdrop cache (below L2 = L0+L1)
+        cc.CompositeToBytes(cdoc);
+        L2.Dirty = true;                                   // only the active layer dirty → fast path
+        var fastB = cc.CompositeToBytes(cdoc);
+
+        bool same = refB.Length == fastB.Length;
+        if (same) for (int i = 0; i < refB.Length; i++) if (refB[i] != fastB[i]) { same = false; break; }
+        int mid = (32 * 64 + 32) * 4;
+        Console.WriteLine($"composite-cache: fast==full={same} px=({fastB[mid]},{fastB[mid+1]},{fastB[mid+2]},{fastB[mid+3]})");
+    }
+
     // --- M1 verification: .sable save/load round-trip ---------------------------
     var sdoc = Sable.Engine.Document.CreateDemo(80, 60);
     var sablePath = Path.GetFullPath("roundtrip.sable");

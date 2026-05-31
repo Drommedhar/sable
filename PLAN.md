@@ -727,7 +727,7 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 - ✅ **Real GPU-tiled layer storage** (atlas + LRU residency + eviction) — meets the §3 invariant; pixel layers sample resident 256² tiles from a shared atlas (`TileResidency` + `composite.wgsl` srcMode/atlas bindings). ⬜ follow-up: viewport-tile culling for true 100MP; atlas masks.
 - ✅ **Rebindable hotkeys (keymap settings page)** — command actions (`KeyCommands` catalog + `SableSettings.KeyBindings`); steal+warn. ⬜ tool letters + presets.
 - ✅ **Customisable canvas-overlay appearance** — guide/smart/grid/quick-mask colours (blit uniform 60→72 floats). ⬜ widths/dash/opacity/spacing/ruler-unit.
-- ⬜ **Composite-cache** (cache backdrop below active layer; region recompositing) for big-doc paint. *(hot-path; also enables atlas viewport culling)*
+- ✅ **Composite-cache** (cache backdrop below active layer) — brush strokes re-blend only active→top (`GpuCompositor.CompositeRoot`/`_backdropCache`; GPU smoke fast==full). ⬜ follow-up: region/dirty-tile recompositing + viewport-tile culling.
 - ⬜ **HiDPI / per-monitor DPI**.
 - ⬜ **Dock.Avalonia docking** + saved workspaces + macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels (§16.13, §16.14).
 
