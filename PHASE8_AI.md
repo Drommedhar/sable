@@ -383,11 +383,29 @@ Each slice is independently shippable + verified, following the project's slice 
     (curated pointer list — name/url/size/vram/licence, no bundled weights) + `Sable.Ai/Download/ModelDownloader`
     (recommended OR direct/HF `owner/repo/file` shorthand → stream to `models/<id>/`, progress, auto-draft
     manifest, register) + a minimal `ModelsWindow` (recommended rows + paste-URL box + installed list),
-    opened from AI ▸ Models. Remaining for 8.5: VRAM-fit badges, per-task defaults, LoRA stacks, import.
-*   VRAM meter + honest pre-flight gating UX across all light features; editor tile-eviction cooperation  
-    during heavy ops (wire `TileResidency` budget).
+    opened from AI ▸ Models.
+*   **VRAM-fit badges — DONE**: pure `Sable.Core/Ai/VramBadge.ForModel(vramBytes, freeBytes)` → `VramFit`
+    (Unknown/Fits/Tight/WontFit) + label, reusing `VramGate` so badge + pre-flight agree. Shown on every
+    recommended + installed row, colour-coded (free VRAM via `GpuProbe.FreeVramBytes()`; 0 = unknown → shows
+    the stated requirement only). The **real per-OS free-VRAM probe (DXGI/NVML) stays deferred to §8.9** —
+    the badge lights up the moment the probe returns a non-zero number; until then it shows requirements.
+*   **Per-task defaults — DONE**: `ModelRegistry.SetDefault`/`DefaultFor`/`Defaults` (persisted `defaults.json`)
+    were already there; `ModelsWindow` now renders a "Default model per task" section — one combo per task
+    that has ≥1 installed base (Matte/Segment/Upscale/Inpaint), `DefaultsChanged` event → host re-applies
+    AI-menu visibility / which model serves each op.
+*   Remaining for 8.5: editor tile-eviction cooperation during heavy ops (wire `TileResidency` budget);
+    explicit weights **import** (drag a local `.onnx` → `DraftFromFile`); LoRA stacks (generative → deferred).
 *   **Gate / milestone:** light AI fully usable with user-provided ONNX weights, zero Python, GPU-gated.
-*   **Verify:** registry/gating unit tests; full launch with the Models panel.
+*   **Verify:** registry/gating/badge unit tests (4 `VramBadgeTests`, 247 total); full launch with the Models panel.
+
+---
+
+## DEFERRED — Generative AI tier (opt-in Diffusers sidecar)
+
+> The light tier (8.0–8.5) is the shippable milestone and ships with **zero Python**. Everything below
+> (8.6–8.9) is the **opt-in, decoupled generative tier** and is **deferred** — not scheduled until the
+> light tier is shipped and validated. Kept here as the design of record; mirrored in PLAN.md §18
+> "Deferred — Generative AI tier".
 
 ### 8.6 — Generative sidecar: provisioning + IPC (no features yet)
 

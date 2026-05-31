@@ -26,6 +26,8 @@
             <StackPanel Spacing="4">
                 <TextBlock Text="Recommended (downloads from the source; licence shown per model)" Classes="settingHeader" />
                 <StackPanel x:Name="RecoRows" Spacing="6" />
+                <TextBlock x:Name="DefaultsHeader" Text="Default model per task" Classes="settingHeader" Margin="0,12,0,0" IsVisible="False" />
+                <StackPanel x:Name="DefaultRows" Spacing="4" />
                 <TextBlock Text="Installed" Classes="settingHeader" Margin="0,12,0,0" />
                 <StackPanel x:Name="InstalledRows" Spacing="3" />
             </StackPanel>

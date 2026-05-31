@@ -46,6 +46,44 @@ public class VramGateTests
     }
 }
 
+public class VramBadgeTests
+{
+    private const long Gb = 1024L * 1024 * 1024;
+
+    [Fact]
+    public void Unknown_WhenFreeVramIsZero()
+    {
+        var b = VramBadge.ForModel(5 * Gb, 0);
+        Assert.Equal(VramFit.Unknown, b.Fit);
+        Assert.Contains("5.0 GB VRAM", b.Text);   // requirement still shown
+    }
+
+    [Fact]
+    public void Fits_WithComfortableHeadroom()
+    {
+        // 1.5GB model + 256MB working set vs 24GB free → fits, not tight
+        var b = VramBadge.ForModel(3 * Gb / 2, 24UL * Gb);
+        Assert.Equal(VramFit.Fits, b.Fit);
+        Assert.Contains("fits", b.Text);
+    }
+
+    [Fact]
+    public void WontFit_WhenOverFree()
+    {
+        var b = VramBadge.ForModel(5 * Gb, 2UL * Gb);
+        Assert.Equal(VramFit.WontFit, b.Fit);
+        Assert.Contains("won't fit", b.Text);
+    }
+
+    [Fact]
+    public void Tight_WhenLittleHeadroom()
+    {
+        // required = 4GB + 256MB ≈ 4.25GB; free = 4.5GB → > 85% of free → tight
+        var b = VramBadge.ForModel(4 * Gb, 9UL * Gb / 2);
+        Assert.Equal(VramFit.Tight, b.Fit);
+    }
+}
+
 public class ModelCatalogTests
 {
     private static ModelManifest Base(string id, string family, params AiTaskKind[] tasks) => new()

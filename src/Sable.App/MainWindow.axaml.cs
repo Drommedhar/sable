@@ -465,7 +465,9 @@ public partial class MainWindow : Window
 
     private async void OnAiModels(object? sender, RoutedEventArgs e)
     {
-        await new ModelsWindow(Ai.Registry) { WindowStartupLocation = WindowStartupLocation.CenterOwner }.ShowDialog(this);
+        var win = new ModelsWindow(Ai.Registry, Ai.Gpu.FreeVramBytes()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        win.DefaultsChanged += ApplyAiVisibility;   // default/install changes alter which model serves each op
+        await win.ShowDialog(this);
         ApplyAiVisibility();   // installs/removals in the manager change which features are available
     }
 

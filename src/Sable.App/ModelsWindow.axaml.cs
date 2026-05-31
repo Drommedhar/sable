@@ -24,17 +24,24 @@ public partial class ModelsWindow : Window
 {
     private readonly ModelRegistry _registry;
     private readonly ModelDownloader _downloader;
+    private readonly ulong _freeVram;     // 0 = unknown (probe stub) → VRAM badges show requirement only
     private bool _busy;
+    private bool _syncingDefault;         // guard ComboBox SelectionChanged fired while (re)building rows
 
-    public ModelsWindow() : this(new ModelRegistry(System.IO.Path.GetTempPath())) { }
+    /// <summary>Raised when the user changes a per-task default — host refreshes which model serves each op.</summary>
+    public event Action? DefaultsChanged;
 
-    public ModelsWindow(ModelRegistry registry)
+    public ModelsWindow() : this(new ModelRegistry(System.IO.Path.GetTempPath()), 0) { }
+
+    public ModelsWindow(ModelRegistry registry, ulong freeVram = 0)
     {
         InitializeComponent();
         _registry = registry;
+        _freeVram = freeVram;
         _downloader = new ModelDownloader(registry);
         FolderLabel.Text = $"Model folder: {registry.ModelsFolder}";
         BuildRecommended();
+        BuildDefaults();
         BuildInstalled();
     }
 
@@ -55,7 +62,8 @@ public partial class ModelsWindow : Window
         {
             var info = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
             info.Children.Add(Text(rec.Name, "ChromeText"));
-            info.Children.Add(Text($"{rec.Family} · {Mb(rec.SizeBytes)} MB download · ~{Mb(rec.VramBytes)} MB VRAM", "ChromeTextDim", 11));
+            info.Children.Add(Text($"{rec.Family} · {Mb(rec.SizeBytes)} MB download", "ChromeTextDim", 11));
+            info.Children.Add(VramBadgeText(rec.VramBytes));
             info.Children.Add(Text(rec.License, "ChromeTextFaint", 11, wrap: true));
 
             bool installed = _registry.IsInstalled(rec.Id);
@@ -83,6 +91,65 @@ public partial class ModelsWindow : Window
         }
     }
 
+    // A coloured "x.x GB VRAM · fits/tight/won't fit" badge (requirement only when free VRAM is unknown).
+    private TextBlock VramBadgeText(long vramBytes)
+    {
+        var b = VramBadge.ForModel(vramBytes, _freeVram);
+        var tb = new TextBlock { Text = b.Text, FontSize = 11 };
+        if (b.Fit == VramFit.Unknown) Fg(tb, "ChromeTextFaint");
+        else tb.Foreground = new SolidColorBrush(b.Fit switch
+        {
+            VramFit.Fits => Color.Parse("#FF5FB35F"),
+            VramFit.Tight => Color.Parse("#FFD8A032"),
+            _ => Color.Parse("#FFCF5B5B"),
+        });
+        return tb;
+    }
+
+    // Friendly task names for the defaults section (only the light-tier tasks have installed models).
+    private static readonly (AiTaskKind Task, string Label)[] TaskLabels =
+    {
+        (AiTaskKind.Matte, "Background removal"),
+        (AiTaskKind.Segment, "Smart selection"),
+        (AiTaskKind.Upscale, "Upscale"),
+        (AiTaskKind.Inpaint, "Object removal"),
+    };
+
+    /// <summary>Per-task default-model picker — only tasks with at least one installed model appear.</summary>
+    private void BuildDefaults()
+    {
+        DefaultRows.Children.Clear();
+        bool any = false;
+        _syncingDefault = true;
+        foreach (var (task, label) in TaskLabels)
+        {
+            var models = _registry.Catalog.ForTask(task).ToList();
+            if (models.Count == 0) continue;
+            any = true;
+
+            var combo = new ComboBox { MinWidth = 240, FontSize = 12, Tag = task, VerticalAlignment = VerticalAlignment.Center };
+            foreach (var m in models) combo.Items.Add(new ComboBoxItem { Content = m.Name, Tag = m.Id });
+            var def = _registry.DefaultFor(task);
+            combo.SelectedIndex = def is null ? 0 : Math.Max(0, models.FindIndex(m => m.Id == def.Id));
+            combo.SelectionChanged += OnDefaultChanged;
+
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("180,*") };
+            row.Children.Add(Text(label, "ChromeTextDim", 12));
+            Grid.SetColumn(combo, 1);
+            row.Children.Add(combo);
+            DefaultRows.Children.Add(row);
+        }
+        _syncingDefault = false;
+        DefaultsHeader.IsVisible = any;
+    }
+
+    private void OnDefaultChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefault || sender is not ComboBox { Tag: AiTaskKind task, SelectedItem: ComboBoxItem { Tag: string id } }) return;
+        _registry.SetDefault(task, id);
+        DefaultsChanged?.Invoke();
+    }
+
     private void BuildInstalled()
     {
         InstalledRows.Children.Clear();
@@ -94,7 +161,12 @@ public partial class ModelsWindow : Window
             return;
         }
         foreach (var m in all)
-            InstalledRows.Children.Add(Text($"{m.Name}  ·  {m.Family}  ·  {string.Join(", ", m.Tasks)}", "ChromeTextDim", 12));
+        {
+            var info = new StackPanel { Spacing = 1 };
+            info.Children.Add(Text($"{m.Name}  ·  {m.Family}  ·  {string.Join(", ", m.Tasks)}", "ChromeTextDim", 12));
+            info.Children.Add(VramBadgeText(m.VramBytes));
+            InstalledRows.Children.Add(info);
+        }
     }
 
     private async void OnDownloadRecommended(object? sender, RoutedEventArgs e)
@@ -110,6 +182,7 @@ public partial class ModelsWindow : Window
         var win = new LicenseCycleWindow(models, _downloader) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
         await win.ShowDialog<List<RecommendedModel>?>(this);
         BuildRecommended();
+        BuildDefaults();
         BuildInstalled();
     }
 
@@ -118,7 +191,9 @@ public partial class ModelsWindow : Window
         if (_busy || sender is not Button { Tag: string id }) return;
         _registry.Remove(id);
         ShowStatus($"Removed {RecommendedModels.ById(id)?.Name ?? id}.");
+        DefaultsChanged?.Invoke();
         BuildRecommended();
+        BuildDefaults();
         BuildInstalled();
     }
 
@@ -146,7 +221,9 @@ public partial class ModelsWindow : Window
         {
             var m = await run(progress);
             ShowStatus($"Installed {m.Name}.");
+            DefaultsChanged?.Invoke();
             BuildRecommended();
+            BuildDefaults();
             BuildInstalled();
         }
         catch (Exception ex) { ShowStatus($"Download failed: {ex.Message}"); }

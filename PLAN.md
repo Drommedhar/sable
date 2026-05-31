@@ -732,9 +732,10 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 - ⏸️ **Dock.Avalonia docking** — PARKED (user call; revisit as a focused live-verification session). Spike findings for next time: deps = `Dock.Avalonia` + `Dock.Model.Avalonia` (controls/XAML layout, keeps panel `x:Name`s in MainWindow namescope — avoids extracting handlers) + theme is a SEPARATE pkg `Dock.Avalonia.Themes.Fluent` whose entry is the **`DockFluentTheme` Styles class** (`xmlns clr-namespace:Dock.Avalonia.Themes.Fluent;assembly=...` → `<DockFluentTheme/>` in `Application.Styles`; the old `avares://Dock.Avalonia/Themes/*.axaml` StyleInclude path is gone). `DockControl InitializeLayout="True" InitializeFactory="True"` self-wires a factory. **Blocker that parked it:** floating a `Tool` re-parents it into a separate HostWindow → Window-relative `DocumentViewModel` bindings on the Colour/Layers panels break SILENTLY (empty list / dead editor, no crash) → needs per-Tool DataContext re-pointed on each tab switch, and is only live-verifiable (headless launch can't catch silent binding failures). Keep canvas fixed-centre (native HWND airspace) regardless.
 - ⬜ **Saved workspaces / macros/actions + plugin API; real Brushes/Channels/Paths/Navigator panels** (§16.13, §16.14).
 
-### Phase 8 — AI (was M3)  ·  **detailed plan: [PHASE8_AI.md](PHASE8_AI.md)**
-- ONNX light tier in-process: SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal. Then Diffusers **sidecar** (uv venv, IPC) for generative fill/expand + **model manager + VRAM gating** (§6, §16.15).
-- Sub-phases 8.0 infra/seams → 8.1 bg-removal → 8.2 upscale+tiling → 8.3 SAM2 → 8.4 LaMa → **8.5 model-mgr UI = light tier ships (no Python)** → 8.6 sidecar provision+IPC → 8.7 gen-fill → 8.8 outpaint+txt2img → 8.9 contention/polish. See [PHASE8_AI.md](PHASE8_AI.md) for seams, EP matrix, VRAM gating, verification strategy.
+### Phase 8 — AI light tier (was M3)  ·  **detailed plan: [PHASE8_AI.md](PHASE8_AI.md)**
+- ONNX light tier in-process (no Python): SAM2 smart-select, BiRefNet/RMBG bg-removal, Real-ESRGAN upscale, LaMa object-removal + **model manager + VRAM gating** (§6, §16.15).
+- Sub-phases 8.0 infra/seams ✅ → 8.1 bg-removal ✅ → 8.2 upscale+tiling ✅ → 8.3 SAM2 ✅ → 8.4 LaMa ✅ → **8.5 model-mgr UI = light tier ships (no Python)** ⬜ (in progress). See [PHASE8_AI.md](PHASE8_AI.md) for seams, EP matrix, VRAM gating, verification strategy.
+- **8.5 = the shippable milestone.** Everything below it (generative tier) is deferred to its own section.
 
 ### Phase 9 — Cross-platform
 - Real **Linux** (Xlib/Wayland) + **macOS** (CAMetalLayer) backends (surface + input) — seam ready (`IPlatformBackend`/`IInputSource`). Per-OS packaging.
@@ -742,4 +743,11 @@ Sequences everything in §14/§15/§16/§17 into dependency-ordered phases. The 
 ### Phase 10 — Polish & release (was M5)
 - Tablet pressure/tilt, telemetry/crash (opt-in), perf pass (brush latency, large docs), packaging/signing/**notarisation** (MSIX/MSI · AppImage/Flatpak · .app), docs, i18n decision, accessibility.
 
-**Sequencing notes**: Phases 1 & 2 are the big near-term value and run in parallel (Engine vs App). Phase 0 leak fix gates Phase 2 tabs. Phase 7 tiling is the one large engine refactor — schedule before heavy multi-tab/100MP use bites. Out of scope: §16.16 (advanced/pro).
+### Deferred — Generative AI tier (opt-in Diffusers sidecar)  ·  **detailed plan: [PHASE8_AI.md](PHASE8_AI.md) §8.6–8.9**
+Pulled out of the Phase 8 critical path: the light tier (8.0–8.5) ships with zero Python, and the generative tier is the opt-in, decoupled half. Not scheduled until the light tier is shipped and validated.
+- **8.6 sidecar provision + IPC** — `UvEnv` (venv, vendor torch wheel, progress/resume/repair/uninstall), `SidecarBackend` lifecycle, `SidecarClient` IPC, Python Diffusers `server/` (`health`/`vram`/`load_model`), component resolution + `offload`, Settings "Install generative AI" flow.
+- **8.7 generative fill / inpaint + LoRA stack** — paint mask + prompt → `inpaint` → new clipped layer; per-op base-model picker + LoRA stack UI; registry enforces LoRA↔base compat; VRAM gate includes LoRA cost.
+- **8.8 generative expand / outpaint + text-to-image** — extend canvas → fill border; new generated layer from prompt.
+- **8.9 contention + polish** — VRAM budget manager hardening (editor/AI co-tenancy), cancellation, GPU/VRAM meter, op queue/batching, docs.
+
+**Sequencing notes**: Phases 1 & 2 are the big near-term value and run in parallel (Engine vs App). Phase 0 leak fix gates Phase 2 tabs. Phase 7 tiling is the one large engine refactor — schedule before heavy multi-tab/100MP use bites. Out of scope: §16.16 (advanced/pro). Deferred: the generative AI tier (above) until the light tier ships.
