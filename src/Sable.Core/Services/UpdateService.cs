@@ -31,9 +31,7 @@ public interface IUpdateService
 /// </summary>
 public sealed class UpdateService : IUpdateService
 {
-    // TODO: switch to Drommedhar/sable once the repo is public + has releases.
-    // For now we point at novalist-official (public, has releases) so the update flow is testable.
-    private const string ReleasesApiUrl = "https://api.github.com/repos/Drommedhar/novalist-official/releases/latest";
+    private const string ReleasesApiUrl = "https://api.github.com/repos/Drommedhar/sable/releases/latest";
 
     private static readonly HttpClient SharedHttp = CreateHttpClient();
 
