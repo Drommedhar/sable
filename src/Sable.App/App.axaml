@@ -156,6 +156,23 @@
             <Setter Property="Stretch" Value="Uniform" />
         </Style>
 
+        <!-- window caption buttons (custom title bar: minimise / maximise / close) -->
+        <Style Selector="Button.winbtn">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.winbtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF3A3A3A" />
+        </Style>
+        <Style Selector="Button.winclose:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FFC42B1C" />
+        </Style>
+
         <!-- compact icon button for the layers-panel footer -->
         <Style Selector="Button.iconbtn">
             <Setter Property="Width" Value="{StaticResource IconButtonSize}" />

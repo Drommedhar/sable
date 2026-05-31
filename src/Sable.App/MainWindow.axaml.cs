@@ -43,6 +43,11 @@ public partial class MainWindow : Window
     public MainWindow(string[]? args)
     {
         _launchArgs = args ?? System.Array.Empty<string>();
+
+        // custom title bar (menu lives in the header): Avalonia 12 WindowDecorations — BorderOnly
+        // keeps the OS resize border + shadow but drops the native caption/title bar.
+        WindowDecorations = Avalonia.Controls.WindowDecorations.BorderOnly;
+
         InitializeComponent();
 
         // Start with no document (welcome / empty state) — New/Open/paste/drop creates the first tab.
@@ -261,6 +266,19 @@ public partial class MainWindow : Window
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow(GpuName).ShowDialog(this);
+
+    // --- custom title bar (menu-in-header, client-side decorations) ---
+    private void OnMinimizeWindow(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void OnMaxRestoreWindow(object? sender, RoutedEventArgs e)
+        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void OnCloseWindow(object? sender, RoutedEventArgs e) => Close();
+
+    private void OnTitleBarPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) BeginMoveDrag(e);
+    }
+    private void OnTitleBarDoubleTapped(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
     // --- Select menu (PLAN §3 / §16.2) ---
     private void OnSelectAll(object? sender, RoutedEventArgs e)

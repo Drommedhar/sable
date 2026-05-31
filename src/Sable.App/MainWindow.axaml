@@ -23,15 +23,29 @@
     <!-- PS/Affinity-style chrome skeleton (PLAN §13). Real dockable panels (Dock.Avalonia)
          and the embedded wgpu canvas surface land in later milestones. -->
     <Panel>
-    <Grid RowDefinitions="Auto,Auto,*">
+    <!-- OffScreenMargin keeps the custom title bar from clipping when maximised -->
+    <Grid RowDefinitions="Auto,Auto,*" Margin="{Binding $parent[Window].OffScreenMargin}">
 
-        <!-- (4) Menu bar — brand logo at left, like Affinity -->
+        <!-- (4) Title bar = brand logo + menu + window buttons (custom client-side decorations) -->
         <DockPanel Grid.Row="0" Background="{DynamicResource ChromeMenuBg}">
         <Image DockPanel.Dock="Left" Source="avares://Sable.App/Assets/logo_only.png"
                Height="18" Stretch="Uniform" Margin="12,5,12,5" VerticalAlignment="Center"
                RenderOptions.BitmapInterpolationMode="HighQuality"
                ToolTip.Tip="Sable" />
-        <Menu x:Name="MainMenu">
+        <!-- window caption buttons (right) -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Stretch">
+            <Button Classes="winbtn" Click="OnMinimizeWindow" ToolTip.Tip="Minimise">
+                <Border Width="11" Height="1.5" Background="{DynamicResource ChromeText}"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Button>
+            <Button x:Name="MaxRestoreBtn" Classes="winbtn" Click="OnMaxRestoreWindow" ToolTip.Tip="Maximise">
+                <Path Classes="icon" Width="10" Height="10" Data="M4 4h16v16H4z" />
+            </Button>
+            <Button Classes="winbtn winclose" Click="OnCloseWindow" ToolTip.Tip="Close">
+                <Path Classes="icon" Width="11" Height="11" Data="M5 5l14 14 M19 5l-14 14" />
+            </Button>
+        </StackPanel>
+        <Menu x:Name="MainMenu" DockPanel.Dock="Left">
             <MenuItem Header="_File">
                 <MenuItem Header="New..." Click="OnNewMenu" InputGesture="Ctrl+N" />
                 <MenuItem Header="New from Clipboard" Click="OnNewFromClipboard" />
@@ -122,6 +136,9 @@
                 <MenuItem Header="About Sable" Click="OnAbout" />
             </MenuItem>
         </Menu>
+        <!-- draggable empty area (last child fills; double-click toggles maximise) -->
+        <Border x:Name="TitleDrag" Background="Transparent"
+                PointerPressed="OnTitleBarPressed" DoubleTapped="OnTitleBarDoubleTapped" />
         </DockPanel>
 
         <!-- (3) Context / options bar -->
