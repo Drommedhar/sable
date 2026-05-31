@@ -85,6 +85,12 @@
                 <MenuItem Header="Stamp Visible" Click="OnStamp" InputGesture="Ctrl+Shift+Alt+E" />
                 <MenuItem Header="Flatten Image" Click="OnFlatten" />
             </MenuItem>
+            <MenuItem Header="_Type">
+                <MenuItem Header="Convert to Curves" Click="OnTextToCurves" />
+                <Separator />
+                <MenuItem Header="Fit Text to Path" Click="OnTextToPath" />
+                <MenuItem Header="Detach Text from Path" Click="OnTextDetachPath" />
+            </MenuItem>
             <MenuItem Header="_Select">
                 <MenuItem Header="Select All" Click="OnSelectAll" InputGesture="Ctrl+A" />
                 <MenuItem Header="Deselect" Click="OnDeselect" InputGesture="Ctrl+D" />
@@ -219,6 +225,14 @@
                     <TextBox x:Name="LineSpacingBox" Width="48" Text="100" TextAlignment="Center"
                              TextChanged="OnLineSpacingChanged"
                              VerticalAlignment="Center" ToolTip.Tip="Line spacing %" />
+                    <TextBlock Text="Box W" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBox x:Name="BoxWidthBox" Width="48" Text="0" TextAlignment="Center"
+                             TextChanged="OnBoxWidthChanged"
+                             VerticalAlignment="Center" ToolTip.Tip="Area-text wrap width (0 = point text)" />
+                    <TextBlock Text="Tracking" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <TextBox x:Name="TrackingBox" Width="44" Text="0" TextAlignment="Center"
+                             TextChanged="OnTrackingChanged"
+                             VerticalAlignment="Center" ToolTip.Tip="Letter spacing (px)" />
                 </StackPanel>
 
                 <!-- eyedropper: sample size + source -->
@@ -232,6 +246,37 @@
                     </ComboBox>
                     <CheckBox Content="All layers" FontSize="11" Foreground="{DynamicResource ChromeText}"
                               IsChecked="False" IsCheckedChanged="OnEyedropperAllLayersChanged" />
+                </StackPanel>
+
+                <!-- shape tools: fill / stroke / dash / per-kind params (draw-time defaults) -->
+                <StackPanel x:Name="ShapeOpts" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
+                    <CheckBox x:Name="ShapeFillChk" Content="Fill" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                              IsChecked="True" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
+                    <CheckBox x:Name="ShapeStrokeChk" Content="Stroke" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                              IsChecked="False" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
+                    <TextBlock Text="W" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                    <Slider x:Name="ShapeStrokeWidth" Width="80" Minimum="1" Maximum="50" Value="3"
+                            ValueChanged="OnShapeWidthChanged" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ShapeStrokeWidthLabel" Text="3 px" Foreground="{DynamicResource ChromeTextDim}"
+                               VerticalAlignment="Center" FontSize="11" Width="36" />
+                    <CheckBox x:Name="ShapeDashChk" Content="Dash" FontSize="11" Foreground="{DynamicResource ChromeText}"
+                              IsChecked="False" IsCheckedChanged="OnShapeOptChanged" VerticalAlignment="Center" />
+                    <StackPanel x:Name="ShapeSidesOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="Sides" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBox x:Name="ShapeSidesBox" Width="40" Text="5" TextAlignment="Center"
+                                 TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel x:Name="ShapeInnerOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="Inner %" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBox x:Name="ShapeInnerBox" Width="44" Text="50" TextAlignment="Center"
+                                 TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel x:Name="ShapeCornerOpts" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="Radius" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <TextBox x:Name="ShapeCornerBox" Width="44" Text="12" TextAlignment="Center"
+                                 TextChanged="OnShapeNumChanged" VerticalAlignment="Center" />
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- brush/eraser: mask-edit hint -->

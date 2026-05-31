@@ -87,6 +87,20 @@ public static class SableFile
         public byte ShB { get; set; }
         public byte ShA { get; set; } = 255;
         public float ShStroke { get; set; } = 4f;
+        public bool ShFilled { get; set; } = true;
+        public bool ShStroked { get; set; }
+        public byte ShSR { get; set; }
+        public byte ShSG { get; set; }
+        public byte ShSB { get; set; }
+        public byte ShSA { get; set; } = 255;
+        public bool ShDash { get; set; }
+        public float ShDashLen { get; set; } = 12f;
+        public float ShGap { get; set; } = 8f;
+        public float ShCorner { get; set; } = 12f;
+        public int ShSides { get; set; } = 5;
+        public float ShInner { get; set; } = 0.5f;
+        public int ShCap { get; set; } = 1;    // 0=butt,1=round,2=square
+        public int ShJoin { get; set; } = 1;   // 0=miter,1=round,2=bevel
         public string? Text { get; set; }
         public float TxSize { get; set; } = 48f;
         public float TxX { get; set; }
@@ -101,9 +115,35 @@ public static class SableFile
         public bool TxStrike { get; set; }
         public int TxAlign { get; set; }
         public float TxLineSpacing { get; set; } = 1f;
+        public float TxBoxWidth { get; set; }
+        public float TxTracking { get; set; }
+        public float[]? TxPath { get; set; }   // on-path polyline as [x,y,x,y,...]
+        // vector path: nodes flattened as [Ax,Ay,InX,InY,OutX,OutY,Smooth] × n
+        public float[]? PathNodes { get; set; }
+        public bool PathClosed { get; set; }
+        public List<PathContourDto> PathExtras { get; set; } = new();
+        public bool PathFilled { get; set; } = true;
+        public byte PfR { get; set; }
+        public byte PfG { get; set; }
+        public byte PfB { get; set; }
+        public byte PfA { get; set; } = 255;
+        public bool PathStroked { get; set; }
+        public int PsCap { get; set; } = 1;
+        public int PsJoin { get; set; } = 1;
+        public byte PsR { get; set; }
+        public byte PsG { get; set; }
+        public byte PsB { get; set; }
+        public byte PsA { get; set; } = 255;
+        public float PsWidth { get; set; } = 2f;
         public string? Mask { get; set; }   // zip entry name, if the layer has a mask
         public List<EffectDto> Effects { get; set; } = new();
         public List<LayerDto> Children { get; set; } = new();   // for groups
+    }
+
+    private sealed class PathContourDto
+    {
+        public float[]? Nodes { get; set; }   // [Ax,Ay,InX,InY,OutX,OutY,Smooth] × n
+        public bool Closed { get; set; }
     }
 
     private sealed class EffectDto
@@ -208,6 +248,11 @@ public static class SableFile
                 ld.ShX = sh.X; ld.ShY = sh.Y; ld.ShW = sh.W; ld.ShH = sh.H;
                 ld.ShR = sh.R; ld.ShG = sh.G; ld.ShB = sh.B; ld.ShA = sh.A;
                 ld.ShStroke = sh.StrokeWidth;
+                ld.ShFilled = sh.Filled; ld.ShStroked = sh.Stroked;
+                ld.ShSR = sh.StrokeR; ld.ShSG = sh.StrokeG; ld.ShSB = sh.StrokeB; ld.ShSA = sh.StrokeA;
+                ld.ShDash = sh.DashOn; ld.ShDashLen = sh.DashLen; ld.ShGap = sh.GapLen;
+                ld.ShCorner = sh.CornerRadius; ld.ShSides = sh.Sides; ld.ShInner = sh.InnerRatio;
+                ld.ShCap = (int)sh.Cap; ld.ShJoin = (int)sh.Join;
                 break;
             case TextLayer txt:
                 ld.Type = "text";
@@ -217,6 +262,22 @@ public static class SableFile
                 ld.TxFont = txt.FontFamily; ld.TxBold = txt.Bold; ld.TxItalic = txt.Italic;
                 ld.TxUnderline = txt.Underline; ld.TxStrike = txt.Strikethrough;
                 ld.TxAlign = (int)txt.Align; ld.TxLineSpacing = txt.LineSpacing;
+                ld.TxBoxWidth = txt.BoxWidth; ld.TxTracking = txt.Tracking;
+                if (txt.PathPoints.Count > 0)
+                {
+                    var tp = new float[txt.PathPoints.Count * 2];
+                    for (int i = 0; i < txt.PathPoints.Count; i++) { tp[i * 2] = txt.PathPoints[i].X; tp[i * 2 + 1] = txt.PathPoints[i].Y; }
+                    ld.TxPath = tp;
+                }
+                break;
+            case PathLayer pth:
+                ld.Type = "path";
+                ld.PathNodes = NodesToFloats(pth.Nodes); ld.PathClosed = pth.Closed;
+                foreach (var (en, ec) in pth.ExtraContours)
+                    ld.PathExtras.Add(new PathContourDto { Nodes = NodesToFloats(en), Closed = ec });
+                ld.PathFilled = pth.Filled; ld.PfR = pth.FillR; ld.PfG = pth.FillG; ld.PfB = pth.FillB; ld.PfA = pth.FillA;
+                ld.PathStroked = pth.Stroked; ld.PsR = pth.StrokeR; ld.PsG = pth.StrokeG; ld.PsB = pth.StrokeB; ld.PsA = pth.StrokeA;
+                ld.PsWidth = pth.StrokeWidth; ld.PsCap = (int)pth.Cap; ld.PsJoin = (int)pth.Join;
                 break;
             case GroupLayer g:
                 ld.Type = "group";
@@ -267,14 +328,22 @@ public static class SableFile
             "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius, Amount = ld.FilterAmount, Angle = ld.FilterAngle },
             "shape" => new ShapeLayer((ShapeKind)ld.ShapeKind, ld.ShX, ld.ShY, ld.ShW, ld.ShH, ld.ShR, ld.ShG, ld.ShB)
             {
-                A = ld.ShA, StrokeWidth = ld.ShStroke
+                A = ld.ShA, StrokeWidth = ld.ShStroke,
+                Filled = ld.ShFilled, Stroked = ld.ShStroked,
+                StrokeR = ld.ShSR, StrokeG = ld.ShSG, StrokeB = ld.ShSB, StrokeA = ld.ShSA,
+                DashOn = ld.ShDash, DashLen = ld.ShDashLen, GapLen = ld.ShGap,
+                CornerRadius = ld.ShCorner, Sides = ld.ShSides, InnerRatio = ld.ShInner,
+                Cap = (LineCap)ld.ShCap, Join = (LineJoin)ld.ShJoin,
             },
             "text" => new TextLayer(ld.Text ?? "Text", ld.TxX, ld.TxY, ld.TxSize, ld.TxR, ld.TxG, ld.TxB)
             {
                 FontFamily = ld.TxFont ?? "", Bold = ld.TxBold, Italic = ld.TxItalic,
                 Underline = ld.TxUnderline, Strikethrough = ld.TxStrike,
-                Align = (TextAlign)ld.TxAlign, LineSpacing = ld.TxLineSpacing
+                Align = (TextAlign)ld.TxAlign, LineSpacing = ld.TxLineSpacing,
+                BoxWidth = ld.TxBoxWidth, Tracking = ld.TxTracking,
+                PathPoints = BuildTextPath(ld.TxPath),
             },
+            "path" => BuildPath(ld),
             "group" => LoadGroup(ld, zip, w, h),
             _ => null
         };
@@ -338,6 +407,55 @@ public static class SableFile
             }
         }
         return a;
+    }
+
+    private static PathLayer BuildPath(LayerDto ld)
+    {
+        var p = new PathLayer
+        {
+            Closed = ld.PathClosed,
+            Filled = ld.PathFilled, FillR = ld.PfR, FillG = ld.PfG, FillB = ld.PfB, FillA = ld.PfA,
+            Stroked = ld.PathStroked, StrokeR = ld.PsR, StrokeG = ld.PsG, StrokeB = ld.PsB, StrokeA = ld.PsA,
+            StrokeWidth = ld.PsWidth, Cap = (LineCap)ld.PsCap, Join = (LineJoin)ld.PsJoin,
+        };
+        FloatsToNodes(ld.PathNodes, p.Nodes);
+        foreach (var ex in ld.PathExtras)
+        {
+            var en = new List<PathNode>();
+            FloatsToNodes(ex.Nodes, en);
+            p.ExtraContours.Add((en, ex.Closed));
+        }
+        return p;
+    }
+
+    private static List<(float, float)> BuildTextPath(float[]? f)
+    {
+        var list = new List<(float, float)>();
+        if (f is not null) for (int i = 0; i + 1 < f.Length; i += 2) list.Add((f[i], f[i + 1]));
+        return list;
+    }
+
+    private static float[] NodesToFloats(List<PathNode> nodes)
+    {
+        var f = new float[nodes.Count * 7];
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var nd = nodes[i]; int o = i * 7;
+            f[o] = nd.Ax; f[o + 1] = nd.Ay; f[o + 2] = nd.InX; f[o + 3] = nd.InY;
+            f[o + 4] = nd.OutX; f[o + 5] = nd.OutY; f[o + 6] = nd.Smooth ? 1f : 0f;
+        }
+        return f;
+    }
+
+    private static void FloatsToNodes(float[]? f, List<PathNode> into)
+    {
+        if (f is null) return;
+        for (int i = 0; i + 6 < f.Length; i += 7)
+            into.Add(new PathNode
+            {
+                Ax = f[i], Ay = f[i + 1], InX = f[i + 2], InY = f[i + 3],
+                OutX = f[i + 4], OutY = f[i + 5], Smooth = f[i + 6] != 0f
+            });
     }
 
     private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h)

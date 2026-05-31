@@ -385,6 +385,7 @@ public sealed partial class LayerViewModel : ObservableObject
     public bool IsFilter => Model is FilterLayer;
     public bool IsShape => Model is ShapeLayer;
     public bool IsText => Model is TextLayer;
+    public bool IsPath => Model is PathLayer;
     /// <summary>Any non-pixel effect node (has params editable in the toolbox).</summary>
     public bool IsEffect => Model is AdjustmentLayer or FilterLayer;
     public bool IsBrightnessContrast => Model is AdjustmentLayer { Kind: AdjustmentKind.BrightnessContrast };
@@ -496,8 +497,8 @@ public sealed partial class LayerViewModel : ObservableObject
         a.BwR = 0.3f; a.BwG = 0.59f; a.BwB = 0.11f; a.Temperature = 0; a.Tint = 0;
         a.Shadows = 0; a.Highlights = 0;
         Array.Clear(a.ColorBalance);
-        float[] identity = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-        identity.CopyTo(a.ChannelMix, 0);
+        float[] identityBc = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+        identityBc.CopyTo(a.ChannelMix, 0);
         for (int ch = 0; ch < a.Curves.Length; ch++)
         { a.Curves[ch].Clear(); a.Curves[ch].Add((0f, 0f)); a.Curves[ch].Add((1f, 1f)); }
         a.Dirty = true;
@@ -517,6 +518,96 @@ public sealed partial class LayerViewModel : ObservableObject
     public double HueDeg { get => (Model as AdjustmentLayer)?.HueShift * 360 ?? 0; set => SetAdj(a => a.HueShift = (float)(value / 360.0)); }
     public double SatPct { get => (Model as AdjustmentLayer)?.Saturation * 100 ?? 100; set => SetAdj(a => a.Saturation = (float)(value / 100.0)); }
     public double LightPct { get => (Model as AdjustmentLayer)?.Lightness * 100 ?? 0; set => SetAdj(a => a.Lightness = (float)(value / 100.0)); }
+
+    // --- shape-layer params (only meaningful when Model is ShapeLayer) — Shape properties panel ---
+    public bool ShapeUsesSides => Model is ShapeLayer { Kind: ShapeKind.Polygon or ShapeKind.Star };
+    public bool ShapeUsesInner => Model is ShapeLayer { Kind: ShapeKind.Star };
+    public bool ShapeUsesCorner => Model is ShapeLayer { Kind: ShapeKind.RoundedRect };
+    public bool ShapeIsLine => Model is ShapeLayer { Kind: ShapeKind.Line or ShapeKind.Arrow };
+
+    private void SetShape(Action<ShapeLayer> set, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
+    {
+        if (Model is not ShapeLayer s) return;
+        set(s); s.Dirty = true; OnPropertyChanged(name);
+    }
+
+    public bool ShapeFilled
+    {
+        get => Model is ShapeLayer s && s.Filled;
+        set => SetShape(s => s.Filled = value);
+    }
+    public bool ShapeStroked
+    {
+        get => Model is ShapeLayer s && s.Stroked;
+        set => SetShape(s => s.Stroked = value);
+    }
+    public string ShapeFillHex
+    {
+        get => Model is ShapeLayer s ? $"{s.R:X2}{s.G:X2}{s.B:X2}" : "000000";
+        set { if (TryHex(value, out var r, out var g, out var b)) SetShape(s => { s.R = r; s.G = g; s.B = b; }); }
+    }
+    public string ShapeStrokeHex
+    {
+        get => Model is ShapeLayer s ? $"{s.StrokeR:X2}{s.StrokeG:X2}{s.StrokeB:X2}" : "000000";
+        set { if (TryHex(value, out var r, out var g, out var b)) SetShape(s => { s.StrokeR = r; s.StrokeG = g; s.StrokeB = b; }); }
+    }
+    public double ShapeStrokeWidth
+    {
+        get => Model is ShapeLayer s ? s.StrokeWidth : 0;
+        set => SetShape(s => s.StrokeWidth = (float)value);
+    }
+    public bool ShapeDashOn
+    {
+        get => Model is ShapeLayer s && s.DashOn;
+        set => SetShape(s => s.DashOn = value);
+    }
+    public double ShapeDashLen
+    {
+        get => Model is ShapeLayer s ? s.DashLen : 0;
+        set => SetShape(s => s.DashLen = (float)value);
+    }
+    public double ShapeGapLen
+    {
+        get => Model is ShapeLayer s ? s.GapLen : 0;
+        set => SetShape(s => s.GapLen = (float)value);
+    }
+    public double ShapeSides
+    {
+        get => Model is ShapeLayer s ? s.Sides : 5;
+        set => SetShape(s => s.Sides = Math.Clamp((int)Math.Round(value), 3, 60));
+    }
+    public double ShapeInnerPercent
+    {
+        get => Model is ShapeLayer s ? s.InnerRatio * 100 : 50;
+        set => SetShape(s => s.InnerRatio = (float)Math.Clamp(value / 100.0, 0.05, 0.95));
+    }
+    public double ShapeCornerRadius
+    {
+        get => Model is ShapeLayer s ? s.CornerRadius : 0;
+        set => SetShape(s => s.CornerRadius = (float)Math.Max(0, value));
+    }
+    /// <summary>Stroke cap as a combo index (0=butt,1=round,2=square).</summary>
+    public int ShapeCap
+    {
+        get => Model is ShapeLayer s ? (int)s.Cap : 1;
+        set => SetShape(s => s.Cap = (LineCap)Math.Clamp(value, 0, 2));
+    }
+    /// <summary>Stroke join as a combo index (0=miter,1=round,2=bevel).</summary>
+    public int ShapeJoin
+    {
+        get => Model is ShapeLayer s ? (int)s.Join : 1;
+        set => SetShape(s => s.Join = (LineJoin)Math.Clamp(value, 0, 2));
+    }
+
+    private static bool TryHex(string hex, out byte r, out byte g, out byte b)
+    {
+        r = g = b = 0;
+        hex = hex.TrimStart('#');
+        if (hex.Length != 6) return false;
+        return byte.TryParse(hex.AsSpan(0, 2), System.Globalization.NumberStyles.HexNumber, null, out r)
+            && byte.TryParse(hex.AsSpan(2, 2), System.Globalization.NumberStyles.HexNumber, null, out g)
+            && byte.TryParse(hex.AsSpan(4, 2), System.Globalization.NumberStyles.HexNumber, null, out b);
+    }
 
     /// <summary>Brightness as -100..100 for the slider.</summary>
     public double Brightness

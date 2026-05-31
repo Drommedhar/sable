@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private string? _currentPath;
     private AdjustmentWindow? _adjWindow;
     private EffectsWindow? _fxWindow;
+    private ShapeWindow? _shapeWindow;
     private readonly System.Collections.ObjectModel.ObservableCollection<DocumentTab> _tabs = new();
     private DocumentTab? _activeTab;
     private int _untitledCounter = 1;
@@ -482,11 +483,13 @@ public partial class MainWindow : Window
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
             case Key.Enter:
                 if (Canvas.QuickMask) Canvas.ToggleQuickMask();       // commit quick mask
+                else if (Canvas.PenActive) Canvas.CommitPen();        // finish pen path (open)
                 else if (Canvas.PolyLassoActive) Canvas.CommitPolyLasso();
                 else Canvas.CommitCrop();
                 e.Handled = true; break;
             case Key.Escape:
                 if (Canvas.QuickMask) Canvas.CancelQuickMask();       // cancel quick mask (restore prior selection)
+                else if (Canvas.PenActive) Canvas.CancelPen();        // discard pen path
                 else if (Canvas.PolyLassoActive) Canvas.CancelPolyLasso();
                 else { Canvas.CancelCrop(); Canvas.Deselect(); }
                 e.Handled = true; break;
@@ -667,6 +670,25 @@ public partial class MainWindow : Window
         if (FeatherLabel is not null) FeatherLabel.Text = $"{e.NewValue:0} px";
     }
 
+    // --- shape tool options (draw-time defaults baked into each new ShapeLayer) ---
+    private void OnShapeOptChanged(object? sender, RoutedEventArgs e) => SyncShapeStyle();
+    private void OnShapeWidthChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e) => SyncShapeStyle();
+    private void OnShapeNumChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e) => SyncShapeStyle();
+
+    private void SyncShapeStyle()
+    {
+        if (ShapeFillChk is null) return;   // not initialized yet
+        var s = Canvas.Shape;
+        s.Filled = ShapeFillChk.IsChecked == true;
+        s.StrokeOn = ShapeStrokeChk.IsChecked == true;
+        s.StrokeWidth = (float)ShapeStrokeWidth.Value;
+        s.DashOn = ShapeDashChk.IsChecked == true;
+        if (ShapeStrokeWidthLabel is not null) ShapeStrokeWidthLabel.Text = $"{ShapeStrokeWidth.Value:0} px";
+        if (int.TryParse(ShapeSidesBox.Text, out var sides)) s.Sides = Math.Clamp(sides, 3, 60);
+        if (float.TryParse(ShapeInnerBox.Text, out var inner)) s.InnerRatio = Math.Clamp(inner / 100f, 0.05f, 0.95f);
+        if (float.TryParse(ShapeCornerBox.Text, out var corner)) s.CornerRadius = Math.Max(0, corner);
+    }
+
     private bool _gradientTab;
     private Sable.Engine.Layers.ShapeLayer? _shapeTarget;   // selected shape the colour wheel recolours
     private Sable.Engine.Layers.TextLayer? _textTarget;     // selected text layer (wheel recolours + options edit)
@@ -678,6 +700,24 @@ public partial class MainWindow : Window
         Canvas.TypeFontSize = Math.Clamp(v, 4f, 512f);
         if (_syncingType || _textTarget is not { } t) return;
         t.FontSize = Canvas.TypeFontSize; t.Dirty = true;
+        Doc?.SelectedLayer?.RefreshThumbnail();
+    }
+
+    private void OnBoxWidthChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
+    {
+        if (!float.TryParse(BoxWidthBox.Text, out var v)) return;
+        Canvas.TypeBoxWidth = Math.Max(0f, v);
+        if (_syncingType || _textTarget is not { } t) return;
+        t.BoxWidth = Canvas.TypeBoxWidth; t.Dirty = true;
+        Doc?.SelectedLayer?.RefreshThumbnail();
+    }
+
+    private void OnTrackingChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
+    {
+        if (!float.TryParse(TrackingBox.Text, out var v)) return;
+        Canvas.TypeTracking = v;
+        if (_syncingType || _textTarget is not { } t) return;
+        t.Tracking = Canvas.TypeTracking; t.Dirty = true;
         Doc?.SelectedLayer?.RefreshThumbnail();
     }
 
@@ -808,8 +848,12 @@ public partial class MainWindow : Window
         const string grad   = "M4 4h16v16H4z M21 3 3 21";
         const string crop   = "M6 2v14a2 2 0 0 0 2 2h14 M18 22V8a2 2 0 0 0-2-2H2";
         const string shRect = "M3 5h18v14H3z";
+        const string shRound= "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z";
         const string shEll  = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16z";
         const string shLine = "M4 20 20 4";
+        const string shPoly = "M12 2 21 8.5 17.5 19h-11L3 8.5z";
+        const string shStar = "M12 2 14.9 8.6 22 9.3l-5.3 4.7L18.2 21 12 17.3 5.8 21l1.5-7L2 9.3l7.1-.7z";
+        const string shArrow= "M3 12h15 M13 7l6 5-6 5";
         const string clone  = "M5 22h14 M19 18v-3a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3 M12 2a2 2 0 0 0-2 2c0 .8.5 1.4 1 1.7V9h2V5.7c.5-.3 1-.9 1-1.7a2 2 0 0 0-2-2z";
         const string type   = "M4 7V4h16v3 M9 20h6 M12 4v16";
         const string dodge  = "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8z M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1.4 1.4 M17.6 17.6 19 19 M19 5l-1.4 1.4 M6.4 17.6 5 19";
@@ -821,6 +865,8 @@ public partial class MainWindow : Window
         const string pipette= "M2 22l1-1h3l9-9 M3 21v-3l9-9 M15 6l3.4-3.4a2.1 2.1 0 1 1 3 3L21 9 M15 5l4 4";
         const string hand   = "M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2 M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2 M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8 M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15";
         const string zoom   = "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3 M11 8v6 M8 11h6";
+        const string pen    = "M15.7 21.3a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4l5.6-5.6a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4z M18 13l-1.4-6.9a1 1 0 0 0-.7-.8L3.2 2a1 1 0 0 0-1.2 1.2l3.3 12.7a1 1 0 0 0 .8.7L13 18 M2.3 2.3l7.3 7.3 M11 11a2 2 0 1 1-4 0 2 2 0 0 1 4 0z";
+        const string node   = "M5 5h4v4H5z M15 15h4v4h-4z M9 7h4a4 4 0 0 1 4 4v4 M7 9v6";
 
         var defs = new (string letter, ToolDef[] tools)[]
         {
@@ -839,8 +885,12 @@ public partial class MainWindow : Window
                           new ToolDef(grad, "Gradient", Sable.Tools.ToolKind.Gradient) }),
             ("C", new[] { new ToolDef(crop, "Crop", Sable.Tools.ToolKind.Crop) }),
             ("U", new[] { new ToolDef(shRect, "Rectangle", Sable.Tools.ToolKind.ShapeRect),
+                          new ToolDef(shRound, "Rounded Rectangle", Sable.Tools.ToolKind.ShapeRoundedRect),
                           new ToolDef(shEll, "Ellipse", Sable.Tools.ToolKind.ShapeEllipse),
-                          new ToolDef(shLine, "Line", Sable.Tools.ToolKind.ShapeLine) }),
+                          new ToolDef(shPoly, "Polygon", Sable.Tools.ToolKind.ShapePolygon),
+                          new ToolDef(shStar, "Star", Sable.Tools.ToolKind.ShapeStar),
+                          new ToolDef(shLine, "Line", Sable.Tools.ToolKind.ShapeLine),
+                          new ToolDef(shArrow, "Arrow", Sable.Tools.ToolKind.ShapeArrow) }),
             ("S", new[] { new ToolDef(clone, "Clone Stamp", Sable.Tools.ToolKind.CloneStamp) }),
             ("O", new[] { new ToolDef(dodge, "Dodge", Sable.Tools.ToolKind.Dodge),
                           new ToolDef(burn, "Burn", Sable.Tools.ToolKind.Burn),
@@ -849,6 +899,8 @@ public partial class MainWindow : Window
                           new ToolDef(sharpB, "Sharpen", Sable.Tools.ToolKind.SharpenBrush),
                           new ToolDef(smudge, "Smudge", Sable.Tools.ToolKind.Smudge) }),
             ("T", new[] { new ToolDef(type, "Text", Sable.Tools.ToolKind.Type) }),
+            ("P", new[] { new ToolDef(pen, "Pen", Sable.Tools.ToolKind.Pen),
+                          new ToolDef(node, "Node", Sable.Tools.ToolKind.Node) }),
             ("I", new[] { new ToolDef(pipette, "Eyedropper", Sable.Tools.ToolKind.Eyedropper) }),
             ("H", new[] { new ToolDef(hand, "Hand", Sable.Tools.ToolKind.Hand) }),
             ("Z", new[] { new ToolDef(zoom, "Zoom", Sable.Tools.ToolKind.Zoom) }),
@@ -983,8 +1035,9 @@ public partial class MainWindow : Window
         ToolKind.Fill => "Click to flood-fill with the foreground colour. Alt samples a colour.",
         ToolKind.Gradient => "Drag to draw a gradient (start → end). Shift constrains the angle.",
         ToolKind.Crop => "Drag a rectangle, then Enter to commit or Esc to cancel.",
-        ToolKind.ShapeRect or ToolKind.ShapeEllipse => "Drag to draw the shape. Shift constrains to a square/circle.",
-        ToolKind.ShapeLine => "Drag to draw a line. Shift constrains the angle.",
+        ToolKind.ShapeRect or ToolKind.ShapeRoundedRect or ToolKind.ShapeEllipse
+            or ToolKind.ShapePolygon or ToolKind.ShapeStar => "Drag to draw the shape. Set fill/stroke/sides in the options bar; edit it later in the Shape panel.",
+        ToolKind.ShapeLine or ToolKind.ShapeArrow => "Drag to draw. Shift constrains the angle.",
         ToolKind.CloneStamp => "Alt-click to set the source, then drag to paint cloned pixels.",
         ToolKind.Dodge => "Drag to lighten. Adjust strength in the options bar.",
         ToolKind.Burn => "Drag to darken. Adjust strength in the options bar.",
@@ -993,6 +1046,8 @@ public partial class MainWindow : Window
         ToolKind.SharpenBrush => "Drag to sharpen. Adjust strength in the options bar.",
         ToolKind.Smudge => "Drag to smudge colour along the stroke.",
         ToolKind.Type => "Click to place a text layer, then type. Double-click existing text to edit.",
+        ToolKind.Pen => "Click to add corner nodes; drag to pull smooth handles. Click the first node or press Enter to finish, Esc to cancel.",
+        ToolKind.Node => "Drag a node or handle to reshape the selected path. Click the path to add a node. Alt-click a node to delete it.",
         ToolKind.Eyedropper => "Click to sample a colour. Use the options bar to set the sample size.",
         ToolKind.Hand => "Drag to pan. (Space-drag pans with any tool; wheel zooms.)",
         ToolKind.Zoom => "Click to zoom in, Alt-click to zoom out. Wheel zooms to the cursor.",
@@ -1003,9 +1058,18 @@ public partial class MainWindow : Window
     private void UpdateOptionsBar(Sable.Tools.ToolKind k)
     {
         if (SizeOpts is null) return;   // not initialized yet
-        SizeOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.CloneStamp or ToolKind.ShapeLine
+        SizeOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.CloneStamp
                               or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                               or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
+        bool shapeTool = k is ToolKind.ShapeRect or ToolKind.ShapeRoundedRect or ToolKind.ShapeEllipse
+                              or ToolKind.ShapeLine or ToolKind.ShapePolygon or ToolKind.ShapeStar or ToolKind.ShapeArrow;
+        ShapeOpts.IsVisible = shapeTool;
+        bool lineish = k is ToolKind.ShapeLine or ToolKind.ShapeArrow;
+        ShapeFillChk.IsVisible = !lineish;
+        ShapeStrokeChk.IsVisible = !lineish;   // line/arrow always stroke
+        ShapeSidesOpts.IsVisible = k is ToolKind.ShapePolygon or ToolKind.ShapeStar;
+        ShapeInnerOpts.IsVisible = k is ToolKind.ShapeStar;
+        ShapeCornerOpts.IsVisible = k is ToolKind.ShapeRoundedRect;
         StrengthOpts.IsVisible = k is ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
                                   or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.PolyLasso or ToolKind.MagicWand or ToolKind.ColorRange;
@@ -1035,6 +1099,7 @@ public partial class MainWindow : Window
             case Key.S when e.KeyModifiers == KeyModifiers.None: CycleGroup("S"); break;
             case Key.O: CycleGroup("O"); break;
             case Key.T: CycleGroup("T"); break;
+            case Key.P: CycleGroup("P"); break;
             case Key.I: CycleGroup("I"); break;
             case Key.H: CycleGroup("H"); break;
             case Key.Z: CycleGroup("Z"); break;
@@ -1073,6 +1138,8 @@ public partial class MainWindow : Window
             UpdateActiveLayer(tab.Vm);
             if (tab.Vm.SelectedLayer?.IsEffect == true) ShowAdjustmentWindow();
             else _adjWindow?.Close();
+            if (tab.Vm.SelectedLayer?.IsShape == true) ShowShapeWindow();
+            else _shapeWindow?.Close();
         };
         _tabs.Add(tab);
         ActivateTab(tab);
@@ -1103,6 +1170,7 @@ public partial class MainWindow : Window
         UpdateActiveLayer(tab.Vm);
         if (_adjWindow is not null) _adjWindow.DataContext = tab.Vm;
         if (_fxWindow is not null) _fxWindow.DataContext = tab.Vm;
+        if (_shapeWindow is not null) _shapeWindow.DataContext = tab.Vm;
         Canvas.FitView(_settings.LimitInitialZoom);
         UpdateEmptyState();
         UpdateDocInfo();
@@ -1151,6 +1219,8 @@ public partial class MainWindow : Window
             AlignCenterBtn.IsChecked = txt.Align == Sable.Engine.Layers.TextAlign.Center;
             AlignRightBtn.IsChecked = txt.Align == Sable.Engine.Layers.TextAlign.Right;
             LineSpacingBox.Text = ((int)(txt.LineSpacing * 100)).ToString();
+            BoxWidthBox.Text = ((int)txt.BoxWidth).ToString();
+            TrackingBox.Text = ((int)txt.Tracking).ToString();
             if (!string.IsNullOrEmpty(txt.FontFamily)) FontCombo.SelectedItem = txt.FontFamily;
             _syncingType = false;
         }
@@ -1173,6 +1243,16 @@ public partial class MainWindow : Window
         win.Closed += (_, _) => _adjWindow = null;
         _adjWindow = win;
         win.Show(this);            // modeless, owned + centered over main
+    }
+
+    private void ShowShapeWindow()
+    {
+        if (_shapeWindow is not null) { _shapeWindow.Activate(); return; }
+        var win = new ShapeWindow { DataContext = DataContext };
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        win.Closed += (_, _) => _shapeWindow = null;
+        _shapeWindow = win;
+        win.Show(this);
     }
 
     // ===== clipboard (PLAN §16.2 / Phase 1 #5) =====
@@ -1273,6 +1353,11 @@ public partial class MainWindow : Window
     private void OnFilesDrop(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.TryGetFiles() is not { } files) return;
+        // drop target: over the canvas (with a doc open) → add image as a layer; elsewhere → new tab
+        var p = e.GetPosition(Canvas);
+        bool overCanvas = Canvas.Document is not null && Doc is not null &&
+            p.X >= 0 && p.Y >= 0 && p.X < Canvas.Bounds.Width && p.Y < Canvas.Bounds.Height;
+
         foreach (var f in files)
         {
             var path = f.TryGetLocalPath();
@@ -1284,6 +1369,12 @@ public partial class MainWindow : Window
                 {
                     var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
                     tab.IsDirty = false;
+                }
+                else if (overCanvas && DocumentIO.OpenImage(path).Layers is [Sable.Engine.Layers.PixelLayer src, ..])
+                {
+                    var layer = LayerFromRegion(src.Pixels, src.Width, src.Height, null);   // centred, region-sized
+                    layer.Name = System.IO.Path.GetFileNameWithoutExtension(path);
+                    Doc!.PasteLayer(layer);   // undoable add to the current document
                 }
                 else
                 {
@@ -1373,6 +1464,60 @@ public partial class MainWindow : Window
         if (Collapse(all, "Flattened") is not { } flat) return;
         vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, all, 0, flat, "Flatten Image"));
         vm.SelectModel(flat);
+    }
+
+    // ===== Type menu (PLAN §16.10) =====
+
+    private void OnTextToCurves(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer?.Model is not Sable.Engine.Layers.TextLayer txt) return;
+        var path = txt.ToPath();
+        if (path.Nodes.Count == 0) return;   // empty / whitespace text
+        var parent = doc.FindParent(txt) ?? doc.Layers;
+        int i = parent.IndexOf(txt);
+        if (i < 0) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent,
+            new System.Collections.Generic.List<Layer> { txt }, i, path, "Text to Curves"));
+        vm.SelectModel(path);
+    }
+
+    private void OnTextToPath(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer?.Model is not Sable.Engine.Layers.TextLayer txt) return;
+        if (FindPathSource(doc, txt) is not { } pts || pts.Count < 2) return;   // no vector path to fit to
+        vm.Undo.Execute(new Sable.Engine.Commands.SetTextPathCommand(doc, txt, pts));
+    }
+
+    private void OnTextDetachPath(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is not { } doc || vm.SelectedLayer?.Model is not Sable.Engine.Layers.TextLayer txt) return;
+        if (txt.PathPoints.Count == 0) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.SetTextPathCommand(doc, txt, new System.Collections.Generic.List<(float, float)>()));
+    }
+
+    /// <summary>Flattened doc-px polyline of the topmost vector path/shape (excluding the text), to fit text along.</summary>
+    private static System.Collections.Generic.List<(float, float)>? FindPathSource(Sable.Engine.Document doc, Layer exclude)
+    {
+        Layer? src = null;
+        void Walk(System.Collections.Generic.List<Layer> layers)
+        {
+            foreach (var l in layers)   // doc order is bottom→top; keep the last match = topmost
+            {
+                if (!ReferenceEquals(l, exclude) && l is Sable.Engine.Layers.PathLayer or Sable.Engine.Layers.ShapeLayer) src = l;
+                if (l is Sable.Engine.Layers.GroupLayer g) Walk(g.Children);
+            }
+        }
+        Walk(doc.Layers);
+        switch (src)
+        {
+            case Sable.Engine.Layers.PathLayer p:
+                return p.Flatten(24).Select(t => ((float)t.X + p.OffsetX, (float)t.Y + p.OffsetY)).ToList();
+            case Sable.Engine.Layers.ShapeLayer s:
+                var (outline, _) = s.BuildOutline();
+                return outline.Select(t => ((float)t.X + s.OffsetX, (float)t.Y + s.OffsetY)).ToList();
+            default:
+                return null;
+        }
     }
 
     private void OnRasterise(object? sender, RoutedEventArgs e)

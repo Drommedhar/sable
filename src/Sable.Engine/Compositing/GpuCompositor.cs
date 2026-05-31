@@ -457,6 +457,10 @@ public sealed unsafe class GpuCompositor : IDisposable
             {
                 BlendContentWithFx(ref current, ref other, GetTextBuffer(txt), layer, maskBuf, _width, _height);
             }
+            else if (layer is PathLayer pth)
+            {
+                BlendContentWithFx(ref current, ref other, GetPathBuffer(pth), layer, maskBuf, _width, _height);
+            }
             else if (layer is GroupLayer grp)
             {
                 var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
@@ -1012,6 +1016,23 @@ public sealed unsafe class GpuCompositor : IDisposable
         sh.Rasterize(_shapeScratch, _width, _height);
         fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
         sh.Dirty = false;
+        return buf;
+    }
+
+    /// <summary>(Re)rasterize a parametric vector-path layer into a GPU buffer; cached, refreshed when dirty.</summary>
+    private Buffer* GetPathBuffer(PathLayer pth)
+    {
+        bool cached = _layerBuffers.TryGetValue(pth, out var existing);
+        if (cached && !pth.Dirty) return (Buffer*)existing;
+
+        Buffer* buf;
+        if (cached) buf = (Buffer*)existing;
+        else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[pth] = (nint)buf; }
+
+        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        pth.Rasterize(_shapeScratch, _width, _height);
+        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        pth.Dirty = false;
         return buf;
     }
 

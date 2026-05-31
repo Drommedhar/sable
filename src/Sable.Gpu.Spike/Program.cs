@@ -194,6 +194,39 @@ unsafe
     // live-filter GPU smoke: one of every FilterKind (exercises all filter pipelines + mask/opacity blend)
     foreach (Sable.Engine.Layers.FilterKind fk in System.Enum.GetValues<Sable.Engine.Layers.FilterKind>())
         doc.Layers.Add(new Sable.Engine.Layers.FilterLayer(fk) { Radius = 6f, Amount = 1f, Angle = 30f, Opacity = 0.7f });
+    // vector path GPU smoke: a closed filled+stroked bézier diamond (exercises GetPathBuffer + raster)
+    doc.Layers.Add(new Sable.Engine.Layers.PathLayer(new[]
+    {
+        new Sable.Engine.Layers.PathNode(doc.Width * 0.5f, doc.Height * 0.2f),
+        new Sable.Engine.Layers.PathNode(doc.Width * 0.8f, doc.Height * 0.5f),
+        new Sable.Engine.Layers.PathNode(doc.Width * 0.5f, doc.Height * 0.8f),
+        new Sable.Engine.Layers.PathNode(doc.Width * 0.2f, doc.Height * 0.5f),
+    }, true, 240, 180, 40) { Stroked = true, StrokeR = 20, StrokeG = 20, StrokeB = 20, StrokeWidth = 5f, Opacity = 0.8f });
+    // shape GPU smoke: rounded rect (fill+dashed stroke), polygon, star, arrow
+    doc.Layers.Add(new Sable.Engine.Layers.ShapeLayer(Sable.Engine.Layers.ShapeKind.RoundedRect, 20, 20, 120, 80, 60, 140, 220)
+    { CornerRadius = 22, Stroked = true, StrokeR = 255, StrokeG = 255, StrokeB = 255, StrokeWidth = 4, DashOn = true, DashLen = 14, GapLen = 8, Opacity = 0.85f });
+    doc.Layers.Add(new Sable.Engine.Layers.ShapeLayer(Sable.Engine.Layers.ShapeKind.Polygon, 170, 20, 100, 100, 220, 120, 60)
+    { Sides = 6, Stroked = true, StrokeR = 20, StrokeG = 20, StrokeB = 20, StrokeWidth = 6, Join = Sable.Engine.Layers.LineJoin.Miter });
+    // stroke join/cap smoke: thick zigzag, miter joins + square caps
+    doc.Layers.Add(new Sable.Engine.Layers.PathLayer(new[]
+    {
+        new Sable.Engine.Layers.PathNode(30, 300), new Sable.Engine.Layers.PathNode(70, 250),
+        new Sable.Engine.Layers.PathNode(110, 320), new Sable.Engine.Layers.PathNode(150, 250),
+    }, false, 0, 0, 0)
+    { Filled = false, Stroked = true, StrokeR = 90, StrokeG = 200, StrokeB = 120, StrokeWidth = 12,
+      Cap = Sable.Engine.Layers.LineCap.Square, Join = Sable.Engine.Layers.LineJoin.Miter });
+    doc.Layers.Add(new Sable.Engine.Layers.ShapeLayer(Sable.Engine.Layers.ShapeKind.Star, 300, 20, 110, 110, 250, 210, 40)
+    { Sides = 5, InnerRatio = 0.45f, Stroked = true, StrokeR = 120, StrokeG = 80, StrokeB = 0, StrokeWidth = 2 });
+    doc.Layers.Add(new Sable.Engine.Layers.ShapeLayer(Sable.Engine.Layers.ShapeKind.Arrow, 440, 60, 160, 40, 0, 0, 0)
+    { StrokeR = 230, StrokeG = 40, StrokeB = 90, StrokeWidth = 6 });
+    // text depth GPU smoke: text→curves (vector "Sa" with counters), on-path text, area-wrap text
+    var tc = new Sable.Engine.Layers.TextLayer("Sa", 20, 240, 80, 255, 230, 120).ToPath();
+    doc.Layers.Add(tc);
+    var onpath = new Sable.Engine.Layers.TextLayer("on path text", 0, 0, 26, 120, 220, 255)
+    { PathPoints = { (320, 300), (400, 260), (480, 300), (560, 260) } };
+    doc.Layers.Add(onpath);
+    doc.Layers.Add(new Sable.Engine.Layers.TextLayer("area text that wraps to the box width", 200, 200, 18, 255, 255, 255)
+    { BoxWidth = 110, Tracking = 1 });
     // nested group smoke: wrap a pixel layer in a group so the recursive compositor runs
     var grp = new Sable.Engine.Layers.GroupLayer("grp") { Opacity = 0.6f };
     grp.Children.Add(new Sable.Engine.Layers.PixelLayer(doc.Width, doc.Height, "in-group"));

@@ -25,6 +25,7 @@ struct Viewport {
     shx0: f32, shy0: f32, shx1: f32, shy1: f32,
     cloneOn: f32, clsx: f32, clsy: f32, pixGrid: f32,       // clone crosshair; pixGrid: 1 = 1px pixel grid
     caretOn: f32, caretX: f32, caretY0: f32, caretY1: f32,  // text caret (surface px)
+    penOn: f32, penPad0: f32, penPad1: f32, penPad2: f32,   // pen-path node markers (geometry in binding 6)
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -33,6 +34,7 @@ struct Viewport {
 @group(0) @binding(3) var maskTex: texture_2d<f32>;   // selection coverage (R8), doc UV
 @group(0) @binding(4) var<storage, read> guides: array<f32>;   // [countX, countY, _, _, Xs..., Ys...] doc px
 @group(0) @binding(5) var<storage, read> smart: array<f32>;    // smart-guide alignment lines (same layout)
+@group(0) @binding(6) var<storage, read> pen: array<f32>;      // [nodeN, activeIdx, flatN, _, (ax,ay,inx,iny,outx,outy)×nodeN, (x,y)×flatN] surface px
 
 @vertex
 fn vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
@@ -234,6 +236,42 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (vp.caretOn > 0.5) {
         if (abs(frag.x - vp.caretX) < 1.0 && frag.y >= vp.caretY0 && frag.y <= vp.caretY1) {
             outc = vec3<f32>(1.0) - outc;
+        }
+    }
+
+    // pen-tool node markers: handle lines + anchor squares + handle diamonds (surface px)
+    if (vp.penOn > 0.5) {
+        let p = frag.xy;
+        let n = u32(pen[0]);
+        let activeIdx = i32(pen[1]);
+        let flatN = u32(pen[2]);
+        let flatBase = 4u + n * 6u;
+        // spine: connect consecutive flattened points (the live curve)
+        if (flatN >= 2u) {
+            for (var i = 0u; i + 1u < flatN; i = i + 1u) {
+                let s0 = vec2<f32>(pen[flatBase + i * 2u], pen[flatBase + i * 2u + 1u]);
+                let s1 = vec2<f32>(pen[flatBase + (i + 1u) * 2u], pen[flatBase + (i + 1u) * 2u + 1u]);
+                if (segDist(p, s0, s1) < 1.0) { outc = vec3<f32>(0.18, 0.7, 1.0); }
+            }
+        }
+        for (var i = 0u; i < n; i = i + 1u) {
+            let b = 4u + i * 6u;
+            let a  = vec2<f32>(pen[b], pen[b + 1u]);
+            let hi = vec2<f32>(pen[b + 2u], pen[b + 3u]);
+            let ho = vec2<f32>(pen[b + 4u], pen[b + 5u]);
+            // handle lines (thin), only when the handle is pulled out from the anchor
+            if (length(hi - a) > 1.5 && segDist(p, a, hi) < 1.0) { outc = vec3<f32>(0.3, 0.7, 1.0); }
+            if (length(ho - a) > 1.5 && segDist(p, a, ho) < 1.0) { outc = vec3<f32>(0.3, 0.7, 1.0); }
+            // handle end diamonds (small circles)
+            if (length(hi - a) > 1.5 && length(p - hi) < 3.5) { outc = vec3<f32>(0.3, 0.7, 1.0); }
+            if (length(ho - a) > 1.5 && length(p - ho) < 3.5) { outc = vec3<f32>(0.3, 0.7, 1.0); }
+            // anchor square — active/first node tinted, others white with dark border
+            if (inSquare(p, a, 4.0)) {
+                let isActive = i32(i) == activeIdx;
+                outc = select(vec3<f32>(1.0), vec3<f32>(0.18, 0.7, 1.0), isActive);
+            } else if (inSquare(p, a, 5.0)) {
+                outc = vec3<f32>(0.05);
+            }
         }
     }
 

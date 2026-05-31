@@ -81,6 +81,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         set
         {
             if (_activeTool == value) return;
+            if (_activeTool == ToolKind.Pen && value != ToolKind.Pen) CommitPen();   // leaving Pen finishes the path
             _activeTool = value;
             if (value != ToolKind.Type) CommitTextEdit();   // leaving Type ends editing
             ToolChanged?.Invoke(value);
@@ -94,6 +95,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     public bool PaintMask { get; set; }
 
     public BrushTool Brush { get; } = new();
+
+    /// <summary>Draw-time defaults for the Shape tools (fill/stroke/dash/per-kind), set from the options bar.</summary>
+    public ShapeStyle Shape { get; } = new();
 
     /// <summary>The gradient the Gradient tool paints (edited in the Gradients panel).</summary>
     public GradientDef Gradient { get; } =
@@ -120,6 +124,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     public bool TypeStrike { get; set; }
     public int TypeAlign { get; set; }          // 0=L,1=C,2=R
     public float TypeLineSpacing { get; set; } = 1f;
+    public float TypeBoxWidth { get; set; }     // 0 = point text; >0 = area text wrap width
+    public float TypeTracking { get; set; }     // letter spacing px
 
     // on-canvas text editing: the layer currently being typed into (caret + window text input)
     private TextLayer? _editingText;
@@ -285,6 +291,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_shaping)
         {
             _shapeEndSx = sx; _shapeEndSy = sy;   // track for the live outline overlay
+        }
+        else if (_penDragging)
+        {
+            PenMove(sx, sy);
+        }
+        else if (_nodeDragging)
+        {
+            NodeMove(sx, sy);
         }
         else if (_panningMouse)
         {
@@ -495,7 +509,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         {
             if (ReferenceEquals(l, moving) || !l.Visible) continue;
             if (l is Sable.Engine.Layers.GroupLayer g) { CollectLayerLines(g.Children, moving, vcand, hcand); continue; }
-            if (l is not (Sable.Engine.Layers.PixelLayer or Sable.Engine.Layers.ShapeLayer or Sable.Engine.Layers.TextLayer)) continue;
+            if (l is not (Sable.Engine.Layers.PixelLayer or Sable.Engine.Layers.ShapeLayer or Sable.Engine.Layers.TextLayer or Sable.Engine.Layers.PathLayer)) continue;
             var cb = l.ContentBounds(_doc!.Width, _doc.Height);
             double L = l.OffsetX + cb.x, T = l.OffsetY + cb.y;
             vcand.Add(L); vcand.Add(L + cb.w / 2.0); vcand.Add(L + cb.w);
@@ -571,8 +585,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
             case ToolKind.ShapeRect:
+            case ToolKind.ShapeRoundedRect:
             case ToolKind.ShapeEllipse:
             case ToolKind.ShapeLine:
+            case ToolKind.ShapePolygon:
+            case ToolKind.ShapeStar:
+            case ToolKind.ShapeArrow:
                 if (_doc is not null)
                 {
                     _shaping = true; _input?.Capture();
@@ -580,6 +598,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _shapeStartSx = sx; _shapeStartSy = sy;
                     _shapeEndSx = sx; _shapeEndSy = sy;
                 }
+                break;
+            case ToolKind.Pen:
+                PenDown(dx, dy, mods);
+                break;
+            case ToolKind.Node:
+                NodeDown(dx, dy, mods);
                 break;
             case ToolKind.Zoom:
                 ZoomAt(alt ? 1.0 / 1.1 : 1.1, _lastMouseX, _lastMouseY);
@@ -695,7 +719,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                         {
                             FontFamily = TypeFontFamily, Bold = TypeBold, Italic = TypeItalic,
                             Underline = TypeUnderline, Strikethrough = TypeStrike,
-                            Align = (TextAlign)TypeAlign, LineSpacing = TypeLineSpacing
+                            Align = (TextAlign)TypeAlign, LineSpacing = TypeLineSpacing,
+                            BoxWidth = TypeBoxWidth, Tracking = TypeTracking
                         };
                         LayerProduced?.Invoke(t);
                         BeginTextEdit(t);
@@ -867,21 +892,42 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             var (ex, ey) = MapToDoc(_shapeEndSx, _shapeEndSy);
             var kind = ActiveTool switch
             {
+                ToolKind.ShapeRoundedRect => ShapeKind.RoundedRect,
                 ToolKind.ShapeEllipse => ShapeKind.Ellipse,
                 ToolKind.ShapeLine => ShapeKind.Line,
+                ToolKind.ShapePolygon => ShapeKind.Polygon,
+                ToolKind.ShapeStar => ShapeKind.Star,
+                ToolKind.ShapeArrow => ShapeKind.Arrow,
                 _ => ShapeKind.Rectangle
             };
             float sx0 = (float)_shapeStartDocX, sy0 = (float)_shapeStartDocY;
             float sw = (float)(ex - sx0), sh = (float)(ey - sy0);
             if (Math.Abs(sw) >= 2 || Math.Abs(sh) >= 2)   // ignore a tiny accidental drag
             {
-                // each shape is its own PARAMETRIC layer (editable fill + tight bounds; Move grabs it)
+                // each shape is its own PARAMETRIC layer (editable fill + tight bounds; Move grabs it).
+                // Fill colour = foreground; stroke/dash/per-kind params come from the options bar (ShapeStyle).
+                bool lineish = kind is ShapeKind.Line or ShapeKind.Arrow;
                 var shape = new ShapeLayer(kind, sx0, sy0, sw, sh, Brush.R, Brush.G, Brush.B)
                 {
-                    StrokeWidth = (float)(Brush.Radius * 2)
+                    Filled = Shape.Filled && !lineish,
+                    Stroked = Shape.StrokeOn || lineish,
+                    StrokeR = lineish ? Brush.R : Shape.StrokeR,
+                    StrokeG = lineish ? Brush.G : Shape.StrokeG,
+                    StrokeB = lineish ? Brush.B : Shape.StrokeB,
+                    StrokeWidth = Shape.StrokeWidth,
+                    DashOn = Shape.DashOn, DashLen = Shape.DashLen, GapLen = Shape.GapLen,
+                    CornerRadius = Shape.CornerRadius, Sides = Shape.Sides, InnerRatio = Shape.InnerRatio,
                 };
                 LayerProduced?.Invoke(shape);
             }
+        }
+        else if (_penDragging)
+        {
+            PenUp();
+        }
+        else if (_nodeDragging)
+        {
+            NodeUp();
         }
         else if (_panningMouse)
         {

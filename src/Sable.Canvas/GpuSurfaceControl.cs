@@ -488,8 +488,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.ShapeKind = ActiveTool switch
             {
                 Sable.Tools.ToolKind.ShapeEllipse => 1,
-                Sable.Tools.ToolKind.ShapeLine => 2,
-                _ => 0
+                Sable.Tools.ToolKind.ShapeLine or Sable.Tools.ToolKind.ShapeArrow => 2,
+                _ => 0   // rect bbox preview for rect/rounded/polygon/star
             };
             ov.ShX0 = (float)_shapeStartSx; ov.ShY0 = (float)_shapeStartSy;
             ov.ShX1 = (float)_shapeEndSx; ov.ShY1 = (float)_shapeEndSy;
@@ -542,6 +542,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         }
         if (_smartX.Count > 0) ov.SmartX = _smartX.ToArray();
         if (_smartY.Count > 0) ov.SmartY = _smartY.ToArray();
+        if (PenActive) BuildPenOverlay(ref ov);
+        else if (ActiveTool == Sable.Tools.ToolKind.Node && SelLayer is Sable.Engine.Layers.PathLayer np) BuildNodeOverlay(ref ov, np);
         _blitter.Blit(_compositeView, view, ComputeViewport(), ov);
         api.SurfacePresent(_surface);
 

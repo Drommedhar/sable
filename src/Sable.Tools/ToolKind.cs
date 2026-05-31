@@ -21,8 +21,12 @@ public enum ToolKind
     Gradient,     // linear gradient fill (foreground → transparent)
     Crop,         // resize the document to a drawn rectangle
     ShapeRect,    // filled rectangle
+    ShapeRoundedRect, // rounded rectangle
     ShapeEllipse, // filled ellipse
     ShapeLine,    // stroked line
+    ShapePolygon, // regular n-gon
+    ShapeStar,    // n-point star
+    ShapeArrow,   // arrow (line + head)
     CloneStamp,   // copy pixels from a sampled source point
     Dodge,        // lighten
     Burn,         // darken
@@ -31,6 +35,8 @@ public enum ToolKind
     SharpenBrush, // sharpen
     Smudge,       // push colour along the stroke
     Type,         // text layer
+    Pen,          // vector bézier path (click = corner node, drag = smooth handles)
+    Node,         // edit an existing path's nodes/handles (drag/add/delete)
     Eyedropper,
     Hand,         // pan
     Zoom,

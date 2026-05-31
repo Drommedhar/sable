@@ -68,4 +68,11 @@ public struct BlitOverlay
     // transient smart-guide alignment lines (magenta) shown while moving a layer
     public float[]? SmartX;
     public float[]? SmartY;
+
+    // pen-tool node markers — geometry in SURFACE px: per node [ax,ay,inx,iny,outx,outy].
+    // PenActive = index of the highlighted (active/first) anchor, -1 for none.
+    public bool PenOn;
+    public float[]? PenNodes;   // length = 6 × nodeCount
+    public float[]? PenFlat;    // flattened spine polyline, length = 2 × pointCount (surface px)
+    public int PenActive;
 }

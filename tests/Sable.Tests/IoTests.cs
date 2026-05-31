@@ -158,6 +158,107 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesTextBoxAndPath()
+    {
+        var doc = new Document(64, 64);
+        doc.Layers.Add(new TextLayer("hello world", 4, 8, 20, 10, 20, 30)
+        {
+            BoxWidth = 40, Tracking = 3,
+            PathPoints = { (1, 2), (10, 12), (20, 5) },
+        });
+        var path = Path.Combine(Path.GetTempPath(), $"txt_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = (TextLayer)SableFile.Load(path).Layers[0];
+            Assert.Equal(40, l.BoxWidth);
+            Assert.Equal(3, l.Tracking);
+            Assert.Equal(3, l.PathPoints.Count);
+            Assert.Equal((10f, 12f), l.PathPoints[1]);
+            Assert.True(l.OnPath);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesPathExtraContours()
+    {
+        var doc = new Document(32, 32);
+        var p = new PathLayer { Closed = true, Nodes = { new PathNode(0, 0), new PathNode(8, 0), new PathNode(8, 8) } };
+        p.ExtraContours.Add((new System.Collections.Generic.List<PathNode> { new(2, 2), new(4, 2), new(4, 4) }, true));
+        doc.Layers.Add(p);
+        var path = Path.Combine(Path.GetTempPath(), $"pex_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = (PathLayer)SableFile.Load(path).Layers[0];
+            Assert.Single(l.ExtraContours);
+            Assert.Equal(3, l.ExtraContours[0].Nodes.Count);
+            Assert.True(l.ExtraContours[0].Closed);
+            Assert.Equal(2, l.ExtraContours[0].Nodes[0].Ax);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesShapeStrokeAndKindParams()
+    {
+        var doc = new Document(32, 32);
+        doc.Layers.Add(new ShapeLayer(ShapeKind.Star, 1, 2, 20, 20, 10, 20, 30)
+        {
+            A = 200, Filled = true, Stroked = true, StrokeR = 40, StrokeG = 50, StrokeB = 60, StrokeA = 210,
+            StrokeWidth = 6, DashOn = true, DashLen = 9, GapLen = 4, Sides = 7, InnerRatio = 0.33f, CornerRadius = 14,
+        });
+        var path = Path.Combine(Path.GetTempPath(), $"shp_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = (ShapeLayer)SableFile.Load(path).Layers[0];
+            Assert.Equal(ShapeKind.Star, l.Kind);
+            Assert.True(l.Filled); Assert.True(l.Stroked);
+            Assert.Equal(40, l.StrokeR); Assert.Equal(210, l.StrokeA);
+            Assert.Equal(6, l.StrokeWidth);
+            Assert.True(l.DashOn); Assert.Equal(9, l.DashLen); Assert.Equal(4, l.GapLen);
+            Assert.Equal(7, l.Sides); Assert.Equal(0.33f, l.InnerRatio); Assert.Equal(14, l.CornerRadius);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesVectorPath()
+    {
+        var doc = new Document(32, 32);
+        doc.Layers.Add(new PathLayer
+        {
+            Closed = true, Filled = true, FillR = 11, FillG = 22, FillB = 33, FillA = 200,
+            Stroked = true, StrokeR = 44, StrokeG = 55, StrokeB = 66, StrokeWidth = 5,
+            Nodes =
+            {
+                new PathNode(1, 2) { OutX = 3, OutY = 4, Smooth = true },
+                new PathNode(10, 12) { InX = 8, InY = 9 },
+                new PathNode(20, 5),
+            }
+        });
+        var path = Path.Combine(Path.GetTempPath(), $"path_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = (PathLayer)SableFile.Load(path).Layers[0];
+            Assert.True(l.Closed);
+            Assert.Equal(3, l.Nodes.Count);
+            Assert.Equal(1, l.Nodes[0].Ax);
+            Assert.Equal(3, l.Nodes[0].OutX);
+            Assert.True(l.Nodes[0].Smooth);
+            Assert.Equal(8, l.Nodes[1].InX);
+            Assert.Equal(33, l.FillB);
+            Assert.Equal(200, l.FillA);
+            Assert.True(l.Stroked);
+            Assert.Equal(5, l.StrokeWidth);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesLocksAndColorTag()
     {
         var doc = new Document(16, 16);

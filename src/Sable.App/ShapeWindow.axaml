@@ -1,0 +1,92 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.ShapeWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="290" Height="380"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True"
+        ShowInTaskbar="False"
+        Title="Shape">
+
+    <Window.Resources>
+        <LinearGradientBrush x:Key="WidthBrush" StartPoint="0%,0%" EndPoint="100%,0%">
+            <GradientStop Offset="0.0" Color="#FF333333" />
+            <GradientStop Offset="1.0" Color="#FFDDDDDD" />
+        </LinearGradientBrush>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <!-- header -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="10,7">
+            <TextBlock Text="{Binding SelectedLayer.Name}" Classes="panelHeader" Padding="0"
+                       Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" />
+        </Border>
+
+        <!-- footer -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="10,8">
+            <Button Content="Close" HorizontalAlignment="Right" Click="OnClose" />
+        </Border>
+
+        <ScrollViewer>
+            <StackPanel Margin="12,10" Spacing="10">
+
+                <!-- fill -->
+                <CheckBox Content="Fill" Foreground="{DynamicResource ChromeText}" FontSize="12"
+                          IsChecked="{Binding SelectedLayer.ShapeFilled, Mode=TwoWay}"
+                          IsVisible="{Binding !SelectedLayer.ShapeIsLine}" />
+                <local:HexColorField Hex="{Binding SelectedLayer.ShapeFillHex, Mode=TwoWay}"
+                                     IsVisible="{Binding !SelectedLayer.ShapeIsLine}" />
+
+                <Rectangle Height="1" Fill="{DynamicResource ChromeBorder}" />
+
+                <!-- stroke -->
+                <CheckBox Content="Stroke" Foreground="{DynamicResource ChromeText}" FontSize="12"
+                          IsChecked="{Binding SelectedLayer.ShapeStroked, Mode=TwoWay}"
+                          IsVisible="{Binding !SelectedLayer.ShapeIsLine}" />
+                <local:HexColorField Hex="{Binding SelectedLayer.ShapeStrokeHex, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Stroke Width" Minimum="1" Maximum="60" TrackBrush="{StaticResource WidthBrush}"
+                                     Value="{Binding SelectedLayer.ShapeStrokeWidth, Mode=TwoWay}" />
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0" Spacing="3">
+                        <TextBlock Text="Cap" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
+                        <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding SelectedLayer.ShapeCap, Mode=TwoWay}">
+                            <ComboBoxItem>Butt</ComboBoxItem>
+                            <ComboBoxItem>Round</ComboBoxItem>
+                            <ComboBoxItem>Square</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="Join" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
+                        <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding SelectedLayer.ShapeJoin, Mode=TwoWay}">
+                            <ComboBoxItem>Miter</ComboBoxItem>
+                            <ComboBoxItem>Round</ComboBoxItem>
+                            <ComboBoxItem>Bevel</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
+                </Grid>
+
+                <CheckBox Content="Dashed" Foreground="{DynamicResource ChromeText}" FontSize="12"
+                          IsChecked="{Binding SelectedLayer.ShapeDashOn, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Dash" Minimum="1" Maximum="60"
+                                     Value="{Binding SelectedLayer.ShapeDashLen, Mode=TwoWay}"
+                                     IsVisible="{Binding SelectedLayer.ShapeDashOn}" />
+                <local:LabeledSlider Label="Gap" Minimum="1" Maximum="60"
+                                     Value="{Binding SelectedLayer.ShapeGapLen, Mode=TwoWay}"
+                                     IsVisible="{Binding SelectedLayer.ShapeDashOn}" />
+
+                <!-- per-kind -->
+                <local:LabeledSlider Label="Sides" Minimum="3" Maximum="20"
+                                     Value="{Binding SelectedLayer.ShapeSides, Mode=TwoWay}"
+                                     IsVisible="{Binding SelectedLayer.ShapeUsesSides}" />
+                <local:LabeledSlider Label="Inner Radius %" Minimum="5" Maximum="95"
+                                     Value="{Binding SelectedLayer.ShapeInnerPercent, Mode=TwoWay}"
+                                     IsVisible="{Binding SelectedLayer.ShapeUsesInner}" />
+                <local:LabeledSlider Label="Corner Radius" Minimum="0" Maximum="200"
+                                     Value="{Binding SelectedLayer.ShapeCornerRadius, Mode=TwoWay}"
+                                     IsVisible="{Binding SelectedLayer.ShapeUsesCorner}" />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

@@ -299,3 +299,63 @@ public sealed class UngroupCommand : IUndoableCommand
         _doc.MarkStructureChanged();
     }
 }
+
+/// <summary>Snapshot of a vector path's node list (Node tool edits). Undoable. Closed flag
+/// can also change (e.g. deleting the closing node). Replaces the whole node list on do/undo.</summary>
+public sealed class EditPathCommand : IUndoableCommand
+{
+    private readonly Document _doc;
+    private readonly PathLayer _path;
+    private readonly System.Collections.Generic.List<PathNode> _before, _after;
+    private readonly bool _beforeClosed, _afterClosed;
+
+    public EditPathCommand(Document doc, PathLayer path,
+        System.Collections.Generic.List<PathNode> before, bool beforeClosed,
+        System.Collections.Generic.List<PathNode> after, bool afterClosed)
+    {
+        _doc = doc; _path = path;
+        _before = new System.Collections.Generic.List<PathNode>(before);
+        _after = new System.Collections.Generic.List<PathNode>(after);
+        _beforeClosed = beforeClosed; _afterClosed = afterClosed;
+    }
+
+    public string Name => "Edit Path";
+
+    private void Apply(System.Collections.Generic.List<PathNode> nodes, bool closed)
+    {
+        _path.Nodes = new System.Collections.Generic.List<PathNode>(nodes);
+        _path.Closed = closed;
+        _path.Dirty = true;
+        _doc.MarkStructureChanged();
+    }
+
+    public void Do() => Apply(_after, _afterClosed);
+    public void Undo() => Apply(_before, _beforeClosed);
+}
+
+/// <summary>Set or clear a text layer's on-path polyline (Fit/Detach Text to Path). Undoable.</summary>
+public sealed class SetTextPathCommand : IUndoableCommand
+{
+    private readonly Document _doc;
+    private readonly TextLayer _text;
+    private readonly System.Collections.Generic.List<(float, float)> _before, _after;
+
+    public SetTextPathCommand(Document doc, TextLayer text, System.Collections.Generic.List<(float, float)> after)
+    {
+        _doc = doc; _text = text;
+        _before = new System.Collections.Generic.List<(float, float)>(text.PathPoints);
+        _after = new System.Collections.Generic.List<(float, float)>(after);
+    }
+
+    public string Name => "Text on Path";
+
+    private void Apply(System.Collections.Generic.List<(float, float)> pts)
+    {
+        _text.PathPoints = new System.Collections.Generic.List<(float, float)>(pts);
+        _text.Dirty = true;
+        _doc.MarkStructureChanged();
+    }
+
+    public void Do() => Apply(_after);
+    public void Undo() => Apply(_before);
+}
