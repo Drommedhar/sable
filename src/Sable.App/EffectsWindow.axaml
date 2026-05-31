@@ -1,0 +1,208 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.EffectsWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="600" Height="430"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True"
+        ShowInTaskbar="False"
+        Title="{loc:Loc effectsWindow.layerEffects}">
+
+    <Window.Resources>
+        <LinearGradientBrush x:Key="GrayBrush" StartPoint="0%,0%" EndPoint="100%,0%">
+            <GradientStop Offset="0.0" Color="#FF2E2E2E" />
+            <GradientStop Offset="1.0" Color="#FF8A8A8A" />
+        </LinearGradientBrush>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+
+        <!-- bottom bar: fill opacity + close -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="10,7">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
+                <TextBlock Grid.Column="1" Text="{loc:Loc effectsWindow.fillOpacity}" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                <TextBox Grid.Column="2" Width="60" VerticalAlignment="Center"
+                         Text="{Binding SelectedLayer.FillOpacityPercent, Mode=TwoWay, StringFormat={}{0:0} %}" />
+                <Button Grid.Column="3" Content="{loc:Loc effectsWindow.close}" Classes="opt" Padding="14,0" Click="OnClose" />
+            </Grid>
+        </Border>
+
+        <!-- master: effect list + reorder -->
+        <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource ChromeFooter}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,0">
+            <DockPanel LastChildFill="True">
+                <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="6,4">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <Button Classes="iconbtn" Click="OnMoveUp" ToolTip.Tip="{loc:Loc effectsWindow.moveEffectUpStackingOrder}">
+                            <Path Classes="icon" Width="14" Height="14" Data="M18 15l-6-6-6 6" />
+                        </Button>
+                        <Button Classes="iconbtn" Click="OnMoveDown" ToolTip.Tip="{loc:Loc effectsWindow.moveEffectDown}">
+                            <Path Classes="icon" Width="14" Height="14" Data="M6 9l6 6 6-6" />
+                        </Button>
+                    </StackPanel>
+                </Border>
+                <ListBox x:Name="FxList" Background="Transparent" SelectionChanged="OnFxSelected" Padding="0">
+                    <ListBoxItem Tag="0">
+                        <CheckBox Content="{loc:Loc effectsWindow.outerShadow}" IsChecked="{Binding SelectedLayer.HasDropShadow, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="1">
+                        <CheckBox Content="{loc:Loc effectsWindow.outerGlow}" IsChecked="{Binding SelectedLayer.HasOuterGlow, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="2">
+                        <CheckBox Content="{loc:Loc effectsWindow.outline}" IsChecked="{Binding SelectedLayer.HasStroke, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="3">
+                        <CheckBox Content="{loc:Loc effectsWindow.colourOverlay}" IsChecked="{Binding SelectedLayer.HasColorOverlay, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="4">
+                        <CheckBox Content="{loc:Loc effectsWindow.innerShadow}" IsChecked="{Binding SelectedLayer.HasInnerShadow, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="5">
+                        <CheckBox Content="{loc:Loc effectsWindow.innerGlow}" IsChecked="{Binding SelectedLayer.HasInnerGlow, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="6">
+                        <CheckBox Content="{loc:Loc effectsWindow.gradientOverlay}" IsChecked="{Binding SelectedLayer.HasGradientOverlay, Mode=TwoWay}" />
+                    </ListBoxItem>
+                    <ListBoxItem Tag="7">
+                        <CheckBox Content="{loc:Loc effectsWindow.bevelEmboss}" IsChecked="{Binding SelectedLayer.HasBevel, Mode=TwoWay}" />
+                    </ListBoxItem>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- detail: params of the selected effect -->
+        <Border Padding="16,14">
+            <Panel>
+                <TextBlock Text="{loc:Loc effectsWindow.selectAnEffectOnThe}"
+                           Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Top"
+                           IsVisible="{Binding SelectedLayer, Converter={x:Static ObjectConverters.IsNull}}" />
+
+                <!-- Outer Shadow -->
+                <Grid x:Name="PanelShadow"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.DsBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.DsOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.radius}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.DsRadius, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.offsetX}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="3" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.DsOffsetX, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="{loc:Loc effectsWindow.offsetY}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.DsOffsetY, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.DsColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Outer Glow -->
+                <Grid x:Name="PanelGlow" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.GlowBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GlowOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.radius}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GlowRadius, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.GlowColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Outline / Stroke -->
+                <Grid x:Name="PanelStroke" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.StrokeBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.StrokeOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.width}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="1" Maximum="16" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.StrokeSizeVal, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.position}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch" SelectedIndex="{Binding SelectedLayer.StrokePosIndex, Mode=TwoWay}">
+                        <ComboBoxItem>Outside</ComboBoxItem>
+                        <ComboBoxItem>Inside</ComboBoxItem>
+                        <ComboBoxItem>Centre</ComboBoxItem>
+                    </ComboBox>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="4" Grid.Column="1" Hex="{Binding SelectedLayer.StrokeColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Colour Overlay -->
+                <Grid x:Name="PanelOverlay" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.OverlayBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.OverlayOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="2" Grid.Column="1" Hex="{Binding SelectedLayer.OverlayColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Inner Shadow -->
+                <Grid x:Name="PanelInnerShadow" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.InShBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InShOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.radius}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="16" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InShRadius, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.offsetX}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="3" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InShOffsetX, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="{loc:Loc effectsWindow.offsetY}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="-50" Maximum="50" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InShOffsetY, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.InShColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Inner Glow -->
+                <Grid x:Name="PanelInnerGlow" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.InGlBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InGlOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.radius}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="16" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.InGlRadius, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.colour}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.InGlColorHex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Gradient Overlay -->
+                <Grid x:Name="PanelGradient" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.GradBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GradOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.angle}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.GradAngle, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.start}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="3" Grid.Column="1" Hex="{Binding SelectedLayer.GradColor1Hex, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="{loc:Loc effectsWindow.end}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="4" Grid.Column="1" Hex="{Binding SelectedLayer.GradColor2Hex, Mode=TwoWay}" />
+                </Grid>
+
+                <!-- Bevel / Emboss -->
+                <Grid x:Name="PanelBevel" IsVisible="False"
+                      ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Loc effectsWindow.blendMode}" Classes="fxLabel" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding BlendModes}" SelectedItem="{Binding SelectedLayer.BevBlend, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Loc effectsWindow.opacity}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BevOpacityPct, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Loc effectsWindow.size}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="2" Grid.Column="1" Minimum="1" Maximum="16" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BevSize, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Loc effectsWindow.depth}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="5" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BevDepth, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="{loc:Loc effectsWindow.lightAngle}" Classes="fxLabel" />
+                    <local:GradientSlider Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="360" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.BevAngle, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="{loc:Loc effectsWindow.highlight}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="5" Grid.Column="1" Hex="{Binding SelectedLayer.BevHighlightHex, Mode=TwoWay}" />
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="{loc:Loc effectsWindow.shadow}" Classes="fxLabel" />
+                    <local:HexColorField Grid.Row="6" Grid.Column="1" Hex="{Binding SelectedLayer.BevShadowHex, Mode=TwoWay}" />
+                </Grid>
+            </Panel>
+        </Border>
+    </DockPanel>
+</Window>

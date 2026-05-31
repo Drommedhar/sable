@@ -1,0 +1,111 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.NewDocumentWindow"
+        x:DataType="local:NewDocumentWindow"
+        Width="780" Height="540" MinWidth="640" MinHeight="440"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc newDocumentWindow.newDocument}">
+
+    <Window.Resources>
+        <DataTemplate x:Key="PresetTemplate" x:DataType="local:DocPreset">
+            <StackPanel Width="96" Margin="2,4" Spacing="3">
+                <Border Width="86" Height="70" Background="Transparent" HorizontalAlignment="Center">
+                    <Border Width="{Binding ThumbW}" Height="{Binding ThumbH}"
+                            Background="White" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding Name}" FontSize="11" TextAlignment="Center"
+                           Foreground="{DynamicResource ChromeText}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Dims}" FontSize="9" TextAlignment="Center"
+                           Foreground="{DynamicResource ChromeTextDim}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+
+        <!-- footer -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}"
+                BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="12,8">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{loc:Loc newDocumentWindow.cancel}" Classes="opt" Padding="16,0" Click="OnCancel" />
+                <Button Content="{loc:Loc newDocumentWindow.createDocument}" Classes="opt" Padding="16,0" Click="OnCreate" />
+            </StackPanel>
+        </Border>
+
+        <!-- right: properties panel -->
+        <Border DockPanel.Dock="Right" Width="264" Background="{DynamicResource ChromeFooter}"
+                BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1,0,0,0" Padding="14,12">
+            <StackPanel Spacing="2">
+                <TextBlock x:Name="SelName" Text="{loc:Loc newDocumentWindow.custom}" FontSize="15"
+                           Foreground="{DynamicResource ChromeText}" Margin="0,0,0,10" />
+
+                <local:SettingRow Label="Units">
+                    <ComboBox x:Name="UnitCombo" Width="100" SelectedIndex="0" SelectionChanged="OnUnitChanged">
+                        <ComboBoxItem>Pixels</ComboBoxItem>
+                        <ComboBoxItem>Millimeters</ComboBoxItem>
+                        <ComboBoxItem>Inches</ComboBoxItem>
+                    </ComboBox>
+                </local:SettingRow>
+
+                <local:SettingRow Label="DPI">
+                    <TextBox x:Name="DpiBox" Width="100" Text="96" TextAlignment="Right" TextChanged="OnFieldChanged" />
+                </local:SettingRow>
+
+                <local:SettingRow Label="Width">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBox x:Name="WBox" Width="74" Text="1920" TextAlignment="Right" TextChanged="OnFieldChanged" />
+                        <TextBlock x:Name="WUnit" Text="{loc:Loc newDocumentWindow.px}" Width="22" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ChromeTextDim}" />
+                    </StackPanel>
+                </local:SettingRow>
+
+                <local:SettingRow Label="Height">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBox x:Name="HBox" Width="74" Text="1080" TextAlignment="Right" TextChanged="OnFieldChanged" />
+                        <TextBlock x:Name="HUnit" Text="{loc:Loc newDocumentWindow.px}" Width="22" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ChromeTextDim}" />
+                    </StackPanel>
+                </local:SettingRow>
+
+                <local:SettingRow Label="Orientation">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Button x:Name="PortraitBtn" Classes="iconbtn" Width="28" Height="24" Click="OnPortrait" ToolTip.Tip="{loc:Loc newDocumentWindow.portrait}">
+                            <Path Classes="icon" Width="11" Height="14" Stretch="Uniform"
+                                  Data="M3 1 H13 V19 H3 Z" />
+                        </Button>
+                        <Button x:Name="LandscapeBtn" Classes="iconbtn" Width="28" Height="24" Click="OnLandscape" ToolTip.Tip="{loc:Loc newDocumentWindow.landscape}">
+                            <Path Classes="icon" Width="14" Height="11" Stretch="Uniform"
+                                  Data="M1 3 H19 V13 H1 Z" />
+                        </Button>
+                    </StackPanel>
+                </local:SettingRow>
+
+                <local:SettingRow Label="Background">
+                    <ComboBox x:Name="BgCombo" Width="100" SelectedIndex="0">
+                        <ComboBoxItem>White</ComboBoxItem>
+                        <ComboBoxItem>Transparent</ComboBoxItem>
+                    </ComboBox>
+                </local:SettingRow>
+
+                <TextBlock x:Name="PxLabel" Margin="0,10,0,0" FontSize="11"
+                           Foreground="{DynamicResource ChromeTextFaint}" />
+            </StackPanel>
+        </Border>
+
+        <!-- left: search + preset grid -->
+        <DockPanel LastChildFill="True">
+            <Border DockPanel.Dock="Top" Padding="12,10,12,6">
+                <TextBox x:Name="SearchBox" PlaceholderText="{loc:Loc newDocumentWindow.searchPresets}" TextChanged="OnSearch" />
+            </Border>
+            <ScrollViewer Padding="12,0,12,10">
+                <StackPanel x:Name="Sections" Spacing="6" />
+            </ScrollViewer>
+        </DockPanel>
+
+    </DockPanel>
+</Window>

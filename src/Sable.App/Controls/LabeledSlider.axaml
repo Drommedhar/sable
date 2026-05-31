@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Sable.App"
+             x:Class="Sable.App.LabeledSlider"
+             x:Name="Root">
+    <StackPanel Spacing="4">
+        <TextBlock Text="{Binding Label, ElementName=Root}" Classes="adjLabel" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+            <local:GradientSlider Grid.Column="0"
+                                  Minimum="{Binding Minimum, ElementName=Root}"
+                                  Maximum="{Binding Maximum, ElementName=Root}"
+                                  TrackBrush="{Binding TrackBrush, ElementName=Root}"
+                                  Value="{Binding Value, ElementName=Root, Mode=TwoWay}" />
+            <TextBox Grid.Column="1" Width="52" TextAlignment="Center"
+                     Text="{Binding Value, ElementName=Root, Mode=TwoWay, StringFormat={}{0:0}}" />
+        </Grid>
+    </StackPanel>
+</UserControl>

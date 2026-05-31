@@ -1,0 +1,117 @@
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.ML.OnnxRuntime;
+using Sable.Ai.Adapters;
+using Sable.Core.Ai;
+
+namespace Sable.Ai.Backends;
+
+/// <summary>
+/// Light-tier backend (PHASE8_AI §1.2/§1.5): hosts ONNX Runtime <see cref="InferenceSession"/>s on
+/// the DirectML execution provider (Windows, vendor-agnostic GPU). Sessions are cached per model
+/// path. Per the GPU-only policy there is NO CPU fallback — if the DirectML EP isn't present the
+/// backend reports unavailable and refuses to create a session.
+/// </summary>
+public sealed class OnnxBackend : IAiBackend, IDisposable
+{
+    private readonly Dictionary<string, InferenceSession> _sessions = new();
+    private readonly Dictionary<string, InferenceSession> _cpuSessions = new();
+    private readonly object _lock = new();
+
+    public string Name => "ONNX (DirectML)";
+    public AiTier Tier => AiTier.Light;
+    public bool IsAvailable { get; }
+
+    public OnnxBackend()
+    {
+        bool dml = false;
+        try { dml = OrtEnv.Instance().GetAvailableProviders().Contains("DmlExecutionProvider"); }
+        catch { /* ORT failed to load → unavailable */ }
+        IsAvailable = dml;
+    }
+
+    public Task<ulong> ProbeFreeVramAsync(CancellationToken ct = default) => Task.FromResult(0UL);
+
+    /// <summary>Get (or create + cache) a DirectML session for a model file. Throws if DML is absent.</summary>
+    public InferenceSession GetSession(string modelPath)
+    {
+        if (!IsAvailable)
+            throw new InvalidOperationException("DirectML execution provider not available (AI is GPU-only, no CPU fallback).");
+        if (!modelPath.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"'{Path.GetFileName(modelPath)}' is not an ONNX model. The light tier runs ONNX Runtime — " +
+                "a .pth / .pt / .safetensors / .ckpt must be exported to .onnx first (or download an .onnx build).");
+        lock (_lock)
+        {
+            if (_sessions.TryGetValue(modelPath, out var existing)) return existing;
+            var opts = new SessionOptions();
+            // DirectML requirements: sequential exec + no memory pattern.
+            opts.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
+            opts.EnableMemoryPattern = false;
+            opts.AppendExecutionProvider_DML(0);
+            var sess = new InferenceSession(modelPath, opts);
+            _sessions[modelPath] = sess;
+            return sess;
+        }
+    }
+
+    /// <summary>
+    /// Get (or create + cache) a CPU session for a model. Narrow exception to the GPU-only rule: a few
+    /// models (LaMa's Fast-Fourier convolutions) can't run on DirectML, so they run on the CPU provider.
+    /// Used only by adapters that opt in; the heavy models stay on the GPU.
+    /// </summary>
+    public InferenceSession GetCpuSession(string modelPath)
+    {
+        if (!modelPath.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"'{Path.GetFileName(modelPath)}' is not an ONNX model.");
+        lock (_lock)
+        {
+            if (_cpuSessions.TryGetValue(modelPath, out var existing)) return existing;
+            var sess = new InferenceSession(modelPath, new SessionOptions());   // default EP = CPU
+            _cpuSessions[modelPath] = sess;
+            return sess;
+        }
+    }
+
+    /// <summary>Build the segmentation/matting adapter for a model manifest (BiRefNet/RMBG/SAM2 later).</summary>
+    public IMaskModel CreateMaskModel(ModelManifest m)
+    {
+        var path = m.Files?.FirstOrDefault()
+            ?? throw new InvalidOperationException($"Model '{m.Id}' has no weights file.");
+        if (m.Adapter == "sam2")
+        {
+            if (m.Files is not { Count: >= 2 })
+                throw new InvalidOperationException($"SAM2 model '{m.Id}' needs two files: Files[0]=encoder, Files[1]=decoder.");
+            return new Sam2Adapter(this, m.Files[0], m.Files[1], m.InputSize);
+        }
+        return m.Adapter switch
+        {
+            "matte" => new BiRefNetAdapter(this, path, m.InputSize),
+            _ => new BiRefNetAdapter(this, path, m.InputSize),   // default matte path for 8.1
+        };
+    }
+
+    /// <summary>Build the image→image adapter for a model manifest (ESRGAN upscale / later LaMa, denoise).</summary>
+    public IRasterModel CreateRasterModel(ModelManifest m)
+    {
+        var path = m.Files?.FirstOrDefault()
+            ?? throw new InvalidOperationException($"Model '{m.Id}' has no weights file.");
+        return m.Adapter switch
+        {
+            "esrgan" => new EsrganAdapter(this, path),
+            "lama" => new LamaAdapter(this, path),
+            _ => new EsrganAdapter(this, path),   // default upscale path for 8.2
+        };
+    }
+
+    public void Dispose()
+    {
+        lock (_lock)
+        {
+            foreach (var s in _sessions.Values) s.Dispose();
+            _sessions.Clear();
+            foreach (var s in _cpuSessions.Values) s.Dispose();
+            _cpuSessions.Clear();
+        }
+    }
+}

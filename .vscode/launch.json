@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Sable.App",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-app",
+      "program": "${workspaceFolder}/src/Sable.App/bin/Debug/net10.0/Sable.App.dll",
+      "cwd": "${workspaceFolder}/src/Sable.App",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Sable.Gpu.Spike",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-spike",
+      "program": "${workspaceFolder}/src/Sable.Gpu.Spike/bin/Debug/net10.0/Sable.Gpu.Spike.dll",
+      "cwd": "${workspaceFolder}/src/Sable.Gpu.Spike",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    }
+  ]
+}

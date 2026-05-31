@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.TransformWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="280" Height="360"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True"
+        ShowInTaskbar="False"
+        Title="{loc:Loc transformWindow.transform}">
+
+    <Window.Resources>
+        <LinearGradientBrush x:Key="GreyTrack" StartPoint="0%,0%" EndPoint="100%,0%">
+            <GradientStop Offset="0.0" Color="#FF333333" />
+            <GradientStop Offset="1.0" Color="#FFCCCCCC" />
+        </LinearGradientBrush>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="10,7">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding SelectedLayer.Name}" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="{loc:Loc transformWindow.reset}" Click="OnReset" />
+            </Grid>
+        </Border>
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="10,8">
+            <Button Content="{loc:Loc transformWindow.close}" HorizontalAlignment="Right" Click="OnClose" />
+        </Border>
+
+        <ScrollViewer>
+            <StackPanel Margin="12,10" Spacing="9">
+                <local:LabeledSlider Label="X Offset" Minimum="-2000" Maximum="2000" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfX, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Y Offset" Minimum="-2000" Maximum="2000" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfY, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Width %" Minimum="-300" Maximum="300" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfScaleX, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Height %" Minimum="-300" Maximum="300" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfScaleY, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Rotation°" Minimum="-180" Maximum="180" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfRotation, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Shear X %" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfShearX, Mode=TwoWay}" />
+                <local:LabeledSlider Label="Shear Y %" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GreyTrack}"
+                                     Value="{Binding SelectedLayer.XfShearY, Mode=TwoWay}" />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

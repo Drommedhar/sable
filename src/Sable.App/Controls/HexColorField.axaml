@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Sable.App"
+             x:Class="Sable.App.HexColorField"
+             x:Name="Root">
+    <StackPanel Orientation="Horizontal" Spacing="6">
+        <Border Width="34" Height="22" CornerRadius="3" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1"
+                Background="{Binding Hex, ElementName=Root, Converter={x:Static local:HexToBrushConverter.Instance}}" />
+        <TextBox Width="88" Text="{Binding Hex, ElementName=Root, Mode=TwoWay}" />
+    </StackPanel>
+</UserControl>

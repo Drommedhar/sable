@@ -1,0 +1,25 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:vm="clr-namespace:Sable.UI.ViewModels;assembly=Sable.UI"
+        x:Class="Sable.App.HistoryWindow"
+        x:DataType="vm:DocumentViewModel"
+        Width="240" Height="420"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True" ShowInTaskbar="False" Title="{loc:Loc historyWindow.history}">
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="10,7">
+            <TextBlock Text="{loc:Loc historyWindow.history}" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" />
+        </Border>
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="8,6">
+            <Button Content="{loc:Loc historyWindow.addSnapshot}" HorizontalAlignment="Stretch" Click="OnAddSnapshot" />
+        </Border>
+        <Grid RowDefinitions="*,Auto,Auto">
+            <ListBox Grid.Row="0" x:Name="HistoryList" FontSize="11" SelectionChanged="OnHistorySelected"
+                     Background="Transparent" BorderThickness="0" />
+            <TextBlock Grid.Row="1" Text="{loc:Loc historyWindow.snapshots}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="8,4,0,2" />
+            <ListBox Grid.Row="2" x:Name="SnapshotList" FontSize="11" Height="120" DoubleTapped="OnRestoreSnapshot"
+                     Background="Transparent" BorderThickness="0" />
+        </Grid>
+    </DockPanel>
+</Window>

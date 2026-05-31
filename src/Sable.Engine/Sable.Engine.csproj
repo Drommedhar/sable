@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <ProjectReference Include="..\Sable.Gpu\Sable.Gpu.csproj" />
+    <ProjectReference Include="..\Sable.Imaging\Sable.Imaging.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
