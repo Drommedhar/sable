@@ -26,8 +26,9 @@ fn pack(c: vec4<f32>) -> u32 {
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.width || gid.y >= dims.height) { return; }
-    let dx = f32(gid.x) - dab.cx;
-    let dy = f32(gid.y) - dab.cy;
+    // sample at the pixel CENTRE (+0.5) so the dab lines up with the cursor's doc position
+    let dx = f32(gid.x) + 0.5 - dab.cx;
+    let dy = f32(gid.y) + 0.5 - dab.cy;
     let dist = sqrt(dx * dx + dy * dy);
     if (dist > dab.radius) { return; }
 

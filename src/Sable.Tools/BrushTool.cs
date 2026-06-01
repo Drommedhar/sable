@@ -95,7 +95,7 @@ public sealed class BrushTool
             for (int y = y0; y <= y1; y++)
             for (int x = x0; x <= x1; x++)
             {
-                float ddx = x - (float)cx, ddy = y - (float)cy;
+                float ddx = x + 0.5f - (float)cx, ddy = y + 0.5f - (float)cy;
                 if (ddx * ddx + ddy * ddy > r * r) continue;
                 int sx = x - CloneOffX, sy = y - CloneOffY;
                 if (sx < 0 || sy < 0 || sx >= CloneSrcW || sy >= CloneSrcH) continue;
@@ -125,7 +125,8 @@ public sealed class BrushTool
                 if (mi < 0 || mi >= cm.Length || cm[mi] == 0) continue;
                 clipCov = cm[mi] / 255f;   // soft (feathered) selection edge
             }
-            float dx = (float)(x - cx), dy = (float)(y - cy);
+            // distance from the pixel CENTRE (+0.5) to the dab centre so the dab lines up with the cursor
+            float dx = (float)(x + 0.5 - cx), dy = (float)(y + 0.5 - cy);
             float dist = MathF.Sqrt(dx * dx + dy * dy);
             if (dist > r) continue;
 
