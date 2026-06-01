@@ -228,6 +228,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             _compositor?.ReleaseLayerCaches();   // free the old doc's cached GPU buffers (no leak on swap)
             _doc = value;
             _compositeView = null;
+            SetSmartObjects(null);   // smart-select masks belong to the old doc's layer — drop them on swap
         }
     }
 
@@ -246,7 +247,12 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _compositor.Preview = null;
         var tmp = new Document(_doc.Width, _doc.Height);
         tmp.Layers.AddRange(layers);
-        return _compositor.CompositeToBytes(tmp);
+        var bytes = _compositor.CompositeToBytes(tmp);
+        // CompositeToBytes re-presented the TEMP (subset) doc to the on-screen composite texture; if the
+        // real doc isn't dirty (e.g. Smart Select just reads pixels), the render loop would stay stuck on it.
+        // Force the next frame to recomposite the real document.
+        _compositeView = null;
+        return bytes;
     }
 
     private ViewportTransform ComputeViewport()

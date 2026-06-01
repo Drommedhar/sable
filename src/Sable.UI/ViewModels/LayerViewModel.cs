@@ -116,6 +116,26 @@ public sealed partial class LayerViewModel : ObservableObject
         set { if (Model.Name != value) { Model.Name = value; OnPropertyChanged(); } }
     }
 
+    // --- inline rename (double-click / F2 / context menu) ---
+    /// <summary>True while the layer row's name is being edited inline (TextBox shown instead of TextBlock).</summary>
+    [ObservableProperty]
+    private bool _isEditing;
+
+    private string _nameBackup = "";
+
+    /// <summary>Enter inline-rename mode, remembering the current name so Esc can restore it.</summary>
+    public void BeginRename() { _nameBackup = Name; IsEditing = true; }
+
+    /// <summary>Commit the inline rename (the name is already updated live via the TextBox binding).</summary>
+    public void CommitRename()
+    {
+        if (string.IsNullOrWhiteSpace(Name)) Name = _nameBackup;   // never allow a blank name
+        IsEditing = false;
+    }
+
+    /// <summary>Cancel the inline rename and restore the name as it was before editing.</summary>
+    public void CancelRename() { Name = _nameBackup; IsEditing = false; }
+
     public bool IsVisible
     {
         get => Model.Visible;

@@ -125,6 +125,7 @@
     "maximise": "Maximieren",
     "close": "Schließen",
     "layer": "_Ebene",
+    "rename": "Umbenennen",
     "duplicate": "Duplizieren",
     "rasterise": "Rastern",
     "mergeDown": "Auf darunterliegende reduzieren",
@@ -268,7 +269,7 @@
     "curves": "Gradationskurven",
     "hsl": "HSL",
     "whiteBalance": "Weißabgleich",
-    "blackWhite": "Schwarz &amp; Weiß",
+    "blackWhite": "Schwarz & Weiß",
     "colourBalance": "Farbbalance",
     "channelMixer": "Kanalmixer",
     "shadowsHighlights": "Tiefen / Lichter",
@@ -366,6 +367,6 @@
     "updateAvailable": "Update verfügbar",
     "updateAvailable2": "Update verfügbar",
     "later": "Später",
-    "downloadInstall": "Herunterladen &amp; Installieren"
+    "downloadInstall": "Herunterladen & Installieren"
   }
 }

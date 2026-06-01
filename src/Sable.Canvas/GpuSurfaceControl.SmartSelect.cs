@@ -14,6 +14,9 @@ namespace Sable.Canvas;
 public sealed unsafe partial class GpuSurfaceControl
 {
     private IReadOnlyList<ObjectMask>? _smartObjects;
+    // doc-space rect of the analysed layer: SAM2 ran on the layer's own (content-sized, offset) buffer, so
+    // the objects live in layer space and must be placed at this rect — NOT stretched across the doc.
+    private int _smOffX, _smOffY, _smLayerW, _smLayerH;
     private byte[]? _previewCov;          // doc-sized R8 coverage of the hovered object
     private float _previewMode;           // 0 off, 1 blue (replace), 2 green (add), 3 red (subtract)
     private int _previewVer, _previewUploadedVer = -1;
@@ -22,10 +25,13 @@ public sealed unsafe partial class GpuSurfaceControl
     private TextureView* _previewView;
     private int _previewTexW, _previewTexH;
 
-    /// <summary>Receive the precomputed object masks for the active layer (from the AI service). Resets hover.</summary>
-    public void SetSmartObjects(IReadOnlyList<ObjectMask>? objects)
+    /// <summary>Receive the precomputed object masks plus the analysed layer's doc-space rect
+    /// (offset + dims). The objects are in that layer's coordinate space; the rect places + scales them
+    /// into the document so an offset / content-sized layer's masks line up. Resets hover.</summary>
+    public void SetSmartObjects(IReadOnlyList<ObjectMask>? objects, int offX = 0, int offY = 0, int layerW = 0, int layerH = 0)
     {
         _smartObjects = objects is { Count: > 0 } ? objects : null;
+        _smOffX = offX; _smOffY = offY; _smLayerW = layerW; _smLayerH = layerH;
         ClearSmartHover();
     }
 
@@ -38,13 +44,18 @@ public sealed unsafe partial class GpuSurfaceControl
         _previewVer++;
     }
 
-    /// <summary>Object under the cursor (doc px), mapped into the objects' working resolution.</summary>
+    /// <summary>Object under the cursor (doc px), mapped through the analysed layer's rect into the
+    /// objects' working resolution. Returns null when the cursor is outside the analysed layer.</summary>
     private ObjectMask? ObjectAt(double dx, double dy)
     {
         if (_smartObjects is not { Count: > 0 } objs || _doc is null) return null;
+        int lw = _smLayerW > 0 ? _smLayerW : _doc.Width;
+        int lh = _smLayerH > 0 ? _smLayerH : _doc.Height;
+        double lx = dx - _smOffX, ly = dy - _smOffY;                 // doc → layer-local
+        if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) return null;   // outside the analysed layer
         int ow = objs[0].Width, oh = objs[0].Height;
-        int ox = (int)(dx / _doc.Width * ow);
-        int oy = (int)(dy / _doc.Height * oh);
+        int ox = (int)(lx / lw * ow);
+        int oy = (int)(ly / lh * oh);
         return AmgOps.BestAt(objs, ox, oy);
     }
 
@@ -54,17 +65,23 @@ public sealed unsafe partial class GpuSurfaceControl
     {
         if (_doc is null) return null;
         int w = _doc.Width, h = _doc.Height, ow = obj.Width, oh = obj.Height;
-        var cov = new byte[w * h];
+        int lw = _smLayerW > 0 ? _smLayerW : w;
+        int lh = _smLayerH > 0 ? _smLayerH : h;
+        int ox0 = _smOffX, oy0 = _smOffY;
+        var cov = new byte[w * h];   // zero outside the layer rect
         var src = obj.Coverage;
-        double fx = (double)ow / w, fy = (double)oh / h;
-        for (int y = 0; y < h; y++)
+        // object res (ow×oh) maps to the layer rect (lw×lh) placed at (ox0,oy0) in the doc — bilinear sample
+        double fx = (double)ow / lw, fy = (double)oh / lh;
+        int xStart = System.Math.Max(0, ox0), xEnd = System.Math.Min(w, ox0 + lw);
+        int yStart = System.Math.Max(0, oy0), yEnd = System.Math.Min(h, oy0 + lh);
+        for (int y = yStart; y < yEnd; y++)
         {
-            double syf = (y + 0.5) * fy - 0.5;
+            double syf = ((y - oy0) + 0.5) * fy - 0.5;
             int y0 = (int)System.Math.Floor(syf); double wy = syf - y0;
             int y0c = System.Math.Clamp(y0, 0, oh - 1), y1c = System.Math.Clamp(y0 + 1, 0, oh - 1);
-            for (int x = 0; x < w; x++)
+            for (int x = xStart; x < xEnd; x++)
             {
-                double sxf = (x + 0.5) * fx - 0.5;
+                double sxf = ((x - ox0) + 0.5) * fx - 0.5;
                 int x0 = (int)System.Math.Floor(sxf); double wx = sxf - x0;
                 int x0c = System.Math.Clamp(x0, 0, ow - 1), x1c = System.Math.Clamp(x0 + 1, 0, ow - 1);
                 double v00 = src[y0c * ow + x0c], v10 = src[y0c * ow + x1c];

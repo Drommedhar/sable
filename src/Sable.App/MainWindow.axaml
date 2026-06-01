@@ -170,6 +170,7 @@
             <MenuItem Header="{loc:Loc mainWindow.window}" SubmenuOpened="OnWindowMenuOpened">
                 <MenuItem x:Name="AdjustmentsMenuItem" Header="{loc:Loc mainWindow.adjustments}" Click="OnToggleAdjustments" />
                 <MenuItem x:Name="EffectsMenuItem" Header="{loc:Loc mainWindow.layerEffects}" Click="OnToggleEffects" />
+                <MenuItem Header="{loc:Loc mainWindow.transform}" Click="OnToggleTransform" />
                 <MenuItem Header="{loc:Loc mainWindow.history}" Click="OnToggleHistory" />
                 <MenuItem Header="{loc:Loc mainWindow.commandPalette}" InputGesture="Ctrl+K" Click="OnCommandPalette" />
             </MenuItem>
@@ -691,6 +692,7 @@
                                     <DockPanel Height="{StaticResource LayerRowHeight}" LastChildFill="True">
                                         <DockPanel.ContextFlyout>
                                             <MenuFlyout>
+                                                <MenuItem Header="{loc:Loc mainWindow.rename}" Click="OnRenameLayer" />
                                                 <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" />
                                                 <MenuItem Header="{loc:Loc mainWindow.delete}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
                                                 <Separator />
@@ -755,8 +757,18 @@
                                                           Data="M4 7V4h16v3 M9 20h6 M12 4v16" />
                                                 </Panel>
                                             </Border>
-                                            <TextBlock Text="{Binding Name}" Foreground="{DynamicResource ChromeText}"
-                                                       FontSize="12" VerticalAlignment="Center" />
+                                            <!-- name: TextBlock display, swapped for an inline TextBox while renaming -->
+                                            <Panel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}" Foreground="{DynamicResource ChromeText}"
+                                                           FontSize="12" VerticalAlignment="Center"
+                                                           IsVisible="{Binding !IsEditing}"
+                                                           DoubleTapped="OnLayerNameDoubleTapped" />
+                                                <TextBox Text="{Binding Name, Mode=TwoWay}" FontSize="12"
+                                                         MinHeight="0" Height="20" Padding="3,0" Margin="0"
+                                                         VerticalAlignment="Center" VerticalContentAlignment="Center"
+                                                         AcceptsReturn="False" IsVisible="{Binding IsEditing}"
+                                                         KeyDown="OnLayerNameKeyDown" LostFocus="OnLayerNameCommit" />
+                                            </Panel>
                                         </StackPanel>
                                     </DockPanel>
                                 </DataTemplate>

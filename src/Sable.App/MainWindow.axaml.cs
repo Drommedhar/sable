@@ -405,48 +405,95 @@ public partial class MainWindow : Window
     // AI menu entry just activates the tool; OnToolChanged runs the precompute.
     private void OnAiSmartSelect(object? sender, RoutedEventArgs e) => Canvas.ActiveTool = Sable.Tools.ToolKind.SmartSelect;
 
+    private bool _smartBusy;   // a SAM2 analysis is in flight — block re-entry (concurrent DML Run can crash)
+
+    /// <summary>True when a pixel layer is fully transparent (no alpha) — nothing for SAM2 to segment.</summary>
+    private static bool IsLayerEmpty(Sable.Engine.Layers.PixelLayer px) => IsBufferEmpty(px.Pixels);
+
+    /// <summary>True when an RGBA8 buffer is fully transparent (every alpha byte 0).</summary>
+    private static bool IsBufferEmpty(byte[] rgba)
+    {
+        for (int i = 3; i < rgba.Length; i += 4) if (rgba[i] != 0) return false;
+        return true;
+    }
+
     /// <summary>Precompute the active layer's objects (SAM2 AMG, 32×32) for hover-to-select.</summary>
     private async System.Threading.Tasks.Task StartSmartSelect()
     {
         const string title = "Smart Select";
+        if (_smartBusy) return;   // one SAM2 run at a time — a second concurrent DML Run can hard-crash (AV)
         if (Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
         { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        // a blank/transparent layer (e.g. a just-added layer) has nothing to segment — and feeding an empty
+        // image to the SAM2 DML decoder hard-crashes the process (ScatterND "parameter incorrect"). Bail.
+        if (IsLayerEmpty(px)) { Canvas.SetSmartObjects(null); _smartLayer = px; return; }
 
-        var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment);
-        if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
-
-        // SAM2 density is configurable (Settings ▸ Machine Learning); Auto scales by detected VRAM so a
-        // weak/low-VRAM laptop GPU doesn't hit a driver timeout (TDR) running 1024 decoder passes.
-        int grid = Sable.Core.Settings.SableSettings.SmartSelectGrid(
-            _settings.SmartSelectQuality, new Sable.Ai.Gpu.GpuProbe().TotalVramBytes());
-        bool forceCpu = _settings.SmartSelectForceCpu;   // this GPU previously couldn't run SAM2 → CPU only
-
+        _smartBusy = true;
         using var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, forceCpu ? "Analysing objects (CPU)…" : "Analysing objects…", cts);
-        System.Collections.Generic.IReadOnlyList<Sable.Core.Ai.ObjectMask>? objs = null;
-        System.Exception? error = null;
-        bool fellBack = false;
         try
         {
-            objs = await Ai.SegmentEverythingAsync(px, grid, busy.Progress, cts.Token, forceCpu,
-                onCpuFallback: () => fellBack = true);
-        }
-        catch (System.OperationCanceledException) { busy.Done(); return; }
-        catch (System.Exception ex) { error = ex; }
-        finally { busy.Done(); }
-        if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+            // show the dialog FIRST: the first AI op builds the ONNX backend (loads the ORT native, seconds),
+            // which would otherwise freeze the UI thread before any feedback and look like a crash. Build it
+            // + check readiness off the UI thread while the busy dialog is already up.
+            var busy = BusyWindow.Begin(this, "Preparing AI…", cts);
+            Sable.Ai.AiReadiness r;
+            try { r = await System.Threading.Tasks.Task.Run(() => Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment), cts.Token); }
+            catch (System.OperationCanceledException) { busy.Done(); return; }
+            catch (System.Exception ex) { busy.Done(); await ConfirmWindow.Ask(this, title, $"Failed: {ex.Message}"); return; }
+            if (!r.CanRun) { busy.Done(); await ConfirmWindow.Ask(this, title, r.Message); return; }
 
-        if (fellBack)   // GPU couldn't run SAM2 (TDR) → remember to use CPU next time, tell the user once
-        {
-            _settings.SmartSelectForceCpu = true;
-            Sable.Core.Settings.SettingsService.Save(_settings);
-            await ConfirmWindow.Ask(this, title,
-                "Your GPU couldn't run Smart Select, so it ran on the CPU (slower). Future runs will use the CPU automatically.");
-        }
+            // SAM2 density is configurable (Settings ▸ Machine Learning); Auto scales by detected VRAM so a
+            // weak/low-VRAM laptop GPU doesn't hit a driver timeout (TDR) running 1024 decoder passes.
+            int grid = Sable.Core.Settings.SableSettings.SmartSelectGrid(
+                _settings.SmartSelectQuality, new Sable.Ai.Gpu.GpuProbe().TotalVramBytes());
+            bool forceCpu = _settings.SmartSelectForceCpu;   // this GPU previously couldn't run SAM2 → CPU only
 
-        Canvas.SetSmartObjects(objs);
-        _smartLayer = px;
-        if (objs is { Count: 0 }) await ConfirmWindow.Ask(this, title, "No objects found in this layer.");
+            // a layer with a non-translation transform (scale/rotate/shear/perspective) can't be mapped back
+            // by offset alone, so render it THROUGH its transform into doc space and segment THAT — objects
+            // then come back in doc space (overlay/selection line up). Offset-only/content-sized layers stay
+            // on the raw buffer (better mask resolution) and map via the rect.
+            var samTarget = px;
+            bool docSpace = false;
+            var docM = Canvas.Document;
+            if (docM is not null && HasNonTranslationTransform(px))
+            {
+                var rendered = Canvas.RenderLayersToPixels(new System.Collections.Generic.List<Sable.Engine.Layers.Layer> { px });
+                if (rendered is null || IsBufferEmpty(rendered))
+                { busy.Done(); Canvas.SetSmartObjects(null); _smartLayer = px; return; }   // off-canvas / blank → nothing
+                samTarget = new Sable.Engine.Layers.PixelLayer(docM.Width, docM.Height, px.Name);
+                samTarget.SetBuffer(docM.Width, docM.Height, rendered);
+                docSpace = true;
+            }
+
+            busy.SetMessage(forceCpu ? "Analysing objects (CPU)…" : "Analysing objects…");
+            System.Collections.Generic.IReadOnlyList<Sable.Core.Ai.ObjectMask>? objs = null;
+            System.Exception? error = null;
+            bool fellBack = false;
+            try
+            {
+                objs = await Ai.SegmentEverythingAsync(samTarget, grid, busy.Progress, cts.Token, forceCpu,
+                    onCpuFallback: () => fellBack = true);
+            }
+            catch (System.OperationCanceledException) { busy.Done(); return; }
+            catch (System.Exception ex) { error = ex; }
+            finally { busy.Done(); }
+            if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+
+            if (fellBack)   // GPU couldn't run SAM2 (TDR) → remember to use CPU next time, tell the user once
+            {
+                _settings.SmartSelectForceCpu = true;
+                Sable.Core.Settings.SettingsService.Save(_settings);
+                await ConfirmWindow.Ask(this, title,
+                    "Your GPU couldn't run Smart Select, so it ran on the CPU (slower). Future runs will use the CPU automatically.");
+            }
+
+            if (docSpace) Canvas.SetSmartObjects(objs);   // transform baked into doc space → identity overlay
+            else Canvas.SetSmartObjects(objs, px.OffsetX, px.OffsetY, px.Width, px.Height);   // raw buffer → offset rect
+            _smartLayer = px;
+            if (objs is not null) _smartCache[px] = (objs, ContentKey(px), docSpace);   // cache for instant reload while unchanged
+            if (objs is { Count: 0 }) await ConfirmWindow.Ask(this, title, "No objects found in this layer.");
+        }
+        finally { _smartBusy = false; }
     }
 
     private async void OnAiUpscale(object? sender, RoutedEventArgs e)
@@ -722,11 +769,19 @@ public partial class MainWindow : Window
             }
             return;
         }
-        // rebindable command hotkeys (PLAN §17.1): match the keymap before the fixed tool/nav keys
+        bool typing = IsTypingInTextField();   // a chrome text field has focus (rename box, numeric option fields)
+        if (e.Key == Key.F2)   // rename the selected layer inline
+        {
+            if (!typing && Doc?.SelectedLayer is { } rv) { rv.BeginRename(); FocusRenameBox(rv); e.Handled = true; }
+            return;
+        }
+        // rebindable command hotkeys (PLAN §17.1): match the keymap before the fixed tool/nav keys. These
+        // are all modifier/F-key gestures, so they stay active (e.g. Ctrl+Z) even while a field has focus.
         foreach (var (g, id) in _keyGestures)
         {
             if (g.Matches(e)) { RunKeyCommand(id); e.Handled = true; return; }
         }
+        if (typing) return;   // below: bare Delete/Enter/Escape canvas actions — must not steal typed keys
         switch (e.Key)
         {
             case Key.Delete or Key.Back: Canvas.DeleteSelection(); e.Handled = true; break;
@@ -749,6 +804,47 @@ public partial class MainWindow : Window
 
     private void OnLayerSelectionChanged(object? sender, SelectionChangedEventArgs e)
         => Doc?.SetSelection(LayerList.SelectedItems?.Cast<LayerViewModel>() ?? Enumerable.Empty<LayerViewModel>());
+
+    // --- inline layer rename (double-click name / F2 / context menu) ---
+    private void OnLayerNameDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (LayerOf(sender) is { } vm) { vm.BeginRename(); FocusRenameBox(vm); e.Handled = true; }
+    }
+
+    private void OnRenameLayer(object? sender, RoutedEventArgs e)
+    {
+        var vm = LayerOf(sender) ?? Doc?.SelectedLayer;
+        if (vm is null) return;
+        vm.BeginRename();
+        FocusRenameBox(vm);
+    }
+
+    private void OnLayerNameKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (LayerOf(sender) is not { } vm) return;
+        if (e.Key == Key.Enter) { vm.CommitRename(); LayerList.Focus(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { vm.CancelRename(); LayerList.Focus(); e.Handled = true; }
+    }
+
+    private void OnLayerNameCommit(object? sender, Avalonia.Input.FocusChangedEventArgs e)
+    {
+        if (LayerOf(sender) is { IsEditing: true } vm) vm.CommitRename();
+    }
+
+    /// <summary>Focus + select-all the inline rename TextBox for a row (after it's been made visible).</summary>
+    private void FocusRenameBox(LayerViewModel vm)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var box = LayerList.ContainerFromItem(vm)?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+            if (box is not null) { box.Focus(); box.SelectAll(); }
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>True when a text field (rename box, numeric option boxes, …) has focus — so the global
+    /// key handlers don't steal Enter/Esc/Backspace/letter keys while the user is typing.</summary>
+    private bool IsTypingInTextField()
+        => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox;
 
     private void OnToggleGroupExpand(object? sender, RoutedEventArgs e)
     {
@@ -1412,16 +1508,63 @@ public partial class MainWindow : Window
         SelectMember(g, active ? (g.Current + 1) % g.Tools.Length : g.Current);
     }
 
-    private object? _smartLayer;   // the layer SAM2 objects were precomputed for
+    private object? _smartLayer;   // the layer whose SAM2 objects the canvas currently shows
+    // per-layer SAM2 object cache: switching back to an unchanged layer reuses its masks instead of
+    // re-running SAM2. Keyed by layer ref; the content key invalidates it when the layer's pixels or
+    // transform change. docSpace = objects are in doc space (transform baked in) vs layer-buffer space.
+    private readonly System.Collections.Generic.Dictionary<Sable.Engine.Layers.PixelLayer,
+        (System.Collections.Generic.IReadOnlyList<Sable.Core.Ai.ObjectMask> objs, int key, bool docSpace)> _smartCache = new();
+
+    /// <summary>Cheap sampled hash of a layer's pixels + its transform — changes when the layer is edited
+    /// OR transformed, so a cached analysis is reused only while both are unchanged (the transform matters
+    /// because we segment the layer as displayed). Mirrors Sam2Adapter's pixel key.</summary>
+    private static int ContentKey(Sable.Engine.Layers.PixelLayer px)
+    {
+        var b = px.Pixels;
+        int h = 17 ^ b.Length;
+        int step = System.Math.Max(1, b.Length / 4096);
+        for (int i = 0; i < b.Length; i += step) h = h * 31 + b[i];
+        h = h * 31 + px.OffsetX; h = h * 31 + px.OffsetY;
+        h = h * 31 + px.ScaleX.GetHashCode(); h = h * 31 + px.ScaleY.GetHashCode();
+        h = h * 31 + px.Rotation.GetHashCode();
+        h = h * 31 + px.ShearX.GetHashCode(); h = h * 31 + px.ShearY.GetHashCode();
+        h = h * 31 + px.Perspective.GetHashCode();
+        if (px.PerspCorners is { } pc) foreach (var v in pc) h = h * 31 + v.GetHashCode();
+        return h;
+    }
+
+    /// <summary>True when a layer has a non-translation transform (scale/rotate/shear/perspective) — then
+    /// SAM2 can't run on the raw buffer + offset mapping; the layer must be rendered to doc space first.</summary>
+    private static bool HasNonTranslationTransform(Sable.Engine.Layers.PixelLayer px)
+        => px.Perspective || px.ScaleX != 1f || px.ScaleY != 1f || px.Rotation != 0f || px.ShearX != 0f || px.ShearY != 0f;
+
+    /// <summary>Show SAM2 objects for the current active layer: reuse the per-layer cache when the layer's
+    /// pixels are unchanged, else run SAM2. No-op unless the Smart Select tool is active. Called when the
+    /// analysed layer changes (layer/tab switch) or the tool is entered.</summary>
+    private void EnsureSmartObjectsForActiveLayer()
+    {
+        if (Canvas.ActiveTool != Sable.Tools.ToolKind.SmartSelect) { Canvas.SetSmartObjects(null); _smartLayer = null; return; }
+        var model = Doc?.SelectedLayer?.Model;
+        if (model is not Sable.Engine.Layers.PixelLayer px || IsLayerEmpty(px))
+        { Canvas.SetSmartObjects(null); _smartLayer = model; return; }   // non-pixel / blank → nothing to segment
+
+        if (_smartCache.TryGetValue(px, out var hit) && hit.key == ContentKey(px))
+        {
+            // unchanged since last analysis → instant, no SAM2 run
+            if (hit.docSpace) Canvas.SetSmartObjects(hit.objs);   // transform baked → doc-space identity overlay
+            else Canvas.SetSmartObjects(hit.objs, px.OffsetX, px.OffsetY, px.Width, px.Height);   // raw buffer → offset rect
+            _smartLayer = px;
+            return;
+        }
+        Canvas.SetSmartObjects(null);   // stale/absent → drop the old masks, then analyse (caches on success)
+        _smartLayer = null;
+        _ = StartSmartSelect();
+    }
 
     private void OnToolChanged(Sable.Tools.ToolKind kind)
     {
-        // entering Smart Select → precompute the active layer's objects (once per layer)
-        if (kind == Sable.Tools.ToolKind.SmartSelect)
-        {
-            var layer = Doc?.SelectedLayer?.Model;
-            if (!Canvas.HasSmartObjects || !ReferenceEquals(layer, _smartLayer)) _ = StartSmartSelect();
-        }
+        // entering Smart Select → show the active layer's objects (cached if unchanged, else analyse)
+        if (kind == Sable.Tools.ToolKind.SmartSelect) EnsureSmartObjectsForActiveLayer();
         foreach (var g in _groups)
         {
             int idx = Array.FindIndex(g.Tools, t => t.Kind == kind);
@@ -1438,8 +1581,8 @@ public partial class MainWindow : Window
         SetColorTab(kind == Sable.Tools.ToolKind.Gradient ? "grad" : "color");
         UpdateOptionsBar(kind);
         if (ToolHint is not null) ToolHint.Text = ToolHintFor(kind);
-        if (kind == Sable.Tools.ToolKind.Transform) ShowTransformWindow();
-        else _transformWindow?.Close();
+        // Transform panel no longer auto-opens/closes with the tool (user preference) — it's a plain
+        // modeless panel toggled from Window ▸ Transform, like History/Adjustments.
     }
 
     // Affinity-style status-bar hints: what drag/click/modifiers do for the active tool.
@@ -1510,6 +1653,7 @@ public partial class MainWindow : Window
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (Canvas.TextEditing) return;   // skip tool shortcuts; chars handled by OnTextInput
+        if (IsTypingInTextField()) { base.OnKeyDown(e); return; }   // don't cycle tools while typing in a field
         const double step = 40;
         switch (e.Key)
         {
@@ -1583,6 +1727,7 @@ public partial class MainWindow : Window
     {
         if (_activeTab is { } prev) prev.IsActive = false;
         _activeTab = tab;
+        _smartLayer = null; _smartCache.Clear();   // smart-select masks/cache belong to the previous doc
 
         if (tab is null)
         {
@@ -1618,6 +1763,7 @@ public partial class MainWindow : Window
         {
             vm.Undo.Execute(cmd);
             vm.SelectedLayer?.RefreshThumbnail();   // live row thumb after paint/fill/erase/delete
+            if (Canvas.ActiveLayer is { } al) _smartCache.Remove(al);   // a pixel edit invalidates that layer's cached SAM2 masks
         };
         Canvas.LayerProduced = layer => vm.AddAndSelect(layer);
         Canvas.ColorPicked = (r, g, b) => SetWheel(Avalonia.Media.Color.FromRgb(r, g, b));
@@ -1636,6 +1782,9 @@ public partial class MainWindow : Window
     private void UpdateActiveLayer(DocumentViewModel vm)
     {
         var m = vm.SelectedLayer?.Model;
+        // analysed layer changed (layer/tab switch) → show the new layer's smart-select objects: reuse its
+        // cache if the pixels are unchanged (instant), else re-run SAM2. No-op unless the tool is active.
+        if (!ReferenceEquals(m, _smartLayer)) EnsureSmartObjectsForActiveLayer();
         Canvas.ActiveLayer = m as Sable.Engine.Layers.PixelLayer;   // paint target (pixel only)
         Canvas.SelLayer = m;                                        // Move/bounds target (any type)
         _shapeTarget = m as Sable.Engine.Layers.ShapeLayer;
@@ -1687,6 +1836,12 @@ public partial class MainWindow : Window
         win.Closed += (_, _) => _shapeWindow = null;
         _shapeWindow = win;
         win.Show(this);
+    }
+
+    private void OnToggleTransform(object? sender, RoutedEventArgs e)
+    {
+        if (_transformWindow is not null) { _transformWindow.Close(); return; }
+        ShowTransformWindow();
     }
 
     private void ShowTransformWindow()

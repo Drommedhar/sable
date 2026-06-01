@@ -125,6 +125,7 @@
     "maximise": "Maximise",
     "close": "Close",
     "layer": "_Layer",
+    "rename": "Rename",
     "duplicate": "Duplicate",
     "rasterise": "Rasterise",
     "mergeDown": "Merge Down",
@@ -268,7 +269,7 @@
     "curves": "Curves",
     "hsl": "HSL",
     "whiteBalance": "White Balance",
-    "blackWhite": "Black &amp; White",
+    "blackWhite": "Black & White",
     "colourBalance": "Colour Balance",
     "channelMixer": "Channel Mixer",
     "shadowsHighlights": "Shadows / Highlights",
@@ -366,6 +367,6 @@
     "updateAvailable": "Update Available",
     "updateAvailable2": "Update available",
     "later": "Later",
-    "downloadInstall": "Download &amp; Install"
+    "downloadInstall": "Download & Install"
   }
 }
