@@ -432,10 +432,13 @@ public class OnnxBackendTests
         var ex = Record.Exception(() =>
         {
             using var b = new Sable.Ai.Backends.OnnxBackend();
-            // EP is per-OS: CUDA on Linux (Sable's sm_120 build), DirectML on Windows.
-            Assert.Equal(OperatingSystem.IsLinux() ? "ONNX (CUDA)" : "ONNX (DirectML)", b.Name);
+            // EP is per-OS: CUDA on Linux (Sable's sm_120 build), WebGPU/Metal on macOS, DirectML on Windows.
+            string expected = OperatingSystem.IsLinux() ? "ONNX (CUDA)"
+                            : OperatingSystem.IsMacOS() ? "ONNX (WebGPU)"
+                            : "ONNX (DirectML)";
+            Assert.Equal(expected, b.Name);
             Assert.Equal(AiTier.Light, b.Tier);
-            _ = b.IsAvailable;   // bool; true iff the OS's GPU EP (CUDA/DirectML) is present + activated
+            _ = b.IsAvailable;   // bool; true iff the OS's GPU EP (CUDA/WebGPU/DirectML) is present + activated
         });
         Assert.Null(ex);
     }

@@ -7,10 +7,11 @@ using Sable.Core.Ai;
 namespace Sable.Ai.Backends;
 
 /// <summary>
-/// Light-tier backend (PHASE8_AI §1.2/§1.5): hosts ONNX Runtime <see cref="InferenceSession"/>s on
-/// the DirectML execution provider (Windows, vendor-agnostic GPU). Sessions are cached per model
-/// path. Per the GPU-only policy there is NO CPU fallback — if the DirectML EP isn't present the
-/// backend reports unavailable and refuses to create a session.
+/// Light-tier backend (PHASE8_AI §1.2/§1.5): hosts ONNX Runtime <see cref="InferenceSession"/>s on a
+/// per-OS GPU execution provider — DirectML on Windows, CUDA on Linux, WebGPU (Metal via Dawn) on
+/// macOS. Sessions are cached per model path. Per the GPU-only policy there is NO blanket CPU EP
+/// fallback — if the platform GPU EP isn't present the backend reports unavailable and refuses to
+/// create a session.
 /// </summary>
 public sealed class OnnxBackend : IAiBackend, IDisposable
 {
@@ -22,9 +23,13 @@ public sealed class OnnxBackend : IAiBackend, IDisposable
     public AiTier Tier => AiTier.Light;
     public bool IsAvailable { get; }
 
-    // Linux uses the CUDA EP (from Sable's sm_120 ORT build); Windows uses DirectML. Chosen at
-    // runtime — the managed API exposes both Append* methods regardless of the shipped native.
+    // GPU EP is chosen at runtime per OS: Linux=CUDA (from Sable's sm_120 ORT build), Windows=DirectML,
+    // macOS=WebGPU (Metal via Dawn, in the base package's osx-arm64 native). The managed API exposes
+    // every Append* method regardless of which native is shipped, so no #if/DefineConstants are needed.
+    // (macOS uses WebGPU, not CoreML: on these models CoreML's MLProgram path fails on dynamic dims,
+    // compiles SAM2 in minutes, and rejects ESRGAN — WebGPU runs them all, faster, with no flag fiddling.)
     private readonly bool _useCuda;
+    private readonly bool _useWebGpu;
 
     public OnnxBackend()
     {
@@ -40,6 +45,16 @@ public sealed class OnnxBackend : IAiBackend, IDisposable
             _useCuda = active && cuda;
             IsAvailable = _useCuda;
             Name = "ONNX (CUDA)";
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            // WebGPU EP ships in the base package's osx-arm64 native (no download, unlike Linux/CUDA).
+            bool webgpu = false;
+            try { webgpu = OrtEnv.Instance().GetAvailableProviders().Contains("WebGpuExecutionProvider"); }
+            catch { /* ORT failed to load → unavailable */ }
+            _useWebGpu = webgpu;
+            IsAvailable = webgpu;
+            Name = "ONNX (WebGPU)";
         }
         else
         {
@@ -61,8 +76,11 @@ public sealed class OnnxBackend : IAiBackend, IDisposable
     public InferenceSession GetSession(string modelPath)
     {
         if (!IsAvailable)
+        {
+            string ep = OperatingSystem.IsLinux() ? "CUDA" : OperatingSystem.IsMacOS() ? "WebGPU" : "DirectML";
             throw new InvalidOperationException(
-                $"{(OperatingSystem.IsLinux() ? "CUDA" : "DirectML")} execution provider not available (AI is GPU-only, no CPU fallback).");
+                $"{ep} execution provider not available (AI is GPU-only, no CPU fallback).");
+        }
         if (!modelPath.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"'{Path.GetFileName(modelPath)}' is not an ONNX model. The light tier runs ONNX Runtime — " +
@@ -74,6 +92,13 @@ public sealed class OnnxBackend : IAiBackend, IDisposable
             if (_useCuda)
             {
                 opts.AppendExecutionProvider_CUDA(0);
+            }
+            else if (_useWebGpu)
+            {
+                // WebGPU EP (Metal via Dawn). General compute EP — handles dynamic shapes like CUDA/DML
+                // (unlike CoreML's graph compiler), so no per-model flag fiddling. Appended via the
+                // string API (no typed AppendExecutionProvider_WebGPU helper in the managed assembly).
+                opts.AppendExecutionProvider("WebGPU", new Dictionary<string, string>());
             }
             else
             {

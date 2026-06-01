@@ -6,14 +6,17 @@
     <ProjectReference Include="..\Sable.Imaging\Sable.Imaging.csproj" />
   </ItemGroup>
 
-  <!-- ONNX Runtime native varies per OS (PHASE8_AI §1.5 / Phase 9 Linux):
+  <!-- ONNX Runtime native varies per OS (PHASE8_AI §1.5 / Phase 9 Linux + macOS):
        - Windows: DirectML EP (vendor-agnostic GPU), shipped in the package.
        - Linux:   base package (managed API + CPU native). The GPU path is the CUDA EP, whose native
                   is NOT shipped here — prebuilt ORT has no Blackwell/sm_120 kernels, so Sable builds
                   an sm_120 ORT (tools/build-ort-cuda.sh) and the app downloads + activates it at
                   runtime (OrtCudaRuntime / OrtRuntimeProvisioner). The managed API already exposes
                   AppendExecutionProvider_CUDA, so no DefineConstants/#if are needed.
-       - macOS:   base package; a CoreML/WebGPU EP is a later slice (AI stays disabled until then).
+       - macOS:   base package — its osx-arm64 native already bundles the WebGPU EP (Metal via Dawn)
+                  AND the CoreML EP, so no download/build like Linux. OnnxBackend uses WebGPU (CoreML's
+                  MLProgram path fails on these models' dynamic dims / compiles SAM2 in minutes / rejects
+                  ESRGAN; WebGPU runs them all, faster). Apple Silicon only (no osx-x64 native shipped).
        Built per-platform (framework-dependent), so the build-machine OS == target OS here. -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
