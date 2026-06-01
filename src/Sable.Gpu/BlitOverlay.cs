@@ -81,6 +81,13 @@ public struct BlitOverlay
     public unsafe TextureView* PreviewMaskView;
     public float PreviewMode;
 
+    // eyedropper loupe — circular magnifier of the pixels under the cursor (what gets sampled).
+    // Centre + radius in SURFACE px; sample centre in DOC px; Zoom = surface px per doc px.
+    public bool LoupeOn;
+    public float LoupeCx, LoupeCy, LoupeR;
+    public float LoupeDocX, LoupeDocY, LoupeZoom;
+    public float LoupeColR, LoupeColG, LoupeColB;   // the actual would-be-picked colour (0..1), shown on the rim
+
     // customisable overlay colours (0..1). When HasOverlayColors is false the blitter
     // uses built-in defaults (cyan guides / magenta smart-guides / grey grid / red quick-mask).
     public bool HasOverlayColors;

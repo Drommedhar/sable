@@ -32,7 +32,10 @@ struct Viewport {
     gridR: f32, gridG: f32, gridB: f32,                    // document/pixel grid
     qmR: f32, qmG: f32, qmB: f32,                          // quick-mask (rubylith) fill
     previewMode: f32,                                      // AI hover-select: 0 off, 1 blue(replace), 2 green(add), 3 red(subtract)
-    _pad1: f32, _pad2: f32,
+    loupeOn: f32,                                          // eyedropper loupe (circular magnifier)
+    loupeCx: f32, loupeCy: f32, loupeR: f32,               // loupe centre + radius (surface px)
+    loupeDocX: f32, loupeDocY: f32, loupeZoom: f32,        // sample centre (doc px) + magnification (surface px per doc px)
+    loupeColR: f32, loupeColG: f32, loupeColB: f32,        // the actual would-be-picked colour (rim fill)
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -308,6 +311,38 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (vp.brushOn > 0.5) {
         let d = length(frag.xy - vec2<f32>(vp.brushX, vp.brushY));
         if (abs(d - vp.brushR) <= 1.0) { outc = vec3<f32>(1.0) - outc; }   // contrast ring
+    }
+
+    // eyedropper loupe: circular magnifier showing the pixels that would be sampled.
+    // Centre cell outlines the exact sampled doc pixel; the rim is filled with that colour.
+    if (vp.loupeOn > 0.5) {
+        let lc = vec2<f32>(vp.loupeCx, vp.loupeCy);
+        let d = length(frag.xy - lc);
+        if (d <= vp.loupeR) {
+            let rel = (frag.xy - lc) / vp.loupeZoom;            // doc-px offset from the sample centre
+            let sdx = vp.loupeDocX + rel.x;
+            let sdy = vp.loupeDocY + rel.y;
+            let su = sdx / vp.docW;
+            let sv = sdy / vp.docH;
+            var lcol = vec3<f32>(vp.pasteR, vp.pasteG, vp.pasteB);
+            if (su >= 0.0 && su < 1.0 && sv >= 0.0 && sv < 1.0) {
+                let cbg = checker(frag.xy);
+                let c = textureSampleLevel(tex, samp, vec2<f32>(su, sv), 0.0);
+                lcol = c.rgb * c.a + cbg * (1.0 - c.a);
+            }
+            outc = lcol;
+            // outline the exact sampled doc pixel sitting at the loupe centre
+            let half = vp.loupeZoom * 0.5;
+            let cd = abs(frag.xy - lc);
+            if (cd.x <= half && cd.y <= half && (cd.x > half - 1.5 || cd.y > half - 1.5)) {
+                outc = vec3<f32>(1.0) - lcol;
+            }
+            // rim filled with the actual would-be-picked colour, then a thin dark edge for contrast
+            if (d >= vp.loupeR - 5.0 && d < vp.loupeR - 1.5) {
+                outc = vec3<f32>(vp.loupeColR, vp.loupeColG, vp.loupeColB);
+            }
+            if (d >= vp.loupeR - 1.5) { outc = vec3<f32>(0.1); }
+        }
     }
     return vec4<f32>(outc, 1.0);
 }

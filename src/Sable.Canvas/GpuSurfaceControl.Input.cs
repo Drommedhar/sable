@@ -57,6 +57,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _maskMoveStartX, _maskMoveStartY;
     private bool _patching;                       // patch tool: dragging the selection to a source
     private double _patchStartX, _patchStartY;
+    private byte[]? _patchSrc;                     // immutable pixel snapshot at gesture start (stable preview)
+    private RasterState _patchBefore;             // pre-gesture raster state (whole-raster undo)
+    private SelRect? _patchRect;                   // selection region captured at gesture start (heal target)
+    private byte[]? _patchMask;
+    private CanvasMods _lastMods;                  // modifiers from the most recent pointer event
     private bool _liquifying;                      // liquify displacement stroke
     private PixelLayer? _liquifyLayer;
     private RasterState _liquifyBefore;
@@ -202,9 +207,19 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     // --- ICanvasInputSink: OS-agnostic pointer handlers (surface pixels) ----------
 
+    /// <summary>
+    /// True when the eyedropper is sampling: the dedicated tool, or Alt held over a paint tool
+    /// (matches the <see cref="SampleColor"/> entry conditions in <see cref="OnLeftDown"/>).
+    /// Drives the loupe overlay + suppresses the brush ring/dab while sampling.
+    /// </summary>
+    private bool EyedropperSampling =>
+        ActiveTool == ToolKind.Eyedropper
+        || (_lastMods.HasFlag(CanvasMods.Alt) && ActiveLayer is not null
+            && ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill);
+
     void ICanvasInputSink.PointerDown(CanvasButton button, double sx, double sy, CanvasMods mods)
     {
-        _lastMouseX = sx; _lastMouseY = sy;
+        _lastMouseX = sx; _lastMouseY = sy; _lastMods = mods;
         if (button == CanvasButton.Middle) { StartPan(sx, sy); return; }   // middle-drag = pan
         if (button == CanvasButton.Left) OnLeftDown(sx, sy, mods);
     }
@@ -228,7 +243,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     void ICanvasInputSink.PointerMove(double sx, double sy, CanvasMods mods)
     {
-        _lastMouseX = sx; _lastMouseY = sy;
+        _lastMouseX = sx; _lastMouseY = sy; _lastMods = mods;
         if (CursorDocMoved is not null) { var (cdx, cdy) = MapToDoc(sx, sy); CursorDocMoved(cdx, cdy); }
 
         // AI hover-select: highlight the object under the cursor (no drag/paint for this tool).
@@ -360,6 +375,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             lq.Dirty = true;
             _doc?.MarkStructureChanged();
             _lastDocX = dx; _lastDocY = dy;
+        }
+        else if (_patching && _doc is { } pdoc && ActiveLayer is not null)
+        {
+            var (pdx, pdy) = MapToDoc(sx, sy);   // live heal preview following the drag
+            int poffX = (int)Math.Round(pdx - _patchStartX), poffY = (int)Math.Round(pdy - _patchStartY);
+            ApplyPatchPreview(poffX, poffY);
+            // move the marching ants to the SOURCE region so the user can aim at a clean area
+            if (_patchMask is { } pmk)
+                pdoc.SetSelectionMaskLive(Selections.Shift(pmk, pdoc.Width, pdoc.Height, poffX, poffY));
+            else if (_patchRect is { } prc)
+                pdoc.Selection = SelRect.FromCorners(prc.X + poffX, prc.Y + poffY, prc.Right + poffX, prc.Bottom + poffY, pdoc.Width, pdoc.Height);
         }
         else if (_panningMouse)
         {
@@ -669,10 +695,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
             case ToolKind.Patch:
-                if (_doc is not null && ActiveLayer is not null && (_doc.SelectionMask is not null || _doc.Selection is not null))
+                if (_doc is not null && ActiveLayer is { LockPixels: false } patchLayer
+                    && (_doc.SelectionMask is not null || _doc.Selection is not null))
                 {
                     _patching = true; _input?.Capture();
                     _patchStartX = dx; _patchStartY = dy;
+                    _patchSrc = (byte[])patchLayer.Pixels.Clone();   // immutable source for a stable live preview
+                    _patchBefore = RasterState.Capture(patchLayer);
+                    _patchRect = _doc.Selection;                     // the hole to heal (fixed for the gesture)
+                    _patchMask = _doc.SelectionMask is { } pm0 ? (byte[])pm0.Clone() : null;
                 }
                 break;
             case ToolKind.MeshWarp:
@@ -1028,8 +1059,24 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_patching)
         {
             _patching = false; _input?.ReleaseCapture();
-            var (ux, uy) = MapToDoc(_lastMouseX, _lastMouseY);
-            DoPatch((int)Math.Round(ux - _patchStartX), (int)Math.Round(uy - _patchStartY));
+            if (ActiveLayer is { } pl && _patchSrc is not null)
+            {
+                var (ux, uy) = MapToDoc(_lastMouseX, _lastMouseY);
+                int offX = (int)Math.Round(ux - _patchStartX), offY = (int)Math.Round(uy - _patchStartY);
+                ApplyPatchPreview(offX, offY);   // commit the final heal state
+                if (offX != 0 || offY != 0)
+                {
+                    var after = RasterState.Capture(pl);
+                    CommandProduced?.Invoke(new RasterStateCommand(pl, _patchBefore, after, () => pl.Dirty = true));
+                }
+            }
+            // restore the marching ants to the original (now-healed) hole
+            if (_doc is { } rdoc)
+            {
+                if (_patchMask is { } pmk) rdoc.SetSelectionMaskLive(pmk);
+                else if (_patchRect is { } prc) rdoc.Selection = prc;
+            }
+            _patchSrc = null; _patchMask = null; _patchRect = null;
         }
         else if (_meshDragIdx >= 0)
         {
@@ -1049,62 +1096,41 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         }
     }
 
-    /// <summary>Patch: heal the current selection using the source region offset by (offX,offY),
-    /// shifting the source tone to match the selection's own tone. Undoable.</summary>
-    private void DoPatch(int offX, int offY)
+    /// <summary>
+    /// Patch live-preview + commit: heal the current selection from the immutable gesture-start
+    /// pixel snapshot (<see cref="_patchSrc"/>) using the source region offset by (offX,offY),
+    /// shifting the source tone to match the selection's own tone. The selection bbox is reset
+    /// from the snapshot each call, so repeated drag frames (and repeat patches) never compound
+    /// or smear — every offset is recomputed from scratch. Caller emits the undo command on release.
+    /// </summary>
+    private void ApplyPatchPreview(int offX, int offY)
     {
-        if (_doc is not { } d || ActiveLayer is not { } l) return;
-        if (offX == 0 && offY == 0) return;
-        var mask = d.SelectionMask; var rect = d.Selection;
+        if (_doc is not { } d || ActiveLayer is not { } l || _patchSrc is not { } src) return;
+        var mask = _patchMask; var rect = _patchRect;   // captured at gesture start (immutable region)
         if (mask is null && rect is null) return;
 
-        var target = l.Pixels; int lw = l.Width, lh = l.Height, ox = l.OffsetX, oy = l.OffsetY;
-        var src = (byte[])target.Clone();   // read source from a snapshot (avoids feedback)
+        int lw = l.Width, lh = l.Height, ox = l.OffsetX, oy = l.OffsetY;
+        var rectTuple = rect is { } rr ? ((int, int, int, int)?)(rr.X, rr.Y, rr.W, rr.H) : null;
+        PatchTool.Apply(l.Pixels, src, lw, lh, ox, oy, rectTuple, mask, d.Width, offX, offY);
 
-        int bx0, by0, bx1, by1;
-        if (rect is { } rr) { bx0 = rr.X; by0 = rr.Y; bx1 = rr.Right; by1 = rr.Bottom; }
-        else { bx0 = 0; by0 = 0; bx1 = d.Width; by1 = d.Height; }
-
-        float Cov(int x, int y)
+        // bbox (buffer space) touched → mark its tiles dirty + recomposite for live feedback
+        int bx0 = (rect is { } r1 ? r1.X : 0), by0 = (rect is { } r2 ? r2.Y : 0);
+        int bx1 = (rect is { } r3 ? r3.Right : d.Width), by1 = (rect is { } r4 ? r4.Bottom : d.Height);
+        int cx0 = Math.Max(bx0, ox), cy0 = Math.Max(by0, oy);
+        int cx1 = Math.Min(bx1, ox + lw), cy1 = Math.Min(by1, oy + lh);
+        if (cx1 > cx0 && cy1 > cy0)
         {
-            if (mask is { } m) { int mi = y * d.Width + x; return (mi >= 0 && mi < m.Length) ? m[mi] / 255f : 0f; }
-            return (rect is { } r2 && x >= r2.X && y >= r2.Y && x < r2.Right && y < r2.Bottom) ? 1f : 0f;
+            var tiles = new List<(int, int)>();
+            int tx0 = (cx0 - ox) / RasterTiles.TileSize, tx1 = (cx1 - 1 - ox) / RasterTiles.TileSize;
+            int ty0 = (cy0 - oy) / RasterTiles.TileSize, ty1 = (cy1 - 1 - oy) / RasterTiles.TileSize;
+            int maxTx = RasterTiles.TilesX(lw), maxTy = RasterTiles.TilesY(lh);
+            for (int ty = ty0; ty <= ty1; ty++)
+            for (int tx = tx0; tx <= tx1; tx++)
+                if (tx >= 0 && ty >= 0 && tx < maxTx && ty < maxTy) tiles.Add((tx, ty));
+            l.MarkTilesDirty(tiles);
         }
-
-        // tone shift = mean(dest) - mean(source) over the selection
-        double sdr = 0, sdg = 0, sdb = 0, ssr = 0, ssg = 0, ssb = 0; int cnt = 0;
-        for (int y = by0; y < by1; y++)
-        for (int x = bx0; x < bx1; x++)
-        {
-            if (Cov(x, y) <= 0f) continue;
-            int lx = x - ox, ly = y - oy, sx = x - offX - ox, sy = y - offY - oy;
-            if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) continue;
-            if (sx < 0 || sy < 0 || sx >= lw || sy >= lh) continue;
-            int di = (ly * lw + lx) * 4, sj = (sy * lw + sx) * 4;
-            sdr += target[di]; sdg += target[di + 1]; sdb += target[di + 2];
-            ssr += src[sj]; ssg += src[sj + 1]; ssb += src[sj + 2]; cnt++;
-        }
-        if (cnt == 0) return;
-        float tor = (float)((sdr - ssr) / cnt), tog = (float)((sdg - ssg) / cnt), tob = (float)((sdb - ssb) / cnt);
-
-        var before = SnapshotAllTiles(target, lw, lh);
-        for (int y = by0; y < by1; y++)
-        for (int x = bx0; x < bx1; x++)
-        {
-            float cov = Cov(x, y);
-            if (cov <= 0f) continue;
-            int lx = x - ox, ly = y - oy, sx = x - offX - ox, sy = y - offY - oy;
-            if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) continue;
-            if (sx < 0 || sy < 0 || sx >= lw || sy >= lh) continue;
-            int di = (ly * lw + lx) * 4, sj = (sy * lw + sx) * 4;
-            float hr = Math.Clamp(src[sj] + tor, 0, 255), hg = Math.Clamp(src[sj + 1] + tog, 0, 255), hb = Math.Clamp(src[sj + 2] + tob, 0, 255);
-            target[di] = (byte)(target[di] + (hr - target[di]) * cov + 0.5f);
-            target[di + 1] = (byte)(target[di + 1] + (hg - target[di + 1]) * cov + 0.5f);
-            target[di + 2] = (byte)(target[di + 2] + (hb - target[di + 2]) * cov + 0.5f);
-        }
-        var after = SnapshotAllTiles(target, lw, lh);
-        l.MarkTilesDirty(after.Keys);
-        CommandProduced?.Invoke(new PaintRasterCommand(target, lw, lh, before, after, t => l.MarkTilesDirty(t)));
+        l.Dirty = true;
+        _doc.MarkStructureChanged();
     }
 
     /// <summary>Commit the pending crop rectangle (Enter), resizing the document. Undoable.</summary>
@@ -1446,12 +1472,21 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void SampleColor(double dx, double dy)
     {
+        if (SampleColorValue(dx, dy) is not { } c) return;
+        Brush.R = c.r; Brush.G = c.g; Brush.B = c.b;
+        ColorPicked?.Invoke(c.r, c.g, c.b);
+    }
+
+    /// <summary>Compute the colour the eyedropper would pick at (dx,dy) doc px — no side effects.
+    /// Honours <see cref="EyedropperRadius"/> averaging + <see cref="EyedropperAllLayers"/>.</summary>
+    private (byte r, byte g, byte b)? SampleColorValue(double dx, double dy)
+    {
         byte[]? src; int sw, sh, ox = 0, oy = 0;
         if (EyedropperAllLayers && ReadComposite() is { } comp && _doc is not null)
         { src = comp; sw = _doc.Width; sh = _doc.Height; }
         else if (ActiveLayer is { } layer)
         { src = layer.Pixels; sw = layer.Width; sh = layer.Height; ox = layer.OffsetX; oy = layer.OffsetY; }
-        else return;
+        else return null;
 
         // sample in buffer space (doc cursor minus the layer's origin)
         int cx = (int)Math.Clamp(dx - ox, 0, sw - 1), cy = (int)Math.Clamp(dy - oy, 0, sh - 1);
@@ -1464,10 +1499,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             int i = (yy * sw + xx) * 4;
             rr += src[i]; gg += src[i + 1]; bb += src[i + 2]; n++;
         }
-        if (n == 0) return;
-        byte r = (byte)(rr / n), g = (byte)(gg / n), b = (byte)(bb / n);
-        Brush.R = r; Brush.G = g; Brush.B = b;
-        ColorPicked?.Invoke(r, g, b);
+        if (n == 0) return null;
+        return ((byte)(rr / n), (byte)(gg / n), (byte)(bb / n));
     }
 
     /// <summary>Map a surface-pixel point to document pixels via the inverse viewport transform.</summary>

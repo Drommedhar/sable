@@ -345,13 +345,19 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _configured = true;
     }
 
+    // loupe rim colour cache (the picked colour) keyed by integer doc pixel — avoids a per-frame
+    // ReadComposite() readback while the eyedropper hovers stationary (esp. with all-layers sampling).
+    private int _loupeColX = int.MinValue, _loupeColY = int.MinValue;
+    private float _loupeColR, _loupeColG, _loupeColB;
+    private bool _loupeColValid;
+
     private void UpdatePreviewDab()
     {
         if (_compositor is null) return;
         Sable.Engine.Compositing.PreviewDab? dab = null;
         bool previewTool = ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
                                        or Sable.Tools.ToolKind.CloneStamp;
-        if (!_painting && !QuickMask && ActiveLayer is { } al && previewTool)
+        if (!_painting && !QuickMask && !EyedropperSampling && ActiveLayer is { } al && previewTool)
         {
             var vp = ComputeViewport();
             double docX = vp.Scale > 0 ? (_lastMouseX - vp.Ox) / vp.Scale : -1;
@@ -533,7 +539,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.Corners = CornersSurface(l);
                 ov.RotateHandleDist = RotHandleDist;
             }
-            else if (ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
+            else if (!EyedropperSampling && ActiveTool is Sable.Tools.ToolKind.Brush or Sable.Tools.ToolKind.Eraser
                                 or Sable.Tools.ToolKind.CloneStamp or Sable.Tools.ToolKind.Heal
                                 or Sable.Tools.ToolKind.SpotHeal or Sable.Tools.ToolKind.Dodge
                                 or Sable.Tools.ToolKind.Burn or Sable.Tools.ToolKind.Sponge
@@ -556,6 +562,30 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.GradientOn = true;
                 ov.GradX0 = (float)_gradStartSx; ov.GradY0 = (float)_gradStartSy;
                 ov.GradX1 = (float)_gradEndSx; ov.GradY1 = (float)_gradEndSy;
+            }
+        }
+        // eyedropper loupe — circular magnifier of the pixels under the cursor (what gets sampled)
+        if (EyedropperSampling && _doc is { } ed)
+        {
+            var (dgx, dgy) = MapToDoc(_lastMouseX, _lastMouseY);
+            if (dgx >= 0 && dgy >= 0 && dgx < ed.Width && dgy < ed.Height)
+            {
+                const float r = 60f, zoom = 8f;   // centred on the cursor; magnify 8 surface px / doc px
+                ov.LoupeOn = true;
+                ov.LoupeCx = (float)_lastMouseX; ov.LoupeCy = (float)_lastMouseY; ov.LoupeR = r; ov.LoupeZoom = zoom;
+                ov.LoupeDocX = (float)dgx; ov.LoupeDocY = (float)dgy;
+                int idgx = (int)dgx, idgy = (int)dgy;
+                if (idgx != _loupeColX || idgy != _loupeColY)
+                {
+                    _loupeColX = idgx; _loupeColY = idgy;
+                    if (SampleColorValue(dgx, dgy) is { } pc0)
+                    {
+                        _loupeColR = pc0.r / 255f; _loupeColG = pc0.g / 255f; _loupeColB = pc0.b / 255f;
+                        _loupeColValid = true;
+                    }
+                    else _loupeColValid = false;
+                }
+                if (_loupeColValid) { ov.LoupeColR = _loupeColR; ov.LoupeColG = _loupeColG; ov.LoupeColB = _loupeColB; }
             }
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;

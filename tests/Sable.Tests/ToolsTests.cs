@@ -281,3 +281,76 @@ public class ViewportTransformTests
         Assert.Equal((800 - 512 * 3.125f) / 2 - 5, vp.Oy, 3);
     }
 }
+
+public class PatchToolTests
+{
+    // a 64x64 RGBA8 image where each pixel's R/G/B = its row (a vertical ramp), full alpha
+    private static byte[] RowRamp(int w, int h)
+    {
+        var px = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        { int i = (y * w + x) * 4; px[i] = px[i + 1] = px[i + 2] = (byte)y; px[i + 3] = 255; }
+        return px;
+    }
+
+    [Fact]
+    public void Apply_NoOffset_IsIdentity()
+    {
+        int w = 64, h = 64; var src = RowRamp(w, h);
+        var target = (byte[])src.Clone();
+        PatchTool.Apply(target, src, w, h, 0, 0, (16, 16, 16, 16), null, w, 0, 0);
+        Assert.Equal(src, target);
+    }
+
+    [Fact]
+    public void Apply_CopiesSourceRegionWithToneMatch()
+    {
+        // selection rows 30..40, source 20 rows BELOW (offY=+20) reads rows 50..60.
+        int w = 64, h = 64; var src = RowRamp(w, h);
+        var target = (byte[])src.Clone();
+        PatchTool.Apply(target, src, w, h, 0, 0, (16, 30, 16, 10), null, w, 0, 20);
+
+        // tone shift = mean(dest 30..40) - mean(source 50..60) = 34.5 - 54.5 = -20.
+        // healed pixel = source(+20 rows) + tone = (y+20) + (-20) = y → ramp preserved (perfect blend-in).
+        for (int y = 30; y < 40; y++)
+        for (int x = 16; x < 32; x++)
+        { int i = (y * w + x) * 4; Assert.InRange(target[i], (byte)(y - 1), (byte)(y + 1)); }
+        // outside the selection: untouched
+        int o = (10 * w + 5) * 4; Assert.Equal((byte)10, target[o]);
+    }
+
+    [Fact]
+    public void Apply_IsPureFunctionOfSrcAndOffset_NoCompounding()
+    {
+        // Applying twice in a row (live-drag frames) with the same offset must be idempotent,
+        // and re-applying with a different offset must equal a fresh single application —
+        // i.e. it never reads its own prior output (the cross-gesture smear bug).
+        int w = 64, h = 64; var src = RowRamp(w, h);
+        (int, int, int, int) rect = (10, 25, 20, 15);
+
+        var a = (byte[])src.Clone();
+        PatchTool.Apply(a, src, w, h, 0, 0, rect, null, w, 3, 17);
+        var aTwice = (byte[])a.Clone();
+        PatchTool.Apply(aTwice, src, w, h, 0, 0, rect, null, w, 3, 17);
+        Assert.Equal(a, aTwice);   // same offset twice → no change the 2nd time
+
+        var b = (byte[])a.Clone();                       // b currently holds the offset-(3,17) result
+        PatchTool.Apply(b, src, w, h, 0, 0, rect, null, w, -5, -9);
+        var fresh = (byte[])src.Clone();
+        PatchTool.Apply(fresh, src, w, h, 0, 0, rect, null, w, -5, -9);
+        Assert.Equal(fresh, b);    // re-patch from a different offset == fresh apply (no compounding)
+    }
+
+    [Fact]
+    public void Apply_OffsetLayer_HealsHoleInBufferSpace()
+    {
+        // layer buffer sits at doc offset (100,100); selection in doc space.
+        int w = 64, h = 64; var src = RowRamp(w, h);
+        var target = (byte[])src.Clone();
+        PatchTool.Apply(target, src, w, h, 100, 100, (108, 130, 16, 10), null, 400, 0, 20);
+        // buffer rows 30..40 (doc 130..140) healed; ramp preserved by tone-match
+        for (int y = 30; y < 40; y++)
+        { int i = (y * w + 12) * 4; Assert.InRange(target[i], (byte)(y - 1), (byte)(y + 1)); }
+    }
+}

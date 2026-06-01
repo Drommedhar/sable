@@ -22,7 +22,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private Silk.NET.WebGPU.Buffer* _penBuf;      // pen-tool node geometry (storage)
     private const int GuidesFloats = 512;         // [countX, countY, _, _, Xs..., Ys...]
     private const int PenFloats = 512;            // [count, activeIdx, _, _, (ax,ay,inx,iny,outx,outy)×n]
-    private const int VpFloats = 72;              // 288 bytes (16-byte aligned)
+    private const int VpFloats = 80;              // 320 bytes (16-byte aligned)
     private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
     private TextureView* _dummyMaskView;
 
@@ -198,6 +198,11 @@ public sealed unsafe class SurfaceBlitter : IDisposable
             u[66] = 0.95f; u[67] = 0.1f; u[68] = 0.2f;   // quick-mask red
         }
         u[69] = ov.PreviewMode;   // AI hover-select stripe colour: 0 off, 1 blue, 2 green, 3 red
+        // eyedropper loupe (70..76); written unconditionally so the off state isn't garbage
+        u[70] = ov.LoupeOn ? 1f : 0f;
+        u[71] = ov.LoupeCx; u[72] = ov.LoupeCy; u[73] = ov.LoupeR;
+        u[74] = ov.LoupeDocX; u[75] = ov.LoupeDocY; u[76] = ov.LoupeZoom;
+        u[77] = ov.LoupeColR; u[78] = ov.LoupeColG; u[79] = ov.LoupeColB;
         api.QueueWriteBuffer(_gpu.Queue, _vpBuf, 0, u, (uint)(VpFloats * 4));
 
         // pack guide positions: [countX, countY, _, _, Xs..., Ys...] (doc px)
