@@ -1,0 +1,260 @@
+name: Release Standalone App
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+env:
+  APP_NAME: Sable
+  EXECUTABLE_NAME: Sable.App
+  WIN_ICON_FILE: img/sable.ico
+  PNG_LOGO_FILE: img/logo_only.png
+  DOTNET_VERSION: 10.0.x
+  PROJECT_PATH: src/Sable.App/Sable.App.csproj
+  CONFIGURATION: Release
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.label }}
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            rid: win-x64
+            publish_dir: sable-windows-x64
+            artifact_name: sable-windows-x64-installer
+            package_name: sable-windows-x64-setup.exe
+          - label: macOS x64
+            os: macos-latest
+            rid: osx-x64
+            publish_dir: sable-macos-x64
+            artifact_name: sable-macos-x64-dmg
+            package_name: sable-macos-x64.dmg
+          - label: macOS ARM64
+            os: macos-latest
+            rid: osx-arm64
+            publish_dir: sable-macos-arm64
+            artifact_name: sable-macos-arm64-dmg
+            package_name: sable-macos-arm64.dmg
+          - label: Linux x64
+            os: ubuntu-24.04
+            rid: linux-x64
+            publish_dir: sable-linux-x64
+            artifact_name: sable-linux-x64-appimage
+            package_name: Sable-x86_64.AppImage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Derive version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER="$(printf '%s' "$TAG" | grep -oE '[0-9]+(\.[0-9]+)*')"
+          if [ -z "$VER" ]; then VER="0.0.1"; fi
+          echo "prefix=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Publish app
+        run: >-
+          dotnet publish "${{ env.PROJECT_PATH }}"
+          -c "${{ env.CONFIGURATION }}"
+          -r "${{ matrix.rid }}"
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:ContinuousIntegrationBuild=true
+          -p:DebugSymbols=false
+          -p:DebugType=None
+          -p:VersionPrefix=${{ steps.version.outputs.prefix }}
+          -p:VersionSuffix=
+          -o "${{ github.workspace }}/dist/${{ matrix.publish_dir }}"
+
+      # ── Windows installer (Inno Setup) ───────────────────────────
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Package app (Windows installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $appVersion = "${{ steps.version.outputs.prefix }}"
+          $publishDir = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE "dist\${{ matrix.publish_dir }}")).ProviderPath
+          $outputDir  = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $iconPath   = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE '${{ env.WIN_ICON_FILE }}')).ProviderPath
+          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found after installing Inno Setup.' }
+
+          $arguments = @(
+            "/DAppVersion=$appVersion"
+            "/DSourceDir=$publishDir"
+            "/DOutputDir=$outputDir"
+            "/DOutputBaseFilename=$([System.IO.Path]::GetFileNameWithoutExtension('${{ matrix.package_name }}'))"
+            "/DInstallerIconFile=$iconPath"
+            '.github\installers\windows\sable.iss'
+          )
+          & $iscc @arguments
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE" }
+
+      # ── macOS DMG ────────────────────────────────────────────────
+      - name: Package app (macOS DMG)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_version="${{ steps.version.outputs.prefix }}"
+          publish_dir="${GITHUB_WORKSPACE}/dist/${{ matrix.publish_dir }}"
+          bundle_dir="${GITHUB_WORKSPACE}/dist/${{ env.APP_NAME }}.app"
+          contents_dir="${bundle_dir}/Contents"
+          macos_dir="${contents_dir}/MacOS"
+          resources_dir="${contents_dir}/Resources"
+          artifacts_dir="${GITHUB_WORKSPACE}/artifacts"
+          dmg_root="${GITHUB_WORKSPACE}/dmg-root"
+          rw_dmg="${artifacts_dir}/${{ matrix.publish_dir }}-rw.dmg"
+          final_dmg_base="${artifacts_dir}/${{ matrix.publish_dir }}"
+          mount_point="${GITHUB_WORKSPACE}/mounted-dmg"
+
+          rm -rf "${bundle_dir}" "${dmg_root}" "${mount_point}"
+          mkdir -p "${macos_dir}" "${resources_dir}" "${artifacts_dir}" "${dmg_root}"
+
+          # generate sable.icns from the PNG logo
+          iconset="${GITHUB_WORKSPACE}/sable.iconset"
+          rm -rf "${iconset}"; mkdir -p "${iconset}"
+          for s in 16 32 64 128 256 512; do
+            sips -z $s $s "${GITHUB_WORKSPACE}/${{ env.PNG_LOGO_FILE }}" --out "${iconset}/icon_${s}x${s}.png" >/dev/null
+            d=$((s*2))
+            sips -z $d $d "${GITHUB_WORKSPACE}/${{ env.PNG_LOGO_FILE }}" --out "${iconset}/icon_${s}x${s}@2x.png" >/dev/null
+          done
+          iconutil -c icns "${iconset}" -o "${resources_dir}/sable.icns"
+
+          shopt -s dotglob nullglob
+          for path in "${publish_dir}"/*; do
+            name="$(basename "${path}")"
+            if [[ -d "${path}" ]]; then cp -R "${path}" "${resources_dir}/${name}"; else cp -R "${path}" "${macos_dir}/${name}"; fi
+          done
+          shopt -u dotglob nullglob
+          chmod +x "${macos_dir}/${{ env.EXECUTABLE_NAME }}"
+
+          sed \
+            -e "s/__APP_VERSION__/${app_version}/g" \
+            -e "s/__EXECUTABLE_NAME__/${{ env.EXECUTABLE_NAME }}/g" \
+            '.github/installers/macos/Info.plist.template' > "${contents_dir}/Info.plist"
+
+          # ad-hoc sign so Gatekeeper evaluates a consistent bundle
+          xattr -cr "${bundle_dir}"
+          find "${bundle_dir}" -type f \( -name '*.dylib' -o -perm -111 \) -print0 | while IFS= read -r -d '' file; do
+            codesign --force --sign - --timestamp=none "${file}" || true
+          done
+          codesign --force --sign - --timestamp=none "${bundle_dir}"
+
+          cp -R "${bundle_dir}" "${dmg_root}/"
+          ln -s /Applications "${dmg_root}/Applications"
+          hdiutil create -volname '${{ env.APP_NAME }}' -srcfolder "${dmg_root}" -ov -fs HFS+ -format UDRW "${rw_dmg}"
+          hdiutil convert "${rw_dmg}" -format UDZO -o "${final_dmg_base}"
+          rm -f "${rw_dmg}"
+
+      # ── Linux AppImage ───────────────────────────────────────────
+      - name: Package app (Linux AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          publish_dir="${GITHUB_WORKSPACE}/dist/${{ matrix.publish_dir }}"
+          appdir="${GITHUB_WORKSPACE}/AppDir"
+          artifacts_dir="${GITHUB_WORKSPACE}/artifacts"
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-0 libfuse2t64 desktop-file-utils wget
+
+          rm -rf "${appdir}"
+          mkdir -p \
+            "${appdir}/usr/bin" \
+            "${appdir}/usr/share/applications" \
+            "${appdir}/usr/share/icons/hicolor/256x256/apps"
+
+          cp -a "${publish_dir}/." "${appdir}/usr/bin/"
+          chmod +x "${appdir}/usr/bin/${{ env.EXECUTABLE_NAME }}"
+
+          cp "${GITHUB_WORKSPACE}/${{ env.PNG_LOGO_FILE }}" "${appdir}/sable.png"
+          cp "${GITHUB_WORKSPACE}/${{ env.PNG_LOGO_FILE }}" "${appdir}/usr/share/icons/hicolor/256x256/apps/sable.png"
+
+          cat > "${appdir}/sable.desktop" <<'EOF'
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=Sable
+          Comment=Cross-platform GPU-first raster image editor
+          Exec=Sable.App
+          Icon=sable
+          Terminal=false
+          Categories=Graphics;2DGraphics;RasterGraphics;
+          MimeType=application/x-sable;
+          StartupNotify=true
+          EOF
+          cp "${appdir}/sable.desktop" "${appdir}/usr/share/applications/"
+
+          cat > "${appdir}/AppRun" <<'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          if [ -n "${DISPLAY:-}" ]; then export GDK_BACKEND=x11; fi
+          exec "${HERE}/usr/bin/Sable.App" "$@"
+          EOF
+          chmod +x "${appdir}/AppRun"
+
+          cd "${GITHUB_WORKSPACE}"
+          wget -q -O appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          mkdir -p "${artifacts_dir}"
+          ARCH=x86_64 ./appimagetool --no-appstream "${appdir}" "${artifacts_dir}/${{ matrix.package_name }}"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/${{ matrix.package_name }}
+          if-no-files-found: error
+
+  release:
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.dmg
+            release-assets/*.exe
+            release-assets/*.AppImage

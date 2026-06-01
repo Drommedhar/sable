@@ -1,0 +1,101 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Sable.App">
+
+    <!-- ============================================================
+         Sable UI theme tokens — SINGLE SOURCE OF TRUTH for sizing + chrome colours.
+         Adjust here to retune the whole UI density / theme (PLAN §13.3 / §17.1).
+         ============================================================ -->
+
+    <!-- chrome colours per theme variant — referenced via {DynamicResource Chrome…} so they
+         re-theme live when MainWindow sets RequestedThemeVariant (Dark / Gray / Light). -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="ChromeWindowBg" Color="#FF1E1E1E" />
+            <SolidColorBrush x:Key="ChromeMenuBg"   Color="#FF2D2D2D" />
+            <SolidColorBrush x:Key="ChromePanel"    Color="#FF2A2A2A" />
+            <SolidColorBrush x:Key="ChromePanel2"   Color="#FF252525" />
+            <SolidColorBrush x:Key="ChromePanel3"   Color="#FF262626" />
+            <SolidColorBrush x:Key="ChromeHeaderBg" Color="#FF313131" />
+            <SolidColorBrush x:Key="ChromeFooter"   Color="#FF232323" />
+            <SolidColorBrush x:Key="ChromeCanvas"   Color="#FF1B1B1B" />
+            <SolidColorBrush x:Key="ChromeBorder"   Color="#FF3A3A3A" />
+            <SolidColorBrush x:Key="ChromeBorder2"  Color="#FF555555" />
+            <SolidColorBrush x:Key="ChromeField"    Color="#FF2B2B2B" />
+            <SolidColorBrush x:Key="ChromeText"     Color="#FFDDDDDD" />
+            <SolidColorBrush x:Key="ChromeTextDim"  Color="#FFA0A0A0" />
+            <SolidColorBrush x:Key="ChromeTextFaint" Color="#FF777777" />
+            <SolidColorBrush x:Key="ChromeWarn"     Color="#FFE0A030" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="{x:Static local:Themes.Gray}">
+            <SolidColorBrush x:Key="ChromeWindowBg" Color="#FF323232" />
+            <SolidColorBrush x:Key="ChromeMenuBg"   Color="#FF3E3E3E" />
+            <SolidColorBrush x:Key="ChromePanel"    Color="#FF3C3C3C" />
+            <SolidColorBrush x:Key="ChromePanel2"   Color="#FF383838" />
+            <SolidColorBrush x:Key="ChromePanel3"   Color="#FF3A3A3A" />
+            <SolidColorBrush x:Key="ChromeHeaderBg" Color="#FF454545" />
+            <SolidColorBrush x:Key="ChromeFooter"   Color="#FF343434" />
+            <SolidColorBrush x:Key="ChromeCanvas"   Color="#FF2A2A2A" />
+            <SolidColorBrush x:Key="ChromeBorder"   Color="#FF4C4C4C" />
+            <SolidColorBrush x:Key="ChromeBorder2"  Color="#FF666666" />
+            <SolidColorBrush x:Key="ChromeField"    Color="#FF3A3A3A" />
+            <SolidColorBrush x:Key="ChromeText"     Color="#FFE8E8E8" />
+            <SolidColorBrush x:Key="ChromeTextDim"  Color="#FFB8B8B8" />
+            <SolidColorBrush x:Key="ChromeTextFaint" Color="#FF8C8C8C" />
+            <SolidColorBrush x:Key="ChromeWarn"     Color="#FFE0A030" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="ChromeWindowBg" Color="#FFE6E6E6" />
+            <SolidColorBrush x:Key="ChromeMenuBg"   Color="#FFDCDCDC" />
+            <SolidColorBrush x:Key="ChromePanel"    Color="#FFDADADA" />
+            <SolidColorBrush x:Key="ChromePanel2"   Color="#FFD0D0D0" />
+            <SolidColorBrush x:Key="ChromePanel3"   Color="#FFD6D6D6" />
+            <SolidColorBrush x:Key="ChromeHeaderBg" Color="#FFCFCFCF" />
+            <SolidColorBrush x:Key="ChromeFooter"   Color="#FFCACACA" />
+            <SolidColorBrush x:Key="ChromeCanvas"   Color="#FFC4C4C4" />
+            <SolidColorBrush x:Key="ChromeBorder"   Color="#FFB2B2B2" />
+            <SolidColorBrush x:Key="ChromeBorder2"  Color="#FF9A9A9A" />
+            <SolidColorBrush x:Key="ChromeField"    Color="#FFF2F2F2" />
+            <SolidColorBrush x:Key="ChromeText"     Color="#FF1E1E1E" />
+            <SolidColorBrush x:Key="ChromeTextDim"  Color="#FF555555" />
+            <SolidColorBrush x:Key="ChromeTextFaint" Color="#FF808080" />
+            <SolidColorBrush x:Key="ChromeWarn"     Color="#FFB26A00" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- type scale -->
+    <x:Double x:Key="FontSizeSmall">11</x:Double>   <!-- labels, control text -->
+    <x:Double x:Key="FontSizeBody">12</x:Double>    <!-- menu, tabs, body -->
+    <x:Double x:Key="FontSizeTiny">10</x:Double>    <!-- hints, captions -->
+
+    <!-- bar heights -->
+    <x:Double x:Key="MenuBarHeight">24</x:Double>
+    <x:Double x:Key="OptionsBarHeight">28</x:Double>
+    <x:Double x:Key="StatusBarHeight">20</x:Double>
+
+    <!-- controls -->
+    <x:Double x:Key="ControlHeight">22</x:Double>   <!-- combo / textbox / numeric / opt toggle -->
+    <x:Double x:Key="ToolButtonSize">28</x:Double>  <!-- left tool palette buttons -->
+    <x:Double x:Key="ToolIconSize">24</x:Double>    <!-- glyph size inside a ToolButton (Lucide 24-frame) -->
+    <x:Double x:Key="IconButtonSize">20</x:Double>  <!-- footer / eye icon buttons -->
+    <x:Double x:Key="LayerRowHeight">28</x:Double>
+    <x:Double x:Key="ColorWheelMaxSize">190</x:Double>
+    <x:Double x:Key="CheckBoxBoxSize">15</x:Double>
+    <x:Double x:Key="CheckBoxGlyphSize">9</x:Double>
+
+    <!-- slider geometry (Fluent resource keys — keep these exact names) -->
+    <x:Double x:Key="SliderHorizontalHeight">18</x:Double>
+    <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
+
+    <!-- slider brushes (moved here so all chrome tuning is in one file) -->
+    <SolidColorBrush x:Key="SliderTrackFill" Color="#FF3C3C3C" />
+    <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#FF454545" />
+    <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#FF454545" />
+    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF5687C0" />
+    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF6699D6" />
+    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF6699D6" />
+    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFE0E0E0" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFBFBFBF" />
+
+</ResourceDictionary>

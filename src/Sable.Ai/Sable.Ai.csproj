@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Imaging\Sable.Imaging.csproj" />
+  </ItemGroup>
+
+  <!-- ONNX Runtime native varies per OS (PHASE8_AI §1.5 / Phase 9 Linux):
+       - Windows: DirectML EP (vendor-agnostic GPU), shipped in the package.
+       - Linux:   base package (managed API + CPU native). The GPU path is the CUDA EP, whose native
+                  is NOT shipped here — prebuilt ORT has no Blackwell/sm_120 kernels, so Sable builds
+                  an sm_120 ORT (tools/build-ort-cuda.sh) and the app downloads + activates it at
+                  runtime (OrtCudaRuntime / OrtRuntimeProvisioner). The managed API already exposes
+                  AppendExecutionProvider_CUDA, so no DefineConstants/#if are needed.
+       - macOS:   base package; a CoreML/WebGPU EP is a later slice (AI stays disabled until then).
+       Built per-platform (framework-dependent), so the build-machine OS == target OS here. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+  </ItemGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

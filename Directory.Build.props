@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>$(MSBuildProjectName)</RootNamespace>
+    <!-- App version (overridden in CI release builds via -p:VersionPrefix from the git tag). -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Company>Sable</Company>
+    <Product>Sable</Product>
+  </PropertyGroup>
+</Project>

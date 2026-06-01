@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aop-copilot": {
+      "type": "http",
+      "url": "http://127.0.0.1:63941/mcp",
+      "headers": {
+        "Authorization": "Bearer 2034bfc77845f23a728de73c8a12be444cb11c0a1b73562acd2759ea45136e91"
+      }
+    }
+  }
+}

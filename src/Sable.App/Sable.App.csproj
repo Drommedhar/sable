@@ -1,0 +1,56 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>..\..\img\sable.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- brand assets (logo + icon) compiled into the app at avares://Sable.App/Assets/* -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\img\logo_only.png" Link="Assets/logo_only.png" />
+    <AvaloniaResource Include="..\..\img\sable.ico" Link="Assets/sable.ico" />
+  </ItemGroup>
+
+  <!-- locale JSON read from disk at runtime (Loc.Initialize -> {BaseDir}/Assets/Locales) -->
+  <ItemGroup>
+    <Content Include="Assets\Locales\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.1">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.UI\Sable.UI.csproj" />
+    <ProjectReference Include="..\Sable.Canvas\Sable.Canvas.csproj" />
+    <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Ai\Sable.Ai.csproj" />
+    <ProjectReference Include="..\Sable.Format\Sable.Format.csproj" />
+  </ItemGroup>
+
+  <!-- i18n gate: fail the build on missing keys / unlocalized literals (docs/i18n-decision.md).
+       Exit 1 = drift -> build error. python not found -> warn + continue (don't block python-less devs).
+       Skipped during design-time/IDE intellisense builds. -->
+  <Target Name="LocaleDoctor" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'">
+    <Exec Command="python &quot;$(MSBuildThisFileDirectory)..\..\tools\locale-doctor.py&quot; --strict"
+          ContinueOnError="true" StandardOutputImportance="high" StandardErrorImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="_LocaleDoctorExit" />
+    </Exec>
+    <Warning Condition="'$(_LocaleDoctorExit)' != '0' and '$(_LocaleDoctorExit)' != '1'"
+             Text="locale-doctor skipped: python not found (exit $(_LocaleDoctorExit)). i18n is not being checked on this machine." />
+    <Error Condition="'$(_LocaleDoctorExit)' == '1'"
+           Text="locale-doctor found i18n problems (missing keys or unlocalized .axaml strings). Run: python tools/locale-doctor.py --list-literals" />
+  </Target>
+</Project>

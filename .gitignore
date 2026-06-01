@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+*.user
+
+# Spike artifacts
+spike_out.png
+m1_export.png
+roundtrip.sable
+
+# IDE
+.vs/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

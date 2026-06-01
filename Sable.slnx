@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Sable.Ai.Sidecar/Sable.Ai.Sidecar.csproj" />
+    <Project Path="src/Sable.Ai/Sable.Ai.csproj" />
+    <Project Path="src/Sable.App/Sable.App.csproj" />
+    <Project Path="src/Sable.Canvas/Sable.Canvas.csproj" />
+    <Project Path="src/Sable.Core/Sable.Core.csproj" />
+    <Project Path="src/Sable.Engine/Sable.Engine.csproj" />
+    <Project Path="src/Sable.Format/Sable.Format.csproj" />
+    <Project Path="src/Sable.Gpu.Spike/Sable.Gpu.Spike.csproj" />
+    <Project Path="src/Sable.Gpu/Sable.Gpu.csproj" />
+    <Project Path="src/Sable.Imaging/Sable.Imaging.csproj" />
+    <Project Path="src/Sable.Tools/Sable.Tools.csproj" />
+    <Project Path="src/Sable.UI/Sable.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sable.Tests/Sable.Tests.csproj" />
+  </Folder>
+</Solution>

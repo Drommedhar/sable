@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.CommandPalette"
+        Width="440" Height="380"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="None" Title="{loc:Loc commandPalette.commands}">
+    <Border BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1">
+        <DockPanel LastChildFill="True">
+            <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Watermark="{loc:Loc commandPalette.runACommand}" Margin="8"
+                     FontSize="13" TextChanged="OnSearch" KeyDown="OnSearchKey" />
+            <ListBox x:Name="ResultList" Margin="8,0,8,8" FontSize="12"
+                     Background="Transparent" BorderThickness="0" DoubleTapped="OnRunSelected" />
+        </DockPanel>
+    </Border>
+</Window>
