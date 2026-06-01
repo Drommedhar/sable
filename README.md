@@ -124,10 +124,13 @@ macOS `.app` + DMG, and Linux AppImage. The app version is derived from the tag.
 The engine is UI-agnostic and headless-testable; the only per-OS code is the  
 canvas surface + input backend (`IPlatformBackend` / `IInputSource`).
 
-## Localization
+## Support the Project
 
-Sable ships **English-only for v1**. The localization approach is decided but  
-not yet implemented — see [docs/i18n-decision.md](docs/i18n-decision.md).
+If you find Sable useful and want to support its development:
+
+[<img src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_LG.gif" alt="Donate with PayPal" />](https://www.paypal.com/donate/?hosted_button_id=EQJG5JHAKYU4S)
+
+[Buy me a coffee on Ko-fi](https://ko-fi.com/drommedhar)
 
 ## License
 
