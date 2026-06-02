@@ -14,7 +14,7 @@ public sealed class CropCommand : IUndoableCommand
     private readonly Document _doc;
     private readonly int _x, _y, _w, _h;
     private int _oldW, _oldH;
-    private readonly List<(PixelLayer layer, byte[] px, int w, int h)> _pixSnap = new();
+    private readonly List<(PixelLayer layer, byte[] px, int w, int h, int offX, int offY)> _pixSnap = new();
     private readonly List<(Layer layer, byte[]? mask)> _maskSnap = new();
     private bool _captured;
 
@@ -37,7 +37,7 @@ public sealed class CropCommand : IUndoableCommand
     {
         foreach (var l in list)
         {
-            if (l is PixelLayer px) _pixSnap.Add((px, px.Pixels, px.Width, px.Height));
+            if (l is PixelLayer px) _pixSnap.Add((px, px.Pixels, px.Width, px.Height, px.OffsetX, px.OffsetY));
             _maskSnap.Add((l, l.Mask));
             if (l is GroupLayer g) CaptureList(g.Children);
         }
@@ -48,20 +48,35 @@ public sealed class CropCommand : IUndoableCommand
         foreach (var l in list)
         {
             if (l is PixelLayer px)
-                px.SetBuffer(_w, _h, RasterTiles.Crop(px.Pixels, px.Width, px.Height, _x, _y, _w, _h));
-            if (l.Mask is { } m)
             {
-                l.Mask = RasterTiles.Crop(m, srcW, srcH, _x, _y, _w, _h);
-                l.MaskDirty = true; l.Dirty = true;
+                // crop the layer buffer in LAYER-local space (doc crop origin minus the layer's offset),
+                // then re-origin: the cropped region now starts at the new doc (0,0). Negative coords pad
+                // transparent (= canvas grow). Mask is layer-aligned → crop it the same way.
+                int olw = px.Width, olh = px.Height, oox = px.OffsetX, ooy = px.OffsetY;
+                px.SetBuffer(_w, _h, RasterTiles.Crop(px.Pixels, olw, olh, _x - oox, _y - ooy, _w, _h));
+                px.OffsetX = 0; px.OffsetY = 0;
+                if (px.Mask is { } pm)
+                {
+                    px.Mask = RasterTiles.Crop(pm, olw, olh, _x - oox, _y - ooy, _w, _h);
+                    px.MaskDirty = true; px.Dirty = true;
+                }
             }
-            if (l is GroupLayer g) ApplyCrop(g.Children, srcW, srcH);
+            else
+            {
+                if (l.Mask is { } m)   // non-pixel layers carry document-sized masks
+                {
+                    l.Mask = RasterTiles.Crop(m, srcW, srcH, _x, _y, _w, _h);
+                    l.MaskDirty = true; l.Dirty = true;
+                }
+                if (l is GroupLayer g) ApplyCrop(g.Children, srcW, srcH);
+            }
         }
     }
 
     public void Undo()
     {
         _doc.SetSize(_oldW, _oldH);
-        foreach (var (layer, px, w, h) in _pixSnap) layer.SetBuffer(w, h, px);
+        foreach (var (layer, px, w, h, offX, offY) in _pixSnap) { layer.SetBuffer(w, h, px); layer.OffsetX = offX; layer.OffsetY = offY; }
         foreach (var (layer, mask) in _maskSnap) { layer.Mask = mask; layer.MaskDirty = true; layer.Dirty = true; }
         _doc.ClearSelection();
     }

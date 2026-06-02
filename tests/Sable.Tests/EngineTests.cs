@@ -119,6 +119,38 @@ public class DocumentTests
     }
 
     [Fact]
+    public void Crop_OffsetSubDocLayer_LandsContentCorrectly()   // audit: crop honors layer offset/dims
+    {
+        var doc = new Document(8, 8);
+        var px = new PixelLayer(4, 4, "L") { OffsetX = 4, OffsetY = 4 };   // covers doc [4,8)x[4,8)
+        px.Pixels[0] = 255; px.Pixels[3] = 255;                            // layer-local (0,0) = doc (4,4) red
+        doc.Layers.Add(px);
+
+        new CropCommand(doc, 4, 4, 4, 4).Do();   // crop to the bottom-right quadrant
+        Assert.Equal(4, doc.Width);
+        Assert.Equal(4, px.Width);
+        Assert.Equal(0, px.OffsetX);             // re-origined to the new doc
+        Assert.Equal(255, px.Pixels[0]);         // doc (4,4) → new (0,0) still red
+        Assert.Equal(255, px.Pixels[3]);
+        Assert.Equal(0, px.Pixels[(3 * 4 + 3) * 4 + 3]);   // area the layer never covered → transparent
+    }
+
+    [Fact]
+    public void Resize_OffsetSubDocLayer_ScalesLayerNotDoc()   // audit: resize scales each layer to its own size
+    {
+        var doc = new Document(8, 8);
+        doc.Layers.Add(new PixelLayer(4, 4, "L") { OffsetX = 2, OffsetY = 2 });
+        var px = (PixelLayer)doc.Layers[0];
+
+        new ResizeCommand(doc, 16, 16, 96, bilinear: false).Do();   // 2x document
+        Assert.Equal(16, doc.Width);
+        Assert.Equal(8, px.Width);     // 4*2 — scaled to the layer's own new size, NOT the doc's 16
+        Assert.Equal(8, px.Height);
+        Assert.Equal(4, px.OffsetX);   // offset scaled proportionally (2*2)
+        Assert.Equal(4, px.OffsetY);
+    }
+
+    [Fact]
     public void NeedsComposite_TrueOnParamChange_ClearedAfter()
     {
         var doc = Document.CreateDemo(32, 32);
@@ -704,5 +736,28 @@ public class PixelLayerBoundsTests
         Assert.Equal(8, layer.Width);
         Assert.Equal(20, layer.OffsetX);
         Assert.Equal(255, layer.Pixels[3]);
+    }
+
+    [Fact]
+    public void RasterStateCommand_RoundTripsMask()   // audit C5: mask is realloc'd by ExpandToCover/Trim → must snapshot it too
+    {
+        var layer = new PixelLayer(4, 4, "L");
+        layer.AddWhiteMask(4, 4);
+        layer.Mask![0] = 10;
+        var before = RasterState.Capture(layer);
+
+        // a paint gesture grows the layer (and its mask) to 8x8
+        layer.SetBuffer(8, 8, new byte[8 * 8 * 4]);
+        layer.Mask = new byte[8 * 8 * 4];
+        layer.Mask![0] = 99;
+        var after = RasterState.Capture(layer);
+
+        var cmd = new RasterStateCommand(layer, before, after, () => { });
+        cmd.Undo();
+        Assert.Equal(4 * 4 * 4, layer.Mask!.Length);   // mask restored to the BEFORE size (was 8x8)
+        Assert.Equal(10, layer.Mask![0]);
+        cmd.Do();
+        Assert.Equal(8 * 8 * 4, layer.Mask!.Length);
+        Assert.Equal(99, layer.Mask![0]);
     }
 }

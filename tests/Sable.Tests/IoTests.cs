@@ -555,6 +555,45 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesSubDocLayerMaskDims()   // audit C3: mask must round-trip at LAYER size, not doc size
+    {
+        var doc = new Document(100, 80);
+        doc.Layers.Add(new PixelLayer(100, 80, "bg"));
+        var sub = new PixelLayer(20, 10, "masked") { OffsetX = 5, OffsetY = 5 };
+        sub.AddWhiteMask(20, 10);                 // layer-aligned mask (smaller than the document)
+        sub.Mask![0] = 0;
+        sub.Mask![(5 * 20 + 3) * 4] = 128;
+        doc.Layers.Add(sub);
+
+        var path = Path.Combine(Path.GetTempPath(), $"submask_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var l = (PixelLayer)SableFile.Load(path).Layers[1];
+            Assert.True(l.HasMask);
+            Assert.Equal(20 * 10 * 4, l.Mask!.Length);   // layer-sized — would be 100*80*4 before the fix
+            Assert.Equal(sub.Mask, l.Mask);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void Load_InvalidDimensions_Throws()   // audit C2: reject negative/oversized manifest dims before allocating
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"baddim_{Guid.NewGuid():N}.sable");
+        using (var fs = File.Create(path))
+        using (var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var e = zip.CreateEntry("document.json");
+            using var s = e.Open();
+            var json = System.Text.Encoding.UTF8.GetBytes("{\"Version\":1,\"Width\":-1,\"Height\":10,\"Layers\":[]}");
+            s.Write(json, 0, json.Length);
+        }
+        try { Assert.Throws<InvalidDataException>(() => SableFile.Load(path)); }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void Load_NonSableFile_Throws()
     {
         var path = Path.Combine(Path.GetTempPath(), $"bad_{Guid.NewGuid():N}.sable");

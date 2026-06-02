@@ -12,6 +12,7 @@ namespace Sable.Tools;
 public sealed class StrokeSession
 {
     private readonly byte[] _target;
+    private readonly Func<byte[]?> _live;   // live buffer fetch for the produced undo command
     private readonly int _w, _h;
     private readonly int _ox, _oy;   // document position of the target buffer's (0,0)
     private readonly BrushTool _brush;
@@ -19,9 +20,11 @@ public sealed class StrokeSession
     private readonly Dictionary<(int tx, int ty), byte[]> _before = new();
 
     public StrokeSession(byte[] target, int width, int height, BrushTool brush,
-        Action<IReadOnlyCollection<(int, int)>> markTiles, int originX = 0, int originY = 0)
+        Action<IReadOnlyCollection<(int, int)>> markTiles, int originX = 0, int originY = 0,
+        Func<byte[]?>? liveTarget = null)
     {
         _target = target;
+        _live = liveTarget ?? (() => target);
         _w = width;
         _h = height;
         _ox = originX;
@@ -66,6 +69,6 @@ public sealed class StrokeSession
         var after = new Dictionary<(int, int), byte[]>(_before.Count);
         foreach (var key in _before.Keys)
             after[key] = RasterTiles.GetTile(_target, _w, _h, key.tx, key.ty);
-        return new PaintRasterCommand(_target, _w, _h, _before, after, _markTiles);
+        return new PaintRasterCommand(_live, _w, _h, _before, after, _markTiles);
     }
 }

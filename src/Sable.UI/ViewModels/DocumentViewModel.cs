@@ -67,6 +67,10 @@ public sealed partial class DocumentViewModel : ObservableObject
         Layers.Clear();
         AddTree(Model.Layers, 0);
         SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == keepModel) ?? Layers.FirstOrDefault();
+        // Drop multi-selection refs to layers no longer in the tree (undo/redo/delete can remove them),
+        // else Group/DropLayer would act on dangling models.
+        var live = new HashSet<Layer>(Layers.Select(vm => vm.Model));
+        SelectionModels.RemoveAll(m => !live.Contains(m));
         UndoEditCommand.NotifyCanExecuteChanged();
         RedoEditCommand.NotifyCanExecuteChanged();
     }
@@ -207,9 +211,17 @@ public sealed partial class DocumentViewModel : ObservableObject
     private void ToggleMask()
     {
         if (SelectedLayer?.Model is not { } m) return;
-        if (m.HasMask) m.RemoveMask();
-        else m.AddWhiteMask(Model.Width, Model.Height);
-        SelectedLayer.RaiseMaskChanged();
+        byte[]? after = null;
+        if (!m.HasMask)
+        {
+            // mask is layer-aligned: a pixel layer's mask matches its buffer, others use doc size.
+            int mw = m is PixelLayer px ? px.Width : Model.Width;
+            int mh = m is PixelLayer py ? py.Height : Model.Height;
+            after = new byte[mw * mh * 4];
+            Array.Fill(after, (byte)255);
+        }
+        Undo.Execute(new SetMaskCommand(m, after));   // undoable (Resync runs on Undo.Changed)
+        SelectedLayer?.RaiseMaskChanged();
     }
 
     /// <summary>

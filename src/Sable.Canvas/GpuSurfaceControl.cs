@@ -225,6 +225,9 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         set
         {
             if (ReferenceEquals(_doc, value)) return;
+            // Abort any in-progress gesture FIRST: its flags + layer refs point at the OLD doc's
+            // layers; a stray pointer event after the swap would write into a detached layer or NRE.
+            PenUp(); CancelPen(); CancelMeshWarp(); AbortGesture();
             _compositor?.ReleaseLayerCaches();   // free the old doc's cached GPU buffers (no leak on swap)
             _doc = value;
             _compositeView = null;
@@ -530,8 +533,10 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.ShX0 = (float)_shapeStartSx; ov.ShY0 = (float)_shapeStartSy;
             ov.ShX1 = (float)_shapeEndSx; ov.ShY1 = (float)_shapeEndSy;
         }
-        // Move: tight content bounds of the selected layer of ANY type (shape = the shape rect)
-        if (ActiveTool == Sable.Tools.ToolKind.Move && !ov.RectOn && SelLayer is { } sl && _doc is { } md)
+        // Move (and Transform on a non-pixel layer = move-only): tight content bounds of the selected layer of ANY type
+        if ((ActiveTool == Sable.Tools.ToolKind.Move
+                || (ActiveTool == Sable.Tools.ToolKind.Transform && ActiveLayer is null))
+            && !ov.RectOn && SelLayer is { } sl && _doc is { } md)
         {
             var (bx, by, bw, bh) = sl.ContentBounds(md.Width, md.Height);
             ov.RectOn = true;

@@ -53,16 +53,28 @@ public sealed class ResizeCommand : IUndoableCommand
         {
             if (l is PixelLayer px)
             {
-                px.SetBuffer(_w, _h, RasterTiles.Resample(px.Pixels, px.Width, px.Height, _w, _h, _bilinear));
+                // scale the layer to ITS OWN new size (not the document's), and its offset proportionally —
+                // a sub-doc/offset layer must keep its bounds, not stretch to fill the canvas.
+                int olw = px.Width, olh = px.Height;
+                int nlw = Math.Max(1, (int)Math.Round(olw * rx)), nlh = Math.Max(1, (int)Math.Round(olh * ry));
+                px.SetBuffer(nlw, nlh, RasterTiles.Resample(px.Pixels, olw, olh, nlw, nlh, _bilinear));
                 px.OffsetX = (int)Math.Round(px.OffsetX * rx);
                 px.OffsetY = (int)Math.Round(px.OffsetY * ry);
+                if (px.Mask is { } pm)   // mask is layer-aligned → scale to the new layer size
+                {
+                    px.Mask = RasterTiles.Resample(pm, olw, olh, nlw, nlh, _bilinear);
+                    px.MaskDirty = true; px.Dirty = true;
+                }
             }
-            if (l.Mask is { } m)
+            else
             {
-                l.Mask = RasterTiles.Resample(m, srcW, srcH, _w, _h, _bilinear);
-                l.MaskDirty = true; l.Dirty = true;
+                if (l.Mask is { } m)   // non-pixel masks are document-sized
+                {
+                    l.Mask = RasterTiles.Resample(m, srcW, srcH, _w, _h, _bilinear);
+                    l.MaskDirty = true; l.Dirty = true;
+                }
+                if (l is GroupLayer g) ApplyList(g.Children, srcW, srcH, rx, ry);
             }
-            if (l is GroupLayer g) ApplyList(g.Children, srcW, srcH, rx, ry);
         }
     }
 

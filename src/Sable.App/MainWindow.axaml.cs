@@ -618,12 +618,35 @@ public partial class MainWindow : Window
         _autosaveTimer.Start();
     }
 
+    private bool _autosaving;
+
     private void AutosaveNow()
     {
-        if (!_settings.AutosaveEnabled) return;
-        var dirty = _tabs.Where(t => t.IsDirty)
-            .Select(t => (t.RecoveryId, t.Path, t.Title, t.Doc));
-        if (dirty.Any()) RecoveryService.Save(dirty);
+        if (!_settings.AutosaveEnabled || _autosaving) return;
+        // Snapshot the dirty docs on the UI thread (a fast buffer memcpy), then run the
+        // zip+deflate serialization on a background thread — serializing the live doc on the
+        // Tick handler froze the UI for seconds on a large document (audit C10).
+        var snap = _tabs.Where(t => t.IsDirty)
+            .Select(t => (t.RecoveryId, t.Path, t.Title, Doc: SnapshotDoc(t.Doc)))
+            .ToList();
+        if (snap.Count == 0) return;
+        _autosaving = true;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try { RecoveryService.Save(snap.Select(s => (s.RecoveryId, s.Path, s.Title, s.Doc))); }
+            finally { _autosaving = false; }
+        });
+    }
+
+    /// <summary>Deep-copy a document (layer buffers + params) so it can be serialized off the UI thread.</summary>
+    private static Sable.Engine.Document SnapshotDoc(Sable.Engine.Document d)
+    {
+        var c = new Sable.Engine.Document(d.Width, d.Height);
+        foreach (var l in d.Layers) c.Layers.Add(l.Clone());
+        c.GuidesX.AddRange(d.GuidesX);
+        c.GuidesY.AddRange(d.GuidesY);
+        if (d.SavedSelection is { } s) c.SavedSelection = (byte[])s.Clone();
+        return c;
     }
 
     private async void OfferCrashRecovery()
@@ -2488,8 +2511,15 @@ public partial class MainWindow : Window
         var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
         if (string.IsNullOrEmpty(path)) return;
 
-        OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
-        NoteRecent(path);
+        try
+        {
+            OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
+            NoteRecent(path);
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, "Open image", $"Couldn't open this image:\n{ex.Message}");
+        }
     }
 
     private async void OnOpenSable(object? sender, RoutedEventArgs e)
@@ -2503,17 +2533,31 @@ public partial class MainWindow : Window
         var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
         if (string.IsNullOrEmpty(path)) return;
 
-        var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
-        tab.IsDirty = false;
-        NoteRecent(path);
+        try
+        {
+            var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
+            tab.IsDirty = false;
+            NoteRecent(path);
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, "Open Sable document", $"Couldn't open this .sable file:\n{ex.Message}");
+        }
     }
 
     private async void OnSaveSable(object? sender, RoutedEventArgs e)
     {
         if (_currentPath is { } p && Canvas.Document is { } doc)
         {
-            SableFile.Save(doc, p);
-            if (_activeTab is { } t) t.IsDirty = false;
+            try
+            {
+                SableFile.Save(doc, p);
+                if (_activeTab is { } t) t.IsDirty = false;
+            }
+            catch (System.Exception ex)
+            {
+                await ConfirmWindow.Ask(this, "Save", $"Couldn't save the document:\n{ex.Message}");
+            }
             return;
         }
         await SaveAs();
@@ -2534,7 +2578,15 @@ public partial class MainWindow : Window
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
 
-        SableFile.Save(doc, path);
+        try
+        {
+            SableFile.Save(doc, path);
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, "Save", $"Couldn't save the document:\n{ex.Message}");
+            return;
+        }
         _currentPath = path;
         if (_activeTab is { } t)
         {
@@ -2565,6 +2617,13 @@ public partial class MainWindow : Window
 
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
-        DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality);
+        try
+        {
+            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality);
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, "Export", $"Couldn't export the image:\n{ex.Message}");
+        }
     }
 }

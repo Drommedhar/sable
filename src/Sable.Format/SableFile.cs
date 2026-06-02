@@ -140,6 +140,8 @@ public static class SableFile
         public byte PsA { get; set; } = 255;
         public float PsWidth { get; set; } = 2f;
         public string? Mask { get; set; }   // zip entry name, if the layer has a mask
+        public int MaskW { get; set; }   // mask buffer size (0 = legacy → document size)
+        public int MaskH { get; set; }
         public List<EffectDto> Effects { get; set; } = new();
         public List<LayerDto> Children { get; set; } = new();   // for groups
     }
@@ -182,14 +184,14 @@ public static class SableFile
         dto.GuidesY.AddRange(doc.GuidesY);
         if (doc.SavedSelection is { } sel) { dto.SavedSelection = "selection.raw"; WriteEntry(zip, dto.SavedSelection, sel); }
         foreach (var layer in doc.Layers)
-            dto.Layers.Add(SaveLayer(zip, layer, ref next));
+            dto.Layers.Add(SaveLayer(zip, layer, doc.Width, doc.Height, ref next));
 
         var manifest = zip.CreateEntry(ManifestEntry, CompressionLevel.Optimal);
         using var ms = manifest.Open();
         JsonSerializer.Serialize(ms, dto, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static LayerDto SaveLayer(ZipArchive zip, Layer layer, ref int next)
+    private static LayerDto SaveLayer(ZipArchive zip, Layer layer, int docW, int docH, ref int next)
     {
         int id = next++;
         var ld = new LayerDto
@@ -289,12 +291,15 @@ public static class SableFile
                 break;
             case GroupLayer g:
                 ld.Type = "group";
-                foreach (var c in g.Children) ld.Children.Add(SaveLayer(zip, c, ref next));
+                foreach (var c in g.Children) ld.Children.Add(SaveLayer(zip, c, docW, docH, ref next));
                 break;
         }
         if (layer.Mask is { } mask)
         {
             ld.Mask = $"masks/{id}.raw";
+            // masks are layer-aligned: a pixel layer's mask matches its (dynamic) buffer size;
+            // other layer types use document-sized masks.
+            (ld.MaskW, ld.MaskH) = layer is PixelLayer mpx ? (mpx.Width, mpx.Height) : (docW, docH);
             WriteEntry(zip, ld.Mask, mask);
         }
         return ld;
@@ -312,6 +317,7 @@ public static class SableFile
             dto = JsonSerializer.Deserialize<DocDto>(ms)
                   ?? throw new InvalidDataException("Corrupt .sable manifest");
 
+        ValidateDim(dto.Width, dto.Height, "document");
         var doc = new Document(dto.Width, dto.Height);
         doc.GuidesX.AddRange(dto.GuidesX);
         doc.GuidesY.AddRange(dto.GuidesY);
@@ -386,9 +392,16 @@ public static class SableFile
             });
         if (ld.Mask is not null && zip.GetEntry(ld.Mask) is { } maskEntry)
         {
-            created.AddWhiteMask(w, h);
+            // mask is layer-aligned; legacy files (MaskW==0) used document-sized masks.
+            int mw = ld.MaskW > 0 ? ld.MaskW : w;
+            int mh = ld.MaskH > 0 ? ld.MaskH : h;
+            ValidateDim(mw, mh, "mask");
+            var mask = new byte[mw * mh * 4];
             using var es = maskEntry.Open();
-            ReadFully(es, created.Mask!);
+            ReadFully(es, mask);
+            created.Mask = mask;
+            created.MaskDirty = true;
+            created.Dirty = true;
         }
         return created;
     }
@@ -475,6 +488,7 @@ public static class SableFile
         // LayerW/H == 0 → legacy file where every layer was document-sized
         int lw = ld.LayerW > 0 ? ld.LayerW : w;
         int lh = ld.LayerH > 0 ? ld.LayerH : h;
+        ValidateDim(lw, lh, "layer");
         var px = new PixelLayer(lw, lh, ld.Name);
         if (ld.Pixels is not null && zip.GetEntry(ld.Pixels) is { } pe)
         {
@@ -505,8 +519,19 @@ public static class SableFile
         while (offset < buffer.Length)
         {
             int read = s.Read(buffer, offset, buffer.Length - offset);
-            if (read == 0) break;
+            if (read == 0)
+                throw new InvalidDataException(
+                    $"Corrupt .sable: entry truncated ({offset}/{buffer.Length} bytes).");
             offset += read;
         }
+    }
+
+    private const int MaxDim = 32768;
+
+    /// <summary>Reject negative/zero/oversized dimensions (corrupt or malicious manifest) before allocating.</summary>
+    private static void ValidateDim(int w, int h, string what)
+    {
+        if (w < 1 || h < 1 || w > MaxDim || h > MaxDim || (long)w * h > (long)MaxDim * MaxDim)
+            throw new InvalidDataException($"Corrupt .sable: invalid {what} dimensions {w}x{h}.");
     }
 }

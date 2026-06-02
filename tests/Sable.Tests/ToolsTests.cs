@@ -232,6 +232,45 @@ public class StrokeSessionTests
     }
 
     [Fact]
+    public void Paint_Undo_TargetsLiveBuffer_AfterBufferSwap()   // audit C4: command must re-read the live buffer, not a captured ref
+    {
+        var layer = new PixelLayer(128, 128);
+        var session = new StrokeSession(layer.Pixels, 128, 128, new BrushTool { Radius = 20 },
+            _ => { }, liveTarget: () => layer.Pixels);
+        session.StrokeTo(20, 20, 100, 100);
+        var cmd = session.Finalize();
+        Assert.NotNull(cmd);
+
+        // swap the layer's buffer to a fresh same-size array (as a later resize/SetBuffer would)
+        var fresh = new byte[128 * 128 * 4];
+        System.Array.Fill(fresh, (byte)200);
+        layer.SetBuffer(128, 128, fresh);
+
+        cmd!.Undo();   // must write into 'fresh' (the live buffer), not the orphaned original
+        Assert.True(ReferenceEquals(layer.Pixels, fresh));
+        // the painted tiles were reset to the 'before' (transparent) snapshot in the new buffer
+        Assert.Equal(0, fresh[(60 * 128 + 60) * 4 + 3]);
+    }
+
+    [Fact]
+    public void Paint_Undo_SkipsWhenGeometryChanged()   // audit C4: mismatched dims → safe skip, no corruption
+    {
+        var layer = new PixelLayer(128, 128);
+        var session = new StrokeSession(layer.Pixels, 128, 128, new BrushTool { Radius = 20 },
+            _ => { }, liveTarget: () => layer.Pixels);
+        session.StrokeTo(20, 20, 100, 100);
+        var cmd = session.Finalize()!;
+
+        var smaller = new byte[64 * 64 * 4];
+        System.Array.Fill(smaller, (byte)123);
+        layer.SetBuffer(64, 64, smaller);
+        var copy = (byte[])smaller.Clone();
+
+        cmd.Undo();                     // dims no longer match → must not touch the buffer
+        Assert.Equal(copy, layer.Pixels);
+    }
+
+    [Fact]
     public void Finalize_ReturnsNull_WhenNothingPainted()
     {
         var layer = new PixelLayer(64, 64);

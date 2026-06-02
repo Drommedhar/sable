@@ -11,14 +11,16 @@ namespace Sable.Tools;
 public readonly struct RasterState
 {
     public readonly byte[] Pixels;
+    public readonly byte[]? Mask;   // layer-aligned mask snapshot (ExpandToCover/TrimToContent reallocs it too)
     public readonly int Width, Height, OffsetX, OffsetY;
 
-    private RasterState(byte[] pixels, int w, int h, int ox, int oy)
-    { Pixels = pixels; Width = w; Height = h; OffsetX = ox; OffsetY = oy; }
+    private RasterState(byte[] pixels, byte[]? mask, int w, int h, int ox, int oy)
+    { Pixels = pixels; Mask = mask; Width = w; Height = h; OffsetX = ox; OffsetY = oy; }
 
     /// <summary>Capture a (deep-copied) snapshot of the layer's current raster state.</summary>
     public static RasterState Capture(PixelLayer layer)
-        => new((byte[])layer.Pixels.Clone(), layer.Width, layer.Height, layer.OffsetX, layer.OffsetY);
+        => new((byte[])layer.Pixels.Clone(), layer.Mask is { } m ? (byte[])m.Clone() : null,
+               layer.Width, layer.Height, layer.OffsetX, layer.OffsetY);
 
     /// <summary>Restore this state into the layer (fresh buffer copy so the snapshot stays immutable).</summary>
     public void ApplyTo(PixelLayer layer)
@@ -26,6 +28,8 @@ public readonly struct RasterState
         layer.SetBuffer(Width, Height, (byte[])Pixels.Clone());
         layer.OffsetX = OffsetX;
         layer.OffsetY = OffsetY;
+        layer.Mask = Mask is { } m ? (byte[])m.Clone() : null;
+        layer.MaskDirty = true;
     }
 }
 

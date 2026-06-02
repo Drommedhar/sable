@@ -462,9 +462,15 @@ public sealed unsafe class GpuCompositor : IDisposable
     }
 
     /// <summary>Composite the document and return the result texture view.</summary>
-    public TextureView* Composite(Document doc)
+    public TextureView* Composite(Document doc) => Composite(doc, sweepDead: true);
+
+    // sweepDead: free per-layer GPU buffers/residency for layers no longer in the tree. Only the
+    // on-screen path sweeps; export/merge composite TEMP subset docs (RenderLayersToPixels) whose
+    // tree omits real layers — sweeping there would needlessly churn the real doc's buffers.
+    private TextureView* Composite(Document doc, bool sweepDead)
     {
         EnsureSize(doc);
+        if (sweepDead) SweepDeadLayers(doc);
 
         var result = CompositeRoot(doc);
 
@@ -473,6 +479,50 @@ public sealed unsafe class GpuCompositor : IDisposable
         RunPresentCopy(result);
         doc.ClearDirty();
         return _compositeView;
+    }
+
+    private readonly HashSet<Layer> _liveSweep = new();
+    private readonly List<Layer> _deadSweep = new();
+
+    /// <summary>
+    /// Release GPU buffers + tile residency for any cached layer no longer reachable in the
+    /// document tree (deleted / merged / flattened / rasterised / undone). Without this the
+    /// <c>Layer</c>-keyed caches pin both VRAM and the managed layer for the doc's lifetime.
+    /// </summary>
+    private void SweepDeadLayers(Document doc)
+    {
+        _liveSweep.Clear();
+        CollectLive(doc.Layers);
+        _deadSweep.Clear();
+        foreach (var l in _layerBuffers.Keys) if (!_liveSweep.Contains(l)) _deadSweep.Add(l);
+        foreach (var l in _maskBuffers.Keys) if (!_liveSweep.Contains(l) && !_deadSweep.Contains(l)) _deadSweep.Add(l);
+        foreach (var l in _layerTileDims.Keys) if (!_liveSweep.Contains(l) && !_deadSweep.Contains(l)) _deadSweep.Add(l);
+        foreach (var l in _deadSweep) ReleaseLayer(l);
+    }
+
+    private void CollectLive(List<Layer> list)
+    {
+        foreach (var l in list)
+        {
+            _liveSweep.Add(l);
+            if (l is GroupLayer g) CollectLive(g.Children);
+        }
+    }
+
+    /// <summary>Free a single layer's cached GPU buffers + tile residency + transparency cache.</summary>
+    public void ReleaseLayer(Layer l)
+    {
+        var api = _gpu.Api;
+        if (_layerBuffers.TryGetValue(l, out var b)) { api.BufferRelease((Buffer*)b); _layerBuffers.Remove(l); }
+        _layerBufferBytes.Remove(l);
+        if (_maskBuffers.TryGetValue(l, out var m)) { api.BufferRelease((Buffer*)m); _maskBuffers.Remove(l); }
+        _maskBufferBytes.Remove(l);
+        _residency?.ReleaseOwner(l);
+        _layerTileDims.Remove(l);
+        var dropTiles = new List<(Layer, int, int)>();
+        foreach (var k in _emptyTiles.Keys) if (ReferenceEquals(k.Item1, l)) dropTiles.Add(k);
+        foreach (var k in dropTiles) _emptyTiles.Remove(k);
+        if (ReferenceEquals(_cacheActive, l)) _cacheValid = false;
     }
 
     /// <summary>
@@ -782,7 +832,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     /// <summary>Composite and read the flattened RGBA8 result back to the CPU (for export).</summary>
     public byte[] CompositeToBytes(Document doc)
     {
-        Composite(doc);
+        Composite(doc, sweepDead: false);   // may be a temp subset doc (export/merge) — never sweep here
         var api = _gpu.Api;
 
         var encDesc = new CommandEncoderDescriptor();

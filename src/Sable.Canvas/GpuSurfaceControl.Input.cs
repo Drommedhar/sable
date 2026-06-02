@@ -98,13 +98,45 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         set
         {
             if (_activeTool == value) return;
-            if (_activeTool == ToolKind.Pen && value != ToolKind.Pen) CommitPen();   // leaving Pen finishes the path
+            if (_activeTool == ToolKind.Pen && value != ToolKind.Pen) { PenUp(); CommitPen(); }   // finalize any handle-drag, then commit the path
             if (_activeTool == ToolKind.MeshWarp && value != ToolKind.MeshWarp) CancelMeshWarp();
+            AbortGesture();   // a held-button tool-cycle (keys → window, mouse → native HWND) must not run the old gesture under the new tool
             _activeTool = value;
             if (value == ToolKind.MeshWarp) BeginMeshWarp();
             if (value != ToolKind.Type) CommitTextEdit();   // leaving Type ends editing
             ToolChanged?.Invoke(value);
         }
+    }
+
+    /// <summary>
+    /// Tear down ANY in-progress pointer gesture WITHOUT committing it: discards the partial
+    /// edit, clears every gesture flag + dangling layer ref, releases pointer capture. Called on
+    /// doc/tab swap and mid-gesture tool switch so a stale gesture can't write into a detached
+    /// layer or NRE on the next pointer event. Pen/Mesh have their own commit/cancel (run first).
+    /// </summary>
+    private void AbortGesture()
+    {
+        if (_hudAdjust) _input?.RestoreCursor();
+        _painting = false; _hudAdjust = false;
+        _session = null; _strokeLayer = null;
+        _panningMouse = false;
+        _moving = false;
+        _gradienting = false;
+        _shaping = false;
+        _cropping = false; _cropRect = null;
+        _selecting = false;
+        _lassoing = false; _lassoPts.Clear();
+        _polyPts.Clear();                   // discard a pending polygonal-lasso
+        _selResizing = false; _selMoving = false;
+        _maskMoving = false; _maskMoveOrig = null;
+        _patching = false; _patchSrc = null; _patchRect = null; _patchMask = null;
+        _liquifying = false; _liquifyLayer = null;
+        _transforming = false;
+        _nodeDragging = false; _nodeIdx = -1; _nodePath = null; _nodeBefore = null;
+        _meshDragIdx = -1;
+        _cloneSet = false;                  // stale clone source must not bleed across docs/tools
+        Brush.Clone = false; Brush.Heal = false;
+        _input?.ReleaseCapture();
     }
 
     /// <summary>Raised when the active tool changes (so the toolbar can sync highlight).</summary>
@@ -519,13 +551,15 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             if (!layer.HasMask) layer.AddWhiteMask(layer.Width, layer.Height);
             // mask upload is full-buffer for now (partial mask upload later)
             return new StrokeSession(layer.Mask!, layer.Width, layer.Height, Brush,
-                _ => { layer.MaskDirty = true; layer.Dirty = true; }, layer.OffsetX, layer.OffsetY);
+                _ => { layer.MaskDirty = true; layer.Dirty = true; }, layer.OffsetX, layer.OffsetY,
+                () => layer.Mask);
         }
         Brush.Erase = ActiveTool == ToolKind.Eraser;
         Brush.Pencil = ActiveTool == ToolKind.Pencil;   // hard aliased edge
         Brush.LockAlpha = layer.LockAlpha;   // preserve existing alpha (transparency lock)
         return new StrokeSession(layer.Pixels, layer.Width, layer.Height, Brush,
-            tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY);
+            tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY,
+            () => layer.Pixels);
     }
 
     // guide drag state: 0 = none, 1 = vertical guide (GuidesX), 2 = horizontal guide (GuidesY)
@@ -633,7 +667,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
         bool brushy = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
             or ToolKind.CloneStamp or ToolKind.Heal or ToolKind.SpotHeal or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge
-            or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
+            or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge or ToolKind.Liquify;   // Liquify uses Brush.Radius/Hardness too
 
         // Affinity HUD: Ctrl+Alt + drag adjusts brush size/hardness (intercept before painting)
         if (mods.HasFlag(CanvasMods.Ctrl) && alt && brushy)
@@ -645,7 +679,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             return;
         }
 
-        bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill;
+        // Alt-click = quick eyedropper for paint + retouch brushes (NOT clone/heal — they use Alt for the source point).
+        bool paintTool = ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill
+            or ToolKind.Dodge or ToolKind.Burn or ToolKind.Sponge or ToolKind.BlurBrush or ToolKind.SharpenBrush or ToolKind.Smudge;
         if (alt && ActiveLayer is not null && paintTool) { SampleColor(dx, dy); return; }
         // clone stamp / healing brush: Alt+click sets the source point
         if (ActiveTool is ToolKind.CloneStamp or ToolKind.Heal && alt)
@@ -732,7 +768,16 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 StartPan(sx, sy);
                 break;
             case ToolKind.Transform:
-                BeginTransform(sx, sy, mods.HasFlag(CanvasMods.Ctrl));
+                if (ActiveLayer is not null)
+                    BeginTransform(sx, sy, mods.HasFlag(CanvasMods.Ctrl));   // pixel layer: full gizmo (rotate/scale/perspective)
+                else if (SelLayer is { LockPosition: false } xfMove)
+                {
+                    // non-pixel layers (shape/text/path/group) — move only for now; rotate/scale need the
+                    // compositor to pivot non-pixel transforms about content-centre (follow-up, audit C8).
+                    _moving = true; _input?.Capture();
+                    _moveStartX = dx; _moveStartY = dy;
+                    _moveOrigX = xfMove.OffsetX; _moveOrigY = xfMove.OffsetY;
+                }
                 break;
             case ToolKind.EllipseMarquee:
                 if (_doc is not null)
@@ -959,7 +1004,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             {
                 var after = SnapshotAllTiles(target, w, h);
                 gl.MarkTilesDirty(after.Keys);
-                CommandProduced?.Invoke(new PaintRasterCommand(target, w, h, before, after, t => gl.MarkTilesDirty(t)));
+                CommandProduced?.Invoke(new PaintRasterCommand(() => gl.Pixels, w, h, before, after, t => gl.MarkTilesDirty(t)));
             }
         }
         else if (_lassoing)
@@ -1170,24 +1215,30 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     /// <summary>Erase the selected region of the active layer (undoable). No-op without a selection.</summary>
     public void DeleteSelection()
     {
-        if (_doc?.Selection is not { } sel || ActiveLayer is not { } layer || sel.W <= 0 || sel.H <= 0) return;
+        if (_doc is not { } doc || doc.Selection is not { } sel || ActiveLayer is not { } layer || sel.W <= 0 || sel.H <= 0) return;
         var target = layer.Pixels;
         int w = layer.Width, h = layer.Height;
         var before = SnapshotAllTiles(target, w, h);
-        var mask = _doc?.SelectionMask;
-        int mw = _doc?.Width ?? w;
-        for (int y = Math.Max(0, sel.Y); y < Math.Min(h, sel.Bottom); y++)
-        for (int x = Math.Max(0, sel.X); x < Math.Min(w, sel.Right); x++)
+        var mask = doc.SelectionMask;
+        int mw = doc.Width, ox = layer.OffsetX, oy = layer.OffsetY;
+        // iterate the selection in DOC space (clamped to the doc); map each doc pixel into the layer's
+        // own buffer via the offset, skip pixels outside the layer's bounds.
+        int xs = Math.Max(0, sel.X), xe = Math.Min(doc.Width, sel.Right);
+        int ys = Math.Max(0, sel.Y), ye = Math.Min(doc.Height, sel.Bottom);
+        for (int dy = ys; dy < ye; dy++)
+        for (int dx = xs; dx < xe; dx++)
         {
-            int cov = mask is null ? 255 : mask[y * mw + x];
+            int bx = dx - ox, by = dy - oy;
+            if ((uint)bx >= (uint)w || (uint)by >= (uint)h) continue;   // outside this layer
+            int cov = mask is null ? 255 : mask[dy * mw + dx];
             if (cov == 0) continue;
-            int i = (y * w + x) * 4;
+            int i = (by * w + bx) * 4;
             if (cov >= 255) { target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0; }
             else target[i + 3] = (byte)(target[i + 3] * (255 - cov) / 255);   // feathered: erase alpha ∝ coverage
         }
         var after = SnapshotAllTiles(target, w, h);
         layer.MarkTilesDirty(after.Keys);
-        CommandProduced?.Invoke(new PaintRasterCommand(target, w, h, before, after, t => layer.MarkTilesDirty(t)));
+        CommandProduced?.Invoke(new PaintRasterCommand(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
     }
 
     /// <summary>Copy the selected region of the active layer (or the whole layer if no selection) → RGBA8 region.</summary>
@@ -1196,18 +1247,24 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         if (_doc is null || ActiveLayer is not { } layer) return null;
         if (_doc.Selection is { } sel && sel.W > 0 && sel.H > 0)
         {
+            // region = selection clamped to the DOCUMENT; the layer's pixels are read via its offset,
+            // pixels outside the layer's bounds copy out transparent.
             var mask = _doc.SelectionMask; int mw = _doc.Width;
             int x0 = Math.Max(0, sel.X), y0 = Math.Max(0, sel.Y);
-            int x1 = Math.Min(layer.Width, sel.Right), y1 = Math.Min(layer.Height, sel.Bottom);
+            int x1 = Math.Min(_doc.Width, sel.Right), y1 = Math.Min(_doc.Height, sel.Bottom);
             int w = x1 - x0, h = y1 - y0;
             if (w <= 0 || h <= 0) return null;
+            int lw = layer.Width, lh = layer.Height, ox = layer.OffsetX, oy = layer.OffsetY;
             var src = layer.Pixels; var outp = new byte[w * h * 4];
             for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
-                int si = ((y0 + y) * layer.Width + (x0 + x)) * 4;
+                int dx = x0 + x, dy = y0 + y;
                 int di = (y * w + x) * 4;
-                byte cov = mask is not null ? mask[(y0 + y) * mw + (x0 + x)] : (byte)255;
+                int bx = dx - ox, by = dy - oy;
+                if ((uint)bx >= (uint)lw || (uint)by >= (uint)lh) continue;   // outside layer → transparent
+                int si = (by * lw + bx) * 4;
+                byte cov = mask is not null ? mask[dy * mw + dx] : (byte)255;
                 outp[di] = src[si]; outp[di + 1] = src[si + 1]; outp[di + 2] = src[si + 2];
                 outp[di + 3] = (byte)(src[si + 3] * cov / 255);
             }
