@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Sable.Canvas.Platform;
 using Sable.Core.Ai;
+using Sable.Engine;
 using Silk.NET.WebGPU;
 
 namespace Sable.Canvas;
@@ -102,8 +103,14 @@ public sealed unsafe partial class GpuSurfaceControl
 
         _previewCov = ObjectToDocCoverage(obj);
         _previewVer++;
-        bool shift = mods.HasFlag(CanvasMods.Shift), alt = mods.HasFlag(CanvasMods.Alt);
-        _previewMode = alt ? 3f : shift ? 2f : 1f;   // red subtract / green add / blue replace
+        // preview colour must match the SAME combine op the click will apply (incl. Shift+Alt = intersect)
+        _previewMode = SelModeFrom(mods) switch
+        {
+            SelMode.Add => 2f,        // green
+            SelMode.Subtract => 3f,   // red
+            SelMode.Intersect => 4f,  // yellow
+            _ => 1f                   // blue (replace)
+        };
     }
 
     /// <summary>Click: commit the hovered object to the selection (replace/add/subtract per modifiers).</summary>

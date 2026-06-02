@@ -49,8 +49,9 @@ public sealed partial class DocumentViewModel : ObservableObject
     public void RestoreSnapshot(int index)
     {
         if (index < 0 || index >= Snapshots.Count) return;
-        var copy = Snapshots[index].Layers.Select(l => l.Clone()).ToList();
-        Undo.Execute(new Sable.Engine.Commands.RestoreSnapshotCommand(Model, copy));
+        // pass the stored snapshot directly — RestoreSnapshotCommand.Apply clones from it on each
+        // do/redo, so it stays pristine (no redundant pre-clone here).
+        Undo.Execute(new Sable.Engine.Commands.RestoreSnapshotCommand(Model, Snapshots[index].Layers));
     }
 
     public DocumentViewModel(Document model)

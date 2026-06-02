@@ -21,6 +21,11 @@ public static class Homography
         double[] qy = { 0, 0, height, height };
 
         var h = Solve(px, py, qx, qy);   // h0..h7 (h8 = 1)
+        // degenerate quad (e.g. 3 collinear corners) → near-singular top 2×2; fall back to identity so the
+        // layer renders at its natural rect instead of collapsing to a point.
+        double det = h[0] * h[4] - h[1] * h[3];
+        if (System.Math.Abs(det) < 1e-9 || double.IsNaN(det))
+            return (new[] { 1f, 0f, 0f, 1f, 0f, 0f }, new[] { 0f, 0f, 1f });
         var inv6 = new[] { (float)h[0], (float)h[1], (float)h[3], (float)h[4], (float)h[2], (float)h[5] };
         var perspRow = new[] { (float)h[6], (float)h[7], 1f };
         return (inv6, perspRow);

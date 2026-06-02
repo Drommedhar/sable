@@ -169,12 +169,12 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
 
         _zoom = Math.Clamp(_zoom * factor, 0.05, 64.0);
 
-        double dw = _doc?.Width ?? 1, dh = _doc?.Height ?? 1;
-        float fit = Math.Min(_width / (float)dw, _height / (float)dh);
-        double newScale = fit * _zoom;
-        // solve pan so (docX,docY) maps back to (sx,sy)
-        _panX = sx - docX * newScale - (_width - dw * newScale) / 2.0;
-        _panY = sy - docY * newScale - (_height - dh * newScale) / 2.0;
+        // derive the new scale + centring from the SAME ViewportTransform.Fit (no hand-rolled fit that
+        // could diverge): a pan-0 viewport gives pure centring; then solve pan so (docX,docY) → (sx,sy).
+        _panX = 0; _panY = 0;
+        var bas = ComputeViewport();
+        _panX = sx - docX * bas.Scale - bas.Ox;
+        _panY = sy - docY * bas.Scale - bas.Oy;
         ViewChanged?.Invoke();
     }
 
@@ -609,13 +609,14 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.GridColR = _gridR; ov.GridColG = _gridG; ov.GridColB = _gridB;
             ov.QuickMaskColR = _qmR; ov.QuickMaskColG = _qmG; ov.QuickMaskColB = _qmB;
         }
+        // reuse cached arrays — only reallocate when a list's length changes (rare), no per-frame GC churn
         if (_doc is { } gd)
         {
-            if (gd.GuidesX.Count > 0) ov.GuidesX = gd.GuidesX.ToArray();
-            if (gd.GuidesY.Count > 0) ov.GuidesY = gd.GuidesY.ToArray();
+            if (gd.GuidesX.Count > 0) ov.GuidesX = SyncArr(gd.GuidesX, ref _guidesXArr);
+            if (gd.GuidesY.Count > 0) ov.GuidesY = SyncArr(gd.GuidesY, ref _guidesYArr);
         }
-        if (_smartX.Count > 0) ov.SmartX = _smartX.ToArray();
-        if (_smartY.Count > 0) ov.SmartY = _smartY.ToArray();
+        if (_smartX.Count > 0) ov.SmartX = SyncArr(_smartX, ref _smartXArr);
+        if (_smartY.Count > 0) ov.SmartY = SyncArr(_smartY, ref _smartYArr);
         if (PenActive) BuildPenOverlay(ref ov);
         else if (ActiveTool == Sable.Tools.ToolKind.Node && SelLayer is Sable.Engine.Layers.PathLayer np) BuildNodeOverlay(ref ov, np);
         else if (MeshActive) BuildMeshOverlay(ref ov);
@@ -633,5 +634,18 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
 
         api.TextureViewRelease(view);
         api.TextureRelease(st.Texture);
+    }
+
+    // overlay array caches (guides/smart) — copied in place each frame, reallocated only on length change
+    private float[] _guidesXArr = System.Array.Empty<float>();
+    private float[] _guidesYArr = System.Array.Empty<float>();
+    private float[] _smartXArr = System.Array.Empty<float>();
+    private float[] _smartYArr = System.Array.Empty<float>();
+
+    private static float[] SyncArr(System.Collections.Generic.List<float> src, ref float[] cache)
+    {
+        if (cache.Length != src.Count) cache = new float[src.Count];
+        for (int i = 0; i < src.Count; i++) cache[i] = src[i];
+        return cache;
     }
 }

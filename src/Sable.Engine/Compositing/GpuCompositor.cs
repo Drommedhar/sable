@@ -66,6 +66,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     private ComputePipeline* _stampPipeline;
     private BindGroupLayout* _stampBgl;
     private Buffer* _stampParamsBuf;
+    private Buffer* _stampDimsBuf;   // stamp's own dims (so it never clobbers the shared blend _dimsBuf)
     private Buffer* _dimsBuf;
     private Buffer* _paramsBuf;
     private Buffer* _adjParamsBuf;
@@ -142,6 +143,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         _stampParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _stampDimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
         _fxParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
         _filterParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
 
@@ -648,11 +650,13 @@ public sealed unsafe class GpuCompositor : IDisposable
             }
             else if (layer is AdjustmentLayer adj)
             {
-                var prm = stackalloc uint[16];   // 64B: kind + opacity + p0..p11 + 2 pad
+                var prm = stackalloc uint[16];   // 64B: kind + opacity + p0..p11 + fillOpacity + clip
                 prm[0] = (uint)adj.Kind;
                 *(float*)(prm + 1) = adj.Opacity;
                 var p = new Span<float>((float*)(prm + 2), 12);
                 adj.PackParams(p);
+                *(float*)(prm + 14) = adj.FillOpacity;
+                *(float*)(prm + 15) = adj.ClipToBelow ? 1f : 0f;   // backdrop-alpha clip (approx of per-layer clip)
                 api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 64);
                 if (adj.Kind == AdjustmentKind.Curves)
                 {
@@ -667,8 +671,9 @@ public sealed unsafe class GpuCompositor : IDisposable
             else if (layer is FilterLayer flt)
             {
                 RenderFilter(flt, current, _fxTint);   // filtered backdrop → _fxTint
-                // blend the filtered result back over the backdrop with the layer's opacity + mask
-                BlendBufferInto(ref current, ref other, _fxTint, BlendMode.Normal, layer.Opacity, 0f, 0f, maskBuf);
+                // blend the filtered result back over the backdrop with opacity + mask + fill + clip
+                BlendBufferInto(ref current, ref other, _fxTint, BlendMode.Normal, layer.Opacity, 0f, 0f, maskBuf,
+                    layer.FillOpacity, layer.ClipToBelow ? 1f : 0f);
             }
         }
     }
@@ -689,6 +694,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         prm[12] = perspRow.Length == 3 ? perspRow[1] : 0f;   // h7
         prm[13] = perspRow.Length == 3 ? perspRow[2] : 1f;   // h8
         ((uint*)prm)[14] = srcMode;                          // 0 = contiguous src, 1 = tiled atlas
+        prm[15] = 0f;                                        // zero the trailing pad (don't ship uninit stack to the GPU)
         _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 64);
     }
 
@@ -719,10 +725,10 @@ public sealed unsafe class GpuCompositor : IDisposable
     // blend an arbitrary doc-space sprite onto the accumulator with explicit blend/opacity
     // and a pixel offset (sample sprite at doc-offset). Used for layer-effect sprites.
     private void BlendBufferInto(ref Buffer* current, ref Buffer* other, Buffer* src,
-        BlendMode mode, float opacity, float offX, float offY, Buffer* maskBuf)
+        BlendMode mode, float opacity, float offX, float offY, Buffer* maskBuf, float fill = 1f, float clip = 0f)
     {
         Span<float> inv = stackalloc float[6] { 1, 0, 0, 1, -offX, -offY };
-        WriteBlendParams((uint)mode, opacity, 0f, inv, 1f, maskBuf is not null);
+        WriteBlendParams((uint)mode, opacity, clip, inv, fill, maskBuf is not null);
         DispatchBlend(current, src, other, maskBuf, _width, _height);   // doc-space sprite
         var tmp = current; current = other; other = tmp;
     }
@@ -920,8 +926,9 @@ public sealed unsafe class GpuCompositor : IDisposable
     {
         var api = _gpu.Api;
         // the stamp shader indexes by dims.width/height → set them to the layer buffer size
+        // (own buffer, not the shared _dimsBuf, so an interleaved present/blur can't be corrupted)
         var dimsv = stackalloc uint[4] { (uint)lw, (uint)lh, 0, 0 };
-        api.QueueWriteBuffer(_gpu.Queue, _dimsBuf, 0, dimsv, 16);
+        api.QueueWriteBuffer(_gpu.Queue, _stampDimsBuf, 0, dimsv, 16);
         ulong bytes = (ulong)lw * (ulong)lh * 4;
         var prm = stackalloc float[12]
         {
@@ -932,7 +939,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.QueueWriteBuffer(_gpu.Queue, _stampParamsBuf, 0, prm, 48);
 
         var bg = stackalloc BindGroupEntry[4];
-        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
+        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _stampDimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _stampParamsBuf, Size = 48 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = buf, Size = bytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = src, Size = bytes };
@@ -1144,7 +1151,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         var cmdDesc = new CommandBufferDescriptor();
         var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);
         api.QueueSubmit(_gpu.Queue, 1, &cmd);
-        _gpu.Poll(wait: true);
+        // No blocking Poll here: the swapchain blit that samples _compositeView is queued AFTER this on
+        // the same queue (ordering guaranteed), and the export readback path does its own wait-poll. A
+        // wait here was a full GPU stall on the render thread every on-screen composite.
 
         api.ComputePassEncoderRelease(pass);
         api.CommandEncoderRelease(encoder);
@@ -1465,6 +1474,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_dummyStore is not null) api.BufferRelease(_dummyStore);
         if (_tileTableBuf is not null) api.BufferRelease(_tileTableBuf);
         ReleaseSizeResources();
+        if (_stampDimsBuf is not null) api.BufferRelease(_stampDimsBuf);
         if (_dimsBuf is not null) api.BufferRelease(_dimsBuf);
         if (_paramsBuf is not null) api.BufferRelease(_paramsBuf);
         if (_adjParamsBuf is not null) api.BufferRelease(_adjParamsBuf);

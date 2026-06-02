@@ -98,22 +98,30 @@ public sealed class ModelDownloader
         var dest = Path.Combine(dir, fileName);
         var tmp = dest + ".part";
 
-        using (var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
+        try
         {
-            resp.EnsureSuccessStatusCode();
-            long total = resp.Content.Headers.ContentLength ?? -1;
-            await using var srcStream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
-            var buf = new byte[1 << 16];
-            long read = 0; int n;
-            while ((n = await srcStream.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
+            using (var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
             {
-                await fs.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
-                read += n;
-                if (total > 0) progress?.Report((double)read / total);
+                resp.EnsureSuccessStatusCode();
+                long total = resp.Content.Headers.ContentLength ?? -1;
+                await using var srcStream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
+                var buf = new byte[1 << 16];
+                long read = 0; int n;
+                while ((n = await srcStream.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
+                {
+                    await fs.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
+                    read += n;
+                    if (total > 0) progress?.Report((double)read / total);
+                }
             }
+            File.Move(tmp, dest, overwrite: true);
         }
-        File.Move(tmp, dest, overwrite: true);
+        catch
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best-effort */ }   // don't orphan the .part on cancel/failure
+            throw;
+        }
 
         // many model releases ship the .onnx inside a .zip — extract + locate it
         if (dest.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))

@@ -1670,11 +1670,16 @@ public partial class MainWindow : Window
         SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.PolyLasso or ToolKind.MagicWand or ToolKind.ColorRange;
         TypeOpts.IsVisible = k == ToolKind.Type;
         EyedropperOpts.IsVisible = k == ToolKind.Eyedropper;
+        // Flow only applies to the paint/clone brushes — not liquify/retouch (Smudge etc.) which ignore it
+        if (FlowOpts is not null)
+            FlowOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
+                                  or ToolKind.CloneStamp or ToolKind.Heal or ToolKind.SpotHeal;
         MaskHint.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        if (e.Handled) return;            // the tunnel OnGlobalKeyDown already consumed it (keymap / Delete / Enter / Escape)
         if (Canvas.TextEditing) return;   // skip tool shortcuts; chars handled by OnTextInput
         if (IsTypingInTextField()) { base.OnKeyDown(e); return; }   // don't cycle tools while typing in a field
         const double step = 40;
@@ -1705,8 +1710,7 @@ public partial class MainWindow : Window
             case Key.D when e.KeyModifiers == KeyModifiers.None: Canvas.ResetColors(); UpdateSwatchFills(); break;  // reset fg/bg
             case Key.Q: Canvas.ToggleQuickMask(); break;   // quick mask (paint the selection as rubylith)
             case Key.K: Canvas.PaintMask = !Canvas.PaintMask; break;   // edit layer mask
-            case Key.Escape: Canvas.Deselect(); break;
-            case Key.Delete or Key.Back: Canvas.DeleteSelection(); break;
+            // Delete / Enter / Escape are owned by the tunnel OnGlobalKeyDown (richer pen/mesh/quickmask logic)
             case Key.Left: Canvas.PanBy(step, 0); break;
             case Key.Right: Canvas.PanBy(-step, 0); break;
             case Key.Up: Canvas.PanBy(0, step); break;

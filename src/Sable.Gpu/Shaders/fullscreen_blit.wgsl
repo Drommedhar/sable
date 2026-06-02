@@ -31,7 +31,7 @@ struct Viewport {
     smartR: f32, smartG: f32, smartB: f32,                 // smart-guide alignment lines
     gridR: f32, gridG: f32, gridB: f32,                    // document/pixel grid
     qmR: f32, qmG: f32, qmB: f32,                          // quick-mask (rubylith) fill
-    previewMode: f32,                                      // AI hover-select: 0 off, 1 blue(replace), 2 green(add), 3 red(subtract)
+    previewMode: f32,                                      // AI hover-select: 0 off, 1 blue(replace), 2 green(add), 3 red(subtract), 4 yellow(intersect)
     loupeOn: f32,                                          // eyedropper loupe (circular magnifier)
     loupeCx: f32, loupeCy: f32, loupeR: f32,               // loupe centre + radius (surface px)
     loupeDocX: f32, loupeDocY: f32, loupeZoom: f32,        // sample centre (doc px) + magnification (surface px per doc px)
@@ -82,7 +82,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // flat pasteboard (themed) outside the document; checker only inside (shows transparency)
     var outc = vec3<f32>(vp.pasteR, vp.pasteG, vp.pasteB);
     if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
-        let bg = checker(frag.xy);
+        let bg = checker(vec2<f32>(docX, docY));   // doc-anchored so it doesn't swim under the image when panning
         let col = textureSample(tex, samp, vec2<f32>(u, v));
         outc = col.rgb * col.a + bg * (1.0 - col.a);
     }
@@ -192,7 +192,8 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             let on = ((i32(floor((frag.x + frag.y) / 9.0))) & 1) == 0;
             if (on) {
                 var col = vec3<f32>(0.12, 0.5, 1.0);                         // blue (replace)
-                if (vp.previewMode > 2.5) { col = vec3<f32>(1.0, 0.25, 0.3); }      // red (subtract)
+                if (vp.previewMode > 3.5) { col = vec3<f32>(0.95, 0.85, 0.2); }     // yellow (intersect)
+                else if (vp.previewMode > 2.5) { col = vec3<f32>(1.0, 0.25, 0.3); } // red (subtract)
                 else if (vp.previewMode > 1.5) { col = vec3<f32>(0.2, 0.9, 0.3); }  // green (add)
                 outc = mix(outc, col, 0.6);
             }

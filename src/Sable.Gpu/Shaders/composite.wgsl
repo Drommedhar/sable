@@ -91,7 +91,7 @@ fn each(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
 }
 
 // --- non-separable (W3C) helpers ---
-fn lum(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.3, 0.59, 0.11)); }
+fn lum(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.299, 0.587, 0.114)); }
 fn clipColor(c: vec3<f32>) -> vec3<f32> {
     let l = lum(c);
     let n = min(min(c.x, c.y), c.z);
@@ -129,7 +129,7 @@ fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
         case 14u: { return each(cb, cs, 14u); }                        // VividLight
         case 15u: { return clamp(cb + 2.0 * cs - 1.0, vec3<f32>(0.0), vec3<f32>(1.0)); } // LinearLight
         case 16u: { return each(cb, cs, 16u); }                        // PinLight
-        case 17u: { return floor(clamp(cb + cs, vec3<f32>(0.0), vec3<f32>(1.0)) + vec3<f32>(0.0001)); } // HardMix (approx)
+        case 17u: { return step(vec3<f32>(0.5), each(cb, cs, 14u)); } // HardMix = threshold(VividLight) at 0.5 (true PS)
         case 18u: { return abs(cb - cs); }                             // Difference
         case 19u: { return cb + cs - 2.0 * cb * cs; }                  // Exclusion
         case 20u: { return max(cb - cs, vec3<f32>(0.0)); }             // Subtract
@@ -176,7 +176,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // affine layers pass h6=h7=0,h8=1 → w=1 (no perspective divide).
     let dx = f32(gid.x); let dy = f32(gid.y);
     let w = params.h6 * dx + params.h7 * dy + params.h8;
-    let iw = select(1.0, 1.0 / w, abs(w) > 1e-6);
+    let valid = w > 1e-6;                              // w<=0 = at/behind the perspective horizon
+    let iw = select(0.0, 1.0 / w, valid);
     let lx = (params.m00 * dx + params.m01 * dy + params.b0) * iw;
     let ly = (params.m10 * dx + params.m11 * dy + params.b1) * iw;
     let x0 = i32(floor(lx)); let y0 = i32(floor(ly));
@@ -190,7 +191,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let da = d.w;
     let clipMul = mix(1.0, da, params.clip); // clip to backdrop alpha when clip=1
-    let sa = s.w * params.opacity * params.fillOpacity * m * clipMul;   // effective source alpha
+    let validF = select(0.0, 1.0, valid);    // beyond the horizon → fully transparent (no smeared sample)
+    let sa = s.w * params.opacity * params.fillOpacity * m * clipMul * validF;   // effective source alpha
 
     // blended color, then where backdrop is opaque use blended, else raw source
     let b = blend(d.xyz, s.xyz, params.mode);

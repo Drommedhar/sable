@@ -156,8 +156,8 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     {
         var api = _gpu.Api;
 
-        // 52 floats / 208 bytes: viewport, rect, gizmo, brush, maskOn[35], gradient[36..40],
-        // cropOn[41], shape[42..47], clone-source marker[48..50]
+        // VpFloats (80) floats / 320 bytes: viewport, rect, gizmo, brush, maskOn, gradient, cropOn,
+        // shape, clone-source marker, overlay colours, preview mode — see the Viewport struct in fullscreen_blit.wgsl
         var u = stackalloc float[VpFloats];
         bool hasPaste = ov.PasteR > 0 || ov.PasteG > 0 || ov.PasteB > 0;
         u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = hasPaste ? ov.PasteR : 0.16f;

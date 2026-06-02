@@ -18,7 +18,7 @@ struct Adj {
     kind: u32, opacity: f32,
     p0: f32, p1: f32, p2: f32, p3: f32, p4: f32, p5: f32,
     p6: f32, p7: f32, p8: f32, p9: f32, p10: f32, p11: f32,
-    _pad0: f32, _pad1: f32,
+    fillOpacity: f32, clip: f32,   // fill scales strength; clip=1 → only where backdrop is opaque
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -171,6 +171,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    let outRGB = mix(c.xyz, rgb, adj.opacity * m);
+    let strength = adj.opacity * adj.fillOpacity * m * mix(1.0, c.w, adj.clip);
+    let outRGB = mix(c.xyz, rgb, strength);
     outp[idx] = pack(vec4<f32>(outRGB, c.w));
 }

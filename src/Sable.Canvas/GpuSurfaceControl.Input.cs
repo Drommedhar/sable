@@ -27,7 +27,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private PixelLayer? _strokeLayer;          // active pixel-paint layer (null for mask paint)
     private RasterState _strokeBefore;         // pre-stroke raster snapshot (whole-raster undo + auto-crop)
     private bool _panningMouse;
-    private int _lastPanX, _lastPanY;
+    private double _lastPanX, _lastPanY;   // keep fractional surface coords (no per-move truncation drift)
     private bool _moving;
     private double _moveStartX, _moveStartY;
     private int _moveOrigX, _moveOrigY;
@@ -84,7 +84,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _xfEdgeNx, _xfEdgeNy, _xfEdgeStartHalf;   // outward unit normal (surface) + start half-extent
 
     /// <summary>The active PIXEL layer for paint (brush/fill/eyedropper). Null if a non-pixel layer is selected.</summary>
-    public PixelLayer? ActiveLayer { get; set; }
+    private PixelLayer? _activeLayer;
+    public PixelLayer? ActiveLayer
+    {
+        get => _activeLayer;
+        set
+        {
+            if (ReferenceEquals(_activeLayer, value)) return;
+            _activeLayer = value;
+            _cloneSet = false;   // clone/heal source belongs to the previous layer
+        }
+    }
 
     /// <summary>The selected layer of ANY type — drives Move + the bounds overlay (pixel, shape, group, …).</summary>
     public Layer? SelLayer { get; set; }
@@ -269,7 +279,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     void ICanvasInputSink.Wheel(double sx, double sy, int delta, CanvasMods mods)
     {
-        _lastMouseX = sx; _lastMouseY = sy;
+        _lastMouseX = sx; _lastMouseY = sy; _lastMods = mods;
         ZoomAt(delta > 0 ? 1.1 : 1.0 / 1.1, sx, sy);
     }
 
@@ -422,7 +432,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_panningMouse)
         {
             PanBy(sx - _lastPanX, sy - _lastPanY);
-            _lastPanX = (int)sx; _lastPanY = (int)sy;
+            _lastPanX = sx; _lastPanY = sy;
         }
     }
 
@@ -430,19 +440,23 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private SelMode _selMode = SelMode.Replace;
     private byte[]? _baseSelMask;   // existing selection snapshot at gesture start (for combine)
 
-    /// <summary>Read the combine mode from modifiers and snapshot the current selection.</summary>
-    private void CaptureSelMode(CanvasMods mods)
-    {
-        bool shift = mods.HasFlag(CanvasMods.Shift), alt = mods.HasFlag(CanvasMods.Alt);
-        _selMode = (shift, alt) switch
+    private static SelMode SelModeFrom(CanvasMods mods)
+        => (mods.HasFlag(CanvasMods.Shift), mods.HasFlag(CanvasMods.Alt)) switch
         {
             (true, true) => SelMode.Intersect,
             (true, false) => SelMode.Add,
             (false, true) => SelMode.Subtract,
             _ => SelMode.Replace
         };
+
+    /// <summary>Read the combine mode from modifiers and snapshot the current selection.</summary>
+    private void CaptureSelMode(CanvasMods mods)
+    {
+        _selMode = SelModeFrom(mods);
         _baseSelMask = _selMode == SelMode.Replace ? null : _doc?.SnapshotSelectionMask();
     }
+
+    private byte[]? _polyBase;   // selection before a polygonal-lasso started (combine mode read on the closing click)
 
     /// <summary>Edge softness (px) applied to a selection; 0 = hard edge. Set from the options bar.</summary>
     public float SelectionFeather { get; set; }
@@ -802,10 +816,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             case ToolKind.PolyLasso:
                 if (_doc is not null)
                 {
-                    if (_polyPts.Count == 0) CaptureSelMode(mods);   // capture combine mode on the first vertex
+                    if (_polyPts.Count == 0) _polyBase = _doc.SnapshotSelectionMask();   // remember the pre-poly selection
                     double cth = 8.0 / Math.Max(0.0001, EffectiveScale);
                     if (_polyPts.Count >= 3 && Math.Abs(dx - _polyPts[0].X) <= cth && Math.Abs(dy - _polyPts[0].Y) <= cth)
                     {
+                        // combine mode comes from the CLOSING click's modifiers (natural habit)
+                        _selMode = SelModeFrom(mods);
+                        _baseSelMask = _selMode == SelMode.Replace ? null : _polyBase;
                         CommitPolyLasso();   // clicked back on the first vertex → close
                         break;
                     }
@@ -1083,9 +1100,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 {
                     Filled = Shape.Filled && !lineish,
                     Stroked = Shape.StrokeOn || lineish,
-                    StrokeR = lineish ? Brush.R : Shape.StrokeR,
-                    StrokeG = lineish ? Brush.G : Shape.StrokeG,
-                    StrokeB = lineish ? Brush.B : Shape.StrokeB,
+                    // stroke colour defaults to the foreground (not black) — per-layer override via the Shape panel
+                    StrokeR = Brush.R, StrokeG = Brush.G, StrokeB = Brush.B,
                     StrokeWidth = Shape.StrokeWidth,
                     DashOn = Shape.DashOn, DashLen = Shape.DashLen, GapLen = Shape.GapLen,
                     CornerRadius = Shape.CornerRadius, Sides = Shape.Sides, InnerRatio = Shape.InnerRatio,
@@ -1139,6 +1155,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             _panningMouse = false;
             _input?.ReleaseCapture();
         }
+        else _input?.ReleaseCapture();   // safety net: no gesture branch fired (or a leaked capture) → release
     }
 
     /// <summary>
@@ -1492,8 +1509,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private void StartPan(double sx, double sy)
     {
-        _lastPanX = (int)sx;
-        _lastPanY = (int)sy;
+        _lastPanX = sx;
+        _lastPanY = sy;
         _panningMouse = true;
         _input?.Capture();
     }

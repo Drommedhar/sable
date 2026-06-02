@@ -49,8 +49,10 @@ public partial class BusyWindow : Window
 
     public void SetMessage(string message) => Dispatcher.UIThread.Post(() => { if (!_closed) MessageText.Text = message; });
 
+    private IProgress<double>? _progress;
+
     /// <summary>An <see cref="IProgress{T}"/> that drives the bar 0..1 (switches it to determinate).</summary>
-    public IProgress<double> Progress => new Progress<double>(p => Dispatcher.UIThread.Post(() =>
+    public IProgress<double> Progress => _progress ??= new Progress<double>(p => Dispatcher.UIThread.Post(() =>
     {
         if (_closed) return;
         Bar.IsIndeterminate = false;

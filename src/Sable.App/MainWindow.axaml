@@ -204,12 +204,14 @@
                             ValueChanged="OnBrushHardnessChanged" VerticalAlignment="Center" />
                     <TextBlock x:Name="BrushHardnessLabel" Text="50%" Foreground="{DynamicResource ChromeTextDim}"
                                VerticalAlignment="Center" FontSize="11" Width="36" />
-                    <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
-                    <TextBlock Text="{loc:Loc mainWindow.flow}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
-                    <Slider x:Name="BrushFlowSlider" Width="90" Minimum="1" Maximum="100" Value="100"
-                            ValueChanged="OnBrushFlowChanged" VerticalAlignment="Center" />
-                    <TextBlock x:Name="BrushFlowLabel" Text="100%" Foreground="{DynamicResource ChromeTextDim}"
-                               VerticalAlignment="Center" FontSize="11" Width="36" />
+                    <StackPanel x:Name="FlowOpts" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
+                        <TextBlock Text="{loc:Loc mainWindow.flow}" Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" FontSize="11" />
+                        <Slider x:Name="BrushFlowSlider" Width="90" Minimum="1" Maximum="100" Value="100"
+                                ValueChanged="OnBrushFlowChanged" VerticalAlignment="Center" />
+                        <TextBlock x:Name="BrushFlowLabel" Text="100%" Foreground="{DynamicResource ChromeTextDim}"
+                                   VerticalAlignment="Center" FontSize="11" Width="36" />
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- retouch brushes: effect strength -->

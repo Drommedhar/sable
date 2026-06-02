@@ -97,6 +97,7 @@ public sealed unsafe partial class GpuSurfaceControl
 
     public void CancelMeshWarp()
     {
+        if (_meshDragIdx >= 0) _input?.ReleaseCapture();   // mid point-drag → release the captured pointer
         _meshSrc = null; _meshDst = null; _meshLayer = null; _meshDragIdx = -1;
     }
 
