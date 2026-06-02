@@ -533,9 +533,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.ShX0 = (float)_shapeStartSx; ov.ShY0 = (float)_shapeStartSy;
             ov.ShX1 = (float)_shapeEndSx; ov.ShY1 = (float)_shapeEndSy;
         }
-        // Move (and Transform on a non-pixel layer = move-only): tight content bounds of the selected layer of ANY type
-        if ((ActiveTool == Sable.Tools.ToolKind.Move
-                || (ActiveTool == Sable.Tools.ToolKind.Transform && ActiveLayer is null))
+        // Move tool on a NON-pixel layer (move-only): show the content-bounds rect
+        if (ActiveTool == Sable.Tools.ToolKind.Move && ActiveLayer is null
             && !ov.RectOn && SelLayer is { } sl && _doc is { } md)
         {
             var (bx, by, bw, bh) = sl.ContentBounds(md.Width, md.Height);
@@ -544,7 +543,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         }
         if (ActiveLayer is { } l)
         {
-            if (ActiveTool == Sable.Tools.ToolKind.Transform)
+            if (ActiveTool == Sable.Tools.ToolKind.Move)   // Move = unified Move/Transform: full gizmo on a pixel layer
             {
                 ov.GizmoOn = true;
                 ov.Corners = CornersSurface(l);

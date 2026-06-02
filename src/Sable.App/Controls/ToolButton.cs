@@ -20,13 +20,19 @@ public sealed class ToolButton : Button
     public static readonly StyledProperty<double> IconSizeProperty =
         AvaloniaProperty.Register<ToolButton, double>(nameof(IconSize), 24);
 
+    /// <summary>Affinity-style corner mark: a small triangle in the bottom-right when the button's tool group holds more tools.</summary>
+    public static readonly StyledProperty<bool> HasMoreProperty =
+        AvaloniaProperty.Register<ToolButton, bool>(nameof(HasMore));
+
     public string? Icon { get => GetValue(IconProperty); set => SetValue(IconProperty, value); }
     public double IconSize { get => GetValue(IconSizeProperty); set => SetValue(IconSizeProperty, value); }
+    public bool HasMore { get => GetValue(HasMoreProperty); set => SetValue(HasMoreProperty, value); }
 
     static ToolButton()
     {
         IconProperty.Changed.AddClassHandler<ToolButton>((b, _) => b.Rebuild());
         IconSizeProperty.Changed.AddClassHandler<ToolButton>((b, _) => b.Rebuild());
+        HasMoreProperty.Changed.AddClassHandler<ToolButton>((b, _) => b.Rebuild());
     }
 
     public ToolButton() => Rebuild();
@@ -38,7 +44,7 @@ public sealed class ToolButton : Button
         // 24×24 = the shared Lucide frame; the Viewbox scales it uniformly to IconSize and centres it
         var frame = new Avalonia.Controls.Canvas { Width = 24, Height = 24 };
         frame.Children.Add(path);
-        Content = new Viewbox
+        var icon = new Viewbox
         {
             Width = IconSize,
             Height = IconSize,
@@ -47,5 +53,20 @@ public sealed class ToolButton : Button
             VerticalAlignment = VerticalAlignment.Center,
             Child = frame,
         };
+
+        if (!HasMore) { Content = icon; return; }
+
+        // small filled triangle in the bottom-right corner (more-tools indicator)
+        var marker = new Avalonia.Controls.Shapes.Path
+        {
+            Data = Geometry.Parse("M 0 5 L 5 5 L 5 0 Z"),
+            Stretch = Stretch.None,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 2, 2),
+            IsHitTestVisible = false,
+        };
+        marker.Bind(Avalonia.Controls.Shapes.Shape.FillProperty, this.GetResourceObservable("ChromeTextDim"));
+        Content = new Grid { Children = { icon, marker } };
     }
 }

@@ -1354,7 +1354,6 @@ public partial class MainWindow : Window
     private void WireTools()
     {
         const string move   = "M12 2v20 M2 12h20 M5 9l-3 3 3 3 M9 5l3-3 3 3 M19 9l3 3-3 3 M9 19l3 3 3-3";
-        const string xform  = "M22 6H2 M22 18H2 M6 2v20 M18 2v20";
         const string rect   = "M5 3a2 2 0 0 0-2 2 M19 3a2 2 0 0 1 2 2 M21 19a2 2 0 0 1-2 2 M5 21a2 2 0 0 1-2-2 M9 3h1 M9 21h1 M14 3h1 M14 21h1 M3 9v1 M21 9v1 M3 14v1 M21 14v1";
         const string ellip  = "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z";
         const string lasso  = "M7 22a5 5 0 0 1-2-4 M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1 M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z";
@@ -1395,8 +1394,7 @@ public partial class MainWindow : Window
 
         var defs = new (string letter, ToolDef[] tools)[]
         {
-            ("V", new[] { new ToolDef(move, "Move", Sable.Tools.ToolKind.Move),
-                          new ToolDef(xform, "Transform", Sable.Tools.ToolKind.Transform) }),
+            ("V", new[] { new ToolDef(move, "Move", Sable.Tools.ToolKind.Move) }),   // unified Move + Transform
             ("M", new[] { new ToolDef(rect, "Rectangle Marquee", Sable.Tools.ToolKind.Marquee),
                           new ToolDef(ellip, "Elliptical Marquee", Sable.Tools.ToolKind.EllipseMarquee) }),
             ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso),
@@ -1440,7 +1438,7 @@ public partial class MainWindow : Window
         foreach (var (letter, tools) in defs)
         {
             var g = new ToolGroup { Letter = letter, Tools = tools };
-            var btn = new ToolButton { Classes = { "tool" }, Icon = tools[0].Icon, Tag = g };
+            var btn = new ToolButton { Classes = { "tool" }, Icon = tools[0].Icon, Tag = g, HasMore = tools.Length > 1 };
             btn.Click += (_, _) => Canvas.ActiveTool = g.Tools[g.Current].Kind;
 
             var tip = $"{tools[0].Name} ({letter})";
@@ -1611,8 +1609,8 @@ public partial class MainWindow : Window
     // Affinity-style status-bar hints: what drag/click/modifiers do for the active tool.
     private static string ToolHintFor(ToolKind k) => k switch
     {
-        ToolKind.Move => "Drag to move the layer. Shift constrains to an axis. Use the Layers panel to pick a layer.",
-        ToolKind.Transform => "Drag corners to scale, edges for one axis, outside to rotate. Ctrl-drag a corner = perspective/distort.",
+        ToolKind.Move => "Drag to move (Shift = axis). Handles scale (Shift = free, Ctrl = from centre). Top handle rotates (Shift = snap 15°). Alt-drag a corner = perspective.",
+        ToolKind.Transform => "Drag to move (Shift = axis). Handles scale (Shift = free, Ctrl = from centre). Top handle rotates (Shift = snap 15°). Alt-drag a corner = perspective.",
         ToolKind.Marquee or ToolKind.EllipseMarquee => "Drag to select. Shift adds, Alt subtracts, Shift+Alt intersects. Drag the interior to move the selection.",
         ToolKind.Lasso => "Drag to draw a freehand selection. Shift adds, Alt subtracts, Shift+Alt intersects.",
         ToolKind.PolyLasso => "Click to place points; click the first point or press Enter to close, Esc to cancel. Shift adds, Alt subtracts.",

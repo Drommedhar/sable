@@ -74,14 +74,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     // transform gizmo state
     private const float RotHandleDist = 28f;
     private bool _transforming;
-    private int _xfMode;                 // 1 = move, 2 = rotate, 3 = scale (uniform), 4 = scale one axis (edge)
+    private int _xfMode;                 // 1 = move, 2 = rotate, 3 = scale (handle-driven), 5 = perspective
+    private int _xfHandle;               // scale handle: 0..3 = corner TL,TR,BR,BL; 10..13 = edge top,right,bottom,left
+    private int _xfBoxW, _xfBoxH;        // layer local box size at gesture start
     private LayerXform _xfStart;
-    private double _xfCenterX, _xfCenterY, _xfStartAngle, _xfStartDist;
-    private float _xfStartSx, _xfStartSy;
+    private double _xfCenterX, _xfCenterY, _xfStartAngle;
     private double _xfMoveDocX, _xfMoveDocY;
     private int _xfOrigOffX, _xfOrigOffY;
-    private int _xfEdgeAxis;             // 0 = scale X (left/right edge), 1 = scale Y (top/bottom edge)
-    private double _xfEdgeNx, _xfEdgeNy, _xfEdgeStartHalf;   // outward unit normal (surface) + start half-extent
 
     /// <summary>The active PIXEL layer for paint (brush/fill/eyedropper). Null if a non-pixel layer is selected.</summary>
     private PixelLayer? _activeLayer;
@@ -142,6 +141,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _patching = false; _patchSrc = null; _patchRect = null; _patchMask = null;
         _liquifying = false; _liquifyLayer = null;
         _transforming = false;
+        _smartX.Clear(); _smartY.Clear();   // hide snap alignment lines
         _nodeDragging = false; _nodeIdx = -1; _nodePath = null; _nodeBefore = null;
         _meshDragIdx = -1;
         _cloneSet = false;                  // stale clone source must not bleed across docs/tools
@@ -597,6 +597,21 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private (double x, double y) Snap(double dx, double dy) => (SnapAxis(dx, true), SnapAxis(dy, false));
 
+    /// <summary>Snap a transform scale handle's document position to the canvas borders + centre + guides,
+    /// recording the matched alignment line (so the magenta guide shows). Returns the snapped coord.</summary>
+    private double SnapScaleHandle(double v, bool xAxis, List<float> lines)
+    {
+        if (!SnapEnabled || _doc is not { } d) return v;
+        double th = 6.0 / Math.Max(0.0001, EffectiveScale);
+        double best = v, bestD = th, line = 0; bool found = false;
+        void Try(double c) { double dd = Math.Abs(v - c); if (dd < bestD) { bestD = dd; best = c; found = true; line = c; } }
+        double ext = xAxis ? d.Width : d.Height;
+        Try(0); Try(ext); Try(ext / 2.0);                              // canvas borders + centre
+        foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);       // guides
+        if (found) lines.Add((float)line);
+        return best;
+    }
+
     // smart-guide alignment lines (doc px) collected during the current move; drawn magenta
     private readonly List<float> _smartX = new();
     private readonly List<float> _smartY = new();
@@ -782,16 +797,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 StartPan(sx, sy);
                 break;
             case ToolKind.Transform:
-                if (ActiveLayer is not null)
-                    BeginTransform(sx, sy, mods.HasFlag(CanvasMods.Ctrl));   // pixel layer: full gizmo (rotate/scale/perspective)
-                else if (SelLayer is { LockPosition: false } xfMove)
-                {
-                    // non-pixel layers (shape/text/path/group) — move only for now; rotate/scale need the
-                    // compositor to pivot non-pixel transforms about content-centre (follow-up, audit C8).
-                    _moving = true; _input?.Capture();
-                    _moveStartX = dx; _moveStartY = dy;
-                    _moveOrigX = xfMove.OffsetX; _moveOrigY = xfMove.OffsetY;
-                }
+                BeginMoveTool(sx, sy, dx, dy, mods);   // Move + Transform are one tool now
                 break;
             case ToolKind.EllipseMarquee:
                 if (_doc is not null)
@@ -910,12 +916,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
             case ToolKind.Move:
-                if (SelLayer is { } ml && !ml.LockPosition)
-                {
-                    _moving = true; _input?.Capture();
-                    _moveStartX = dx; _moveStartY = dy;
-                    _moveOrigX = ml.OffsetX; _moveOrigY = ml.OffsetY;
-                }
+                BeginMoveTool(sx, sy, dx, dy, mods);   // unified: move (drag interior) + scale/rotate (grab a handle)
                 break;
             default: // Brush / Eraser / CloneStamp / Heal / SpotHeal
                 if (ActiveTool is ToolKind.CloneStamp or ToolKind.Heal && !_cloneSet) break;   // need a source first (Alt+click)
@@ -1002,6 +1003,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_transforming && ActiveLayer is { } tl)
         {
             _transforming = false;
+            _smartX.Clear(); _smartY.Clear();   // hide snap alignment lines
             _input?.ReleaseCapture();
             if (_doc is not null)
                 CommandProduced?.Invoke(new TransformLayerCommand(_doc, tl, _xfStart, LayerXform.From(tl)));
@@ -1335,13 +1337,28 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     private int _xfCornerIdx = -1;   // perspective corner being dragged (0..3)
 
-    private void BeginTransform(double sx, double sy, bool ctrl = false)
+    /// <summary>Unified Move/Transform begin: pixel layer → full gizmo (move interior / scale handles /
+    /// rotate / Alt-corner perspective); non-pixel layer → move only.</summary>
+    private void BeginMoveTool(double sx, double sy, double dx, double dy, CanvasMods mods)
+    {
+        if (ActiveLayer is not null)
+            BeginTransform(sx, sy, mods.HasFlag(CanvasMods.Alt));
+        else if (SelLayer is { LockPosition: false } ml)
+        {
+            // non-pixel (shape/text/path/group): move only (compositor pivots their transforms about doc-centre)
+            _moving = true; _input?.Capture();
+            _moveStartX = dx; _moveStartY = dy;
+            _moveOrigX = ml.OffsetX; _moveOrigY = ml.OffsetY;
+        }
+    }
+
+    private void BeginTransform(double sx, double sy, bool alt = false)
     {
         if (ActiveLayer is not { } l) return;
         var cs = CornersSurface(l);
 
-        // Ctrl + corner → perspective / free-distort: drag that corner independently
-        if (ctrl)
+        // Alt + corner → perspective / free-distort: drag that corner independently (Ctrl is now centre-scale)
+        if (alt)
         {
             int ci = NearestCornerIndex(cs, sx, sy);
             if (ci >= 0)
@@ -1350,7 +1367,6 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 _xfStart = LayerXform.From(l);
                 if (!l.Perspective || l.PerspCorners is not { Length: 8 })
                 {
-                    // initialise the free corners from the current affine quad
                     l.PerspCorners = AffineMath.Corners(l.Width, l.Height, l.OffsetX, l.OffsetY, l.ScaleX, l.ScaleY, l.Rotation, l.ShearX, l.ShearY);
                     l.Perspective = true;
                 }
@@ -1358,6 +1374,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 return;
             }
         }
+
         double cx = (cs[0] + cs[2] + cs[4] + cs[6]) * 0.25;
         double cy = (cs[1] + cs[3] + cs[5] + cs[7]) * 0.25;
         double tmx = (cs[0] + cs[2]) * 0.5, tmy = (cs[1] + cs[3]) * 0.5;   // top mid
@@ -1365,43 +1382,54 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         double rpx = tmx, rpy = tmy;
         if (dl > 1e-3) { rpx = tmx + (tmx - cx) / dl * RotHandleDist; rpy = tmy + (tmy - cy) / dl * RotHandleDist; }
 
-        // edge midpoints (TL,TR,BR,BL → top,right,bottom,left)
-        double tx = (cs[0] + cs[2]) * 0.5, ty = (cs[1] + cs[3]) * 0.5;   // top
-        double rx = (cs[2] + cs[4]) * 0.5, ry = (cs[3] + cs[5]) * 0.5;   // right
-        double bx = (cs[4] + cs[6]) * 0.5, by = (cs[5] + cs[7]) * 0.5;   // bottom
-        double lxm = (cs[6] + cs[0]) * 0.5, lym = (cs[7] + cs[1]) * 0.5; // left
+        // edge midpoints (top,right,bottom,left)
+        double tx = (cs[0] + cs[2]) * 0.5, ty = (cs[1] + cs[3]) * 0.5;
+        double rx = (cs[2] + cs[4]) * 0.5, ry = (cs[3] + cs[5]) * 0.5;
+        double bx = (cs[4] + cs[6]) * 0.5, by = (cs[5] + cs[7]) * 0.5;
+        double lxm = (cs[6] + cs[0]) * 0.5, lym = (cs[7] + cs[1]) * 0.5;
 
-        _xfMode = 0;
-        if (Dist(sx, sy, rpx, rpy) <= 8) _xfMode = 2;                       // rotate handle
-        else if (NearestCornerDist(cs, sx, sy) <= 8) _xfMode = 3;          // corner → uniform scale
-        else if (Dist(sx, sy, tx, ty) <= 7) BeginEdge(1, cx, cy, tx, ty);   // top → scale Y
-        else if (Dist(sx, sy, bx, by) <= 7) BeginEdge(1, cx, cy, bx, by);   // bottom → scale Y
-        else if (Dist(sx, sy, lxm, lym) <= 7) BeginEdge(0, cx, cy, lxm, lym); // left → scale X
-        else if (Dist(sx, sy, rx, ry) <= 7) BeginEdge(0, cx, cy, rx, ry);   // right → scale X
-        else if (PointInQuad(cs, sx, sy)) _xfMode = 1;                     // inside → move
+        _xfMode = 0; _xfHandle = -1;
+        if (Dist(sx, sy, rpx, rpy) <= 8) _xfMode = 2;                                      // rotate handle
+        else if (NearestCornerDist(cs, sx, sy) <= 8) { _xfMode = 3; _xfHandle = NearestCornerIndex(cs, sx, sy); }
+        else if (Dist(sx, sy, tx, ty) <= 7) { _xfMode = 3; _xfHandle = 10; }               // top edge
+        else if (Dist(sx, sy, rx, ry) <= 7) { _xfMode = 3; _xfHandle = 11; }               // right edge
+        else if (Dist(sx, sy, bx, by) <= 7) { _xfMode = 3; _xfHandle = 12; }               // bottom edge
+        else if (Dist(sx, sy, lxm, lym) <= 7) { _xfMode = 3; _xfHandle = 13; }             // left edge
+        else if (PointInQuad(cs, sx, sy)) _xfMode = 1;                                     // inside → move
+        else _xfMode = 1;                                                                  // anywhere else → move the layer (PS Move-tool feel)
 
         if (_xfMode == 0) return;
         _transforming = true;
         _input?.Capture();
         _xfStart = LayerXform.From(l);
+        _xfBoxW = l.Width; _xfBoxH = l.Height;
         _xfCenterX = cx; _xfCenterY = cy;
         _xfStartAngle = Math.Atan2(sy - cy, sx - cx);
-        _xfStartDist = Math.Max(1e-3, Dist(sx, sy, cx, cy));
-        _xfStartSx = l.ScaleX; _xfStartSy = l.ScaleY;
         var (ddx, ddy) = MapToDoc(sx, sy);
         _xfMoveDocX = ddx; _xfMoveDocY = ddy;
         _xfOrigOffX = l.OffsetX; _xfOrigOffY = l.OffsetY;
     }
 
-    // arm an edge (1-axis) scale: store the outward unit normal (center→edge mid) + start half-extent
-    private void BeginEdge(int axis, double cx, double cy, double ex, double ey)
+    // local (pre-transform) box coords of a scale handle (corner 0..3 / edge 10..13); fallback = centre
+    private (double x, double y) HandleLocal(int handle) => handle switch
     {
-        double dx = ex - cx, dy = ey - cy, len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-3) { _xfMode = 0; return; }
-        _xfEdgeAxis = axis;
-        _xfEdgeNx = dx / len; _xfEdgeNy = dy / len;
-        _xfEdgeStartHalf = len;
-        _xfMode = 4;
+        0 => (0, 0), 1 => (_xfBoxW, 0), 2 => (_xfBoxW, _xfBoxH), 3 => (0, _xfBoxH),
+        10 => (_xfBoxW * 0.5, 0), 11 => (_xfBoxW, _xfBoxH * 0.5),
+        12 => (_xfBoxW * 0.5, _xfBoxH), 13 => (0, _xfBoxH * 0.5),
+        _ => (_xfBoxW * 0.5, _xfBoxH * 0.5)
+    };
+    private static int OppositeHandle(int handle) => handle switch
+    {
+        0 => 2, 1 => 3, 2 => 0, 3 => 1,
+        10 => 12, 11 => 13, 12 => 10, 13 => 11, _ => handle
+    };
+
+    // forward-map a layer-local point to doc space using the given transform (full affine incl shear)
+    private (double x, double y) LocalToDoc(double lx, double ly, LayerXform xf)
+    {
+        var (x, y) = AffineMath.LayerToDoc(_xfBoxW, _xfBoxH, xf.OffsetX, xf.OffsetY,
+            xf.ScaleX, xf.ScaleY, xf.Rotation, (float)lx, (float)ly, xf.ShearX, xf.ShearY);
+        return (x, y);
     }
 
     private void TransformDrag(double sx, double sy)
@@ -1418,36 +1446,93 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 }
                 break;
             }
-            case 4: // single-axis scale via an edge handle
-            {
-                double proj = (sx - _xfCenterX) * _xfEdgeNx + (sy - _xfCenterY) * _xfEdgeNy;
-                double ratio = proj / Math.Max(1e-3, _xfEdgeStartHalf);
-                if (_xfEdgeAxis == 0) l.ScaleX = (float)(_xfStartSx * ratio);
-                else l.ScaleY = (float)(_xfStartSy * ratio);
-                break;
-            }
-            case 2: // rotate about center
+            case 2: // rotate about centre; Shift snaps to 15°
             {
                 double ang = Math.Atan2(sy - _xfCenterY, sx - _xfCenterX);
-                l.Rotation = _xfStart.Rotation + (float)((ang - _xfStartAngle) * 180.0 / Math.PI);
+                double deg = _xfStart.Rotation + (ang - _xfStartAngle) * 180.0 / Math.PI;
+                if (_lastMods.HasFlag(CanvasMods.Shift)) deg = Math.Round(deg / 15.0) * 15.0;
+                l.Rotation = (float)deg;
                 break;
             }
-            case 3: // uniform scale about center
+            case 3: // scale via a corner/edge handle (new modifier model)
             {
-                double ratio = Dist(sx, sy, _xfCenterX, _xfCenterY) / _xfStartDist;
-                l.ScaleX = (float)(_xfStartSx * ratio);
-                l.ScaleY = (float)(_xfStartSy * ratio);
+                ScaleByHandle(l, sx, sy);
                 break;
             }
-            default: // move
+            default: // move (interior); Shift constrains to an axis; snaps to other layers + the canvas
             {
                 var (dx, dy) = MapToDoc(sx, sy);
-                l.OffsetX = _xfOrigOffX + (int)Math.Round(dx - _xfMoveDocX);
-                l.OffsetY = _xfOrigOffY + (int)Math.Round(dy - _xfMoveDocY);
+                double mx = dx - _xfMoveDocX, my = dy - _xfMoveDocY;
+                if (_lastMods.HasFlag(CanvasMods.Shift)) { if (Math.Abs(mx) >= Math.Abs(my)) my = 0; else mx = 0; }
+                double rawX = _xfOrigOffX + mx, rawY = _xfOrigOffY + my;
+                var (snX, snY) = SmartSnap(l, rawX, rawY);   // edges/centres of layers + document
+                l.OffsetX = (int)Math.Round(_smartX.Count > 0 ? snX : SnapAxis(snX, true));
+                l.OffsetY = (int)Math.Round(_smartY.Count > 0 ? snY : SnapAxis(snY, false));
                 break;
             }
         }
         _doc?.MarkStructureChanged();
+    }
+
+    /// <summary>
+    /// Handle-driven scale, anchoring the opposite handle (or the centre with Ctrl):
+    ///  • none → uniform (aspect-locked); • Shift → non-uniform (dragged axis/axes only);
+    ///  • Ctrl → uniform from centre; • Ctrl+Shift → non-uniform from centre.
+    /// Scaling pivots about the layer centre, so after solving the new scale the offset is
+    /// recomputed to keep the anchor point fixed in document space.
+    /// </summary>
+    private void ScaleByHandle(Layer l, double sx, double sy)
+    {
+        bool shift = _lastMods.HasFlag(CanvasMods.Shift);
+        bool ctrl = _lastMods.HasFlag(CanvasMods.Ctrl);
+
+        var (hx, hy) = HandleLocal(_xfHandle);
+        var (ax, ay) = ctrl ? (_xfBoxW * 0.5, _xfBoxH * 0.5) : HandleLocal(OppositeHandle(_xfHandle));
+        var (aDocX, aDocY) = LocalToDoc(ax, ay, _xfStart);     // fixed anchor (start position)
+        var (curX, curY) = MapToDoc(sx, sy);
+
+        // snap the dragged handle to the canvas borders/centre + guides (records magenta alignment lines).
+        // Corners snap both axes; edge handles snap only the axis they move along.
+        _smartX.Clear(); _smartY.Clear();
+        bool snapX = _xfHandle is 0 or 1 or 2 or 3 or 11 or 13;
+        bool snapY = _xfHandle is 0 or 1 or 2 or 3 or 10 or 12;
+        if (snapX) curX = SnapScaleHandle(curX, true, _smartX);
+        if (snapY) curY = SnapScaleHandle(curY, false, _smartY);
+
+        // un-rotate the cursor offset → the target for S·v (v = local handle offset from the anchor)
+        double rad = -_xfStart.Rotation * Math.PI / 180.0;
+        double cr = Math.Cos(rad), sr = Math.Sin(rad);
+        double dX = curX - aDocX, dY = curY - aDocY;
+        double wX = cr * dX - sr * dY, wY = sr * dX + cr * dY;
+
+        double vX = hx - ax, vY = hy - ay;
+        double sx0 = _xfStart.ScaleX, sy0 = _xfStart.ScaleY;
+        double d0X = sx0 * vX, d0Y = sy0 * vY;       // start handle offset in scale space
+
+        double nsx = sx0, nsy = sy0;
+        if (shift)   // non-uniform: each axis independently (an axis with v≈0 keeps its scale)
+        {
+            if (Math.Abs(vX) > 1e-6) nsx = wX / vX;
+            if (Math.Abs(vY) > 1e-6) nsy = wY / vY;
+        }
+        else         // uniform: project the cursor onto the start handle vector → one factor
+        {
+            double denom = d0X * d0X + d0Y * d0Y;
+            double factor = denom > 1e-9 ? (wX * d0X + wY * d0Y) / denom : 1.0;
+            nsx = sx0 * factor; nsy = sy0 * factor;
+        }
+        if (Math.Abs(nsx) < 1e-3) nsx = nsx < 0 ? -1e-3 : 1e-3;   // avoid a degenerate collapse
+        if (Math.Abs(nsy) < 1e-3) nsy = nsy < 0 ? -1e-3 : 1e-3;
+        l.ScaleX = (float)nsx; l.ScaleY = (float)nsy;
+
+        // keep the anchor fixed: centreDoc = aDoc - R·S'·(aLocal - centre); offset = centreDoc - box/2
+        double clX = ax - _xfBoxW * 0.5, clY = ay - _xfBoxH * 0.5;
+        double rad2 = _xfStart.Rotation * Math.PI / 180.0;
+        double cr2 = Math.Cos(rad2), sr2 = Math.Sin(rad2);
+        double pX = nsx * clX, pY = nsy * clY;
+        double rX = cr2 * pX - sr2 * pY, rY = sr2 * pX + cr2 * pY;
+        l.OffsetX = (int)Math.Round((aDocX - rX) - _xfBoxW * 0.5);
+        l.OffsetY = (int)Math.Round((aDocY - rY) - _xfBoxH * 0.5);
     }
 
     /// <summary>
