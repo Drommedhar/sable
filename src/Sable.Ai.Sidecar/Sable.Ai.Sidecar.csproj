@@ -2,7 +2,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
-    <ProjectReference Include="..\Sable.Ai\Sable.Ai.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the Python server beside the app; the sidecar process runs it under the resolved venv. -->
+    <None Include="server\**\*.py" CopyToOutputDirectory="PreserveNewest" LinkBase="server" />
   </ItemGroup>
 
   <PropertyGroup>

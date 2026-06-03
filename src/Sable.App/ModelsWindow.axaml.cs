@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Sable.Ai.Download;
 using Sable.Ai.Models;
@@ -31,6 +32,13 @@ public partial class ModelsWindow : Window
     /// <summary>Raised when the user changes a per-task default — host refreshes which model serves each op.</summary>
     public event Action? DefaultsChanged;
 
+    /// <summary>Raised when external model sources change — host persists them to settings (§2.1).</summary>
+    public event Action? SourcesChanged;
+
+    /// <summary>Raised when the user asks to diagnose the generative sidecar Python env (§3). Host resolves
+    /// the interpreter (pinned / ComfyUI venv / own) and reports what it would use.</summary>
+    public event Action? CheckSidecarRequested;
+
     public ModelsWindow() : this(new ModelRegistry(System.IO.Path.GetTempPath()), 0) { }
 
     public ModelsWindow(ModelRegistry registry, ulong freeVram = 0)
@@ -40,9 +48,98 @@ public partial class ModelsWindow : Window
         _freeVram = freeVram;
         _downloader = new ModelDownloader(registry);
         FolderLabel.Text = $"Model folder: {registry.ModelsFolder}";
+        BuildSources();
         BuildRecommended();
         BuildDefaults();
         BuildInstalled();
+    }
+
+    /// <summary>List external sources (ComfyUI/folder) with their model count + a Remove button.</summary>
+    private void BuildSources()
+    {
+        SourceRows.Children.Clear();
+        foreach (var src in _registry.Sources)
+        {
+            if (src.Kind == ModelSourceKind.Native) continue;
+            int n = _registry.Catalog.All.Count(m => string.Equals(m.SourceId, src.Id, StringComparison.OrdinalIgnoreCase));
+
+            var info = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+            info.Children.Add(Text(src.Path, "ChromeTextDim", 12));
+            info.Children.Add(Text($"{src.Kind} · {n} model(s)" + (src.ReadOnly ? " · read-only" : ""), "ChromeTextFaint", 11));
+
+            var btn = new Button
+            {
+                Content = "Remove", Classes = { "opt" }, Padding = new Avalonia.Thickness(14, 0),
+                Tag = src.Id, VerticalAlignment = VerticalAlignment.Center,
+            };
+            btn.Click += OnRemoveSource;
+
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            row.Children.Add(info);
+            Grid.SetColumn(btn, 1);
+            row.Children.Add(btn);
+
+            var border = new Border { CornerRadius = new Avalonia.CornerRadius(4), Padding = new Avalonia.Thickness(10, 6), Child = row };
+            Bg(border, "ChromePanel2");
+            SourceRows.Children.Add(border);
+        }
+    }
+
+    private async void OnAddComfyFolder(object? sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select the ComfyUI folder (or its models folder)", AllowMultiple = false,
+        });
+        var raw = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        _busy = true;
+        AddSourceBtn.IsEnabled = false;
+        // resolve the ComfyUI root → its models folder, then scan off the UI thread (large/remote trees hang it)
+        ShowStatus("Scanning models…");
+        try
+        {
+            var path = await System.Threading.Tasks.Task.Run(() => SourceScanner.ResolveModelsRoot(raw));
+            var id = UniqueSourceId(path);
+            await System.Threading.Tasks.Task.Run(() => _registry.AddSource(ModelSource.Comfy(id, path)));
+            SourcesChanged?.Invoke();
+            DefaultsChanged?.Invoke();
+            BuildSources();
+            BuildDefaults();
+            BuildInstalled();
+            int n = _registry.Catalog.All.Count(m => m.SourceId == id);
+            ShowStatus($"Added source ({n} model(s)): {path}");
+        }
+        catch (Exception ex) { ShowStatus($"Add source failed: {ex.Message}"); }
+        finally { _busy = false; AddSourceBtn.IsEnabled = true; }
+    }
+
+    private async void OnRemoveSource(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || sender is not Button { Tag: string id }) return;
+        _busy = true;
+        try { await System.Threading.Tasks.Task.Run(() => _registry.RemoveSource(id)); }
+        finally { _busy = false; }
+        SourcesChanged?.Invoke();
+        DefaultsChanged?.Invoke();
+        BuildSources();
+        BuildDefaults();
+        BuildInstalled();
+    }
+
+    /// <summary>Stable, collision-free source id from a folder path ("comfy-&lt;leaf&gt;", numbered on clash).</summary>
+    private string UniqueSourceId(string path)
+    {
+        var leaf = new string((System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(path)) ?? "comfy")
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        if (leaf.Length == 0) leaf = "comfy";
+        var baseId = $"comfy-{leaf.ToLowerInvariant()}";
+        var id = baseId; int i = 2;
+        while (_registry.Sources.Any(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)))
+            id = $"{baseId}-{i++}";
+        return id;
     }
 
     private void Fg(TextBlock tb, string key) => tb.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable(key));
@@ -153,7 +250,8 @@ public partial class ModelsWindow : Window
     private void BuildInstalled()
     {
         InstalledRows.Children.Clear();
-        try { _registry.Load(); } catch { /* ignore */ }
+        // NOTE: do NOT re-scan here — the registry is already loaded by the host; a Load() on every open
+        // re-walks the whole (possibly remote) ComfyUI tree and hangs the dialog.
         var all = _registry.Catalog.All;
         if (all.Count == 0)
         {
@@ -233,6 +331,8 @@ public partial class ModelsWindow : Window
     private void ShowStatus(string text) { Status.Text = text; Status.IsVisible = true; }
 
     private static long Mb(long bytes) => bytes / (1024 * 1024);
+
+    private void OnCheckSidecar(object? sender, RoutedEventArgs e) => CheckSidecarRequested?.Invoke();
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 }

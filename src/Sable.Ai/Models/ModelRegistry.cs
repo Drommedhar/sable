@@ -26,10 +26,60 @@ public sealed class ModelRegistry
     /// <summary>Per-task default base-model id (user-chosen).</summary>
     public Dictionary<AiTaskKind, string> Defaults { get; private set; } = new();
 
+    /// <summary>Extra read-only roots (ComfyUI / folder) scanned alongside the native folder (§2.1).</summary>
+    private readonly List<ModelSource> _externalSources = new();
+
     public ModelRegistry(string modelsFolder) => ModelsFolder = modelsFolder;
 
-    /// <summary>(Re)scan the models folder: each immediate subfolder with a <c>model.json</c> is a model.</summary>
+    /// <summary>The native (writable) root plus every registered external source.</summary>
+    public IReadOnlyList<ModelSource> Sources =>
+        new[] { ModelSource.Native(ModelsFolder) }.Concat(_externalSources).ToList();
+
+    /// <summary>Register an external source (ComfyUI/folder) and re-scan. Ignores the native kind + duplicates.</summary>
+    public void AddSource(ModelSource src)
+    {
+        if (src.Kind == ModelSourceKind.Native) return;
+        if (_externalSources.Any(s => string.Equals(s.Id, src.Id, StringComparison.OrdinalIgnoreCase))) return;
+        _externalSources.Add(src);
+        Load();
+    }
+
+    /// <summary>Forget an external source (never deletes the external tree) and re-scan.</summary>
+    public void RemoveSource(string sourceId)
+    {
+        _externalSources.RemoveAll(s => string.Equals(s.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+        Load();
+    }
+
+    /// <summary>Replace the external-source set wholesale (e.g. from persisted settings). <paramref name="scan"/>
+    /// false defers the (potentially slow) external scan — pair with a later <see cref="Load"/> off the UI thread.</summary>
+    public void SetSources(IEnumerable<ModelSource> sources, bool scan = true)
+    {
+        _externalSources.Clear();
+        _externalSources.AddRange(sources.Where(s => s.Kind != ModelSourceKind.Native));
+        if (scan) Load(); else LoadNativeOnly();
+    }
+
+    /// <summary>Scan only the native folder's <c>model.json</c>s (fast — no external tree walk / header sniff).
+    /// Use at startup so the UI thread never blocks on a large/remote ComfyUI tree; follow with <see cref="Load"/>
+    /// on a background thread to fold in external sources.</summary>
+    public void LoadNativeOnly() => Catalog = ScanNative();
+
+    /// <summary>(Re)scan every source into one catalog: the native folder's <c>model.json</c>s plus each
+    /// enabled external root's drafted (referenced-in-place) manifests. The external walk + header sniff can be
+    /// slow on a big/remote tree — call off the UI thread.</summary>
     public void Load()
+    {
+        var cat = ScanNative();
+        foreach (var src in _externalSources)
+        {
+            if (!src.Enabled) continue;
+            foreach (var m in SourceScanner.Scan(src, ModelsFolder)) cat.Add(m);
+        }
+        Catalog = cat;
+    }
+
+    private ModelCatalog ScanNative()
     {
         var cat = new ModelCatalog();
         if (Directory.Exists(ModelsFolder))
@@ -41,7 +91,7 @@ public sealed class ModelRegistry
             }
             LoadDefaults();
         }
-        Catalog = cat;
+        return cat;
     }
 
     public static ModelManifest? ParseManifest(string json)

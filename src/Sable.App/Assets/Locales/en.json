@@ -293,7 +293,14 @@
     "close": "Close",
     "recommendedDownloadsFromTheSource": "Recommended (downloads from the source; licence shown per model)",
     "defaultModelPerTask": "Default model per task",
-    "installed": "Installed"
+    "installed": "Installed",
+    "sources": "Model sources",
+    "addComfyUIFolder": "Add ComfyUI folder…",
+    "checkSidecar": "Check sidecar / Python env",
+    "sourcesHint": "Reuse models from a ComfyUI (or compatible) install — referenced in place, never copied."
+  },
+  "generative": {
+    "title": "Generative Fill"
   },
   "newDocumentWindow": {
     "newDocument": "New Document",

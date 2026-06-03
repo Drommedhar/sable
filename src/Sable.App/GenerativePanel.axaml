@@ -1,0 +1,15 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.GenerativePanel"
+        Width="380" Height="600"
+        CanResize="True"
+        Background="{DynamicResource ChromePanel}"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc generative.title}">
+    <DockPanel Margin="12">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="Root" Spacing="8" />
+        </ScrollViewer>
+    </DockPanel>
+</Window>

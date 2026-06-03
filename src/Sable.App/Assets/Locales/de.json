@@ -293,7 +293,14 @@
     "close": "Schließen",
     "recommendedDownloadsFromTheSource": "Empfohlen (Download von der Quelle; Lizenz pro Modell angezeigt)",
     "defaultModelPerTask": "Standardmodell pro Aufgabe",
-    "installed": "Installiert"
+    "installed": "Installiert",
+    "sources": "Modellquellen",
+    "addComfyUIFolder": "ComfyUI-Ordner hinzufügen…",
+    "checkSidecar": "Sidecar / Python-Umgebung prüfen",
+    "sourcesHint": "Modelle aus einer ComfyUI-Installation (oder kompatibel) nutzen — direkt referenziert, nie kopiert."
+  },
+  "generative": {
+    "title": "Generative Füllung"
   },
   "newDocumentWindow": {
     "newDocument": "Neues Dokument",

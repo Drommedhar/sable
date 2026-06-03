@@ -30,6 +30,11 @@ public sealed class AiService
     public GpuProbe Gpu { get; }
     private readonly List<IAiBackend> _backends = new();
 
+    /// <summary>The opt-in generative backend (Diffusers sidecar), injected by the App once started (§4).
+    /// AiService depends only on the Core <see cref="IGenerativeBackend"/> seam, never on the sidecar project.</summary>
+    public IGenerativeBackend? Generative { get; set; }
+    private string? _loadedSig;   // signature of the currently-loaded base+offload+lora stack (skip reload)
+
     public AiService(ModelRegistry registry, GpuProbe? gpu = null)
     {
         Registry = registry;
@@ -190,6 +195,80 @@ public sealed class AiService
         var parent = doc.FindParent(target) ?? doc.Layers;
         int idx = parent.IndexOf(target) + 1;
         return new AddLayerCommand(doc, parent, layer, idx);
+    }
+
+    /// <summary>
+    /// Ensure the generative sidecar has the right base (+ LoRA stack) loaded (PHASE8_AI_SIDECAR §3.5/§4).
+    /// Builds a <see cref="LoadPlan"/> from the registry, blocks with a clear message on a missing component,
+    /// and skips the reload when the same stack is already resident. Returns the resolved base manifest.
+    /// </summary>
+    public async Task<ModelManifest> EnsureModelLoadedAsync(
+        string baseModelId, bool offload, IReadOnlyList<AdapterRef>? loras, CancellationToken ct = default)
+    {
+        if (Generative is null || !Generative.IsAvailable)
+            throw new AiNotReadyException("Generative sidecar is not running. Enable it in Settings.");
+
+        var baseModel = Registry.Catalog.ById(baseModelId) ?? Registry.DefaultFor(AiTaskKind.Inpaint)
+            ?? throw new AiNotReadyException($"No generative base model '{baseModelId}'.");
+
+        var plan = LoadPlan.Resolve(Registry.Catalog, baseModel, offload, loras);
+        if (!plan.Ok || plan.Request is null)
+            throw new AiNotReadyException(plan.Missing.Count > 0
+                ? $"Missing component(s): {string.Join(", ", plan.Missing)}. Install them in the Models panel."
+                : (string.IsNullOrEmpty(plan.Error) ? "Could not plan the model load." : plan.Error));
+
+        var sig = Signature(baseModel.Id, offload, loras);
+        if (sig == _loadedSig) return baseModel;
+
+        var res = await Generative.LoadModelAsync(plan.Request, ct).ConfigureAwait(false);
+        if (!res.Ok) { _loadedSig = null; throw new AiNotReadyException(string.IsNullOrEmpty(res.Error) ? "Model load failed." : res.Error); }
+        _loadedSig = sig;
+        return baseModel;
+    }
+
+    /// <summary>
+    /// Generative fill / inpaint (PHASE8_AI_SIDECAR §4): inpaint the masked region of the layer with the
+    /// generative base + prompt in <paramref name="spec"/>, and return a command that adds the result as a
+    /// NEW layer clipped to the mask, above the source (non-destructive, undoable). <paramref name="region"/>
+    /// must match the target layer's dimensions (the caller resamples the doc selection to the layer).
+    /// <paramref name="spec"/> carries prompt/negative/steps/cfg/seed/base/loras/offload — its Image/Mask/Task
+    /// are set here. Throws <see cref="AiNotReadyException"/> on pre-flight failure (never mutates the layer).
+    /// </summary>
+    public async Task<IUndoableCommand> GenerativeFillAsync(
+        Document doc, PixelLayer target, AiMask region, GenRequest spec,
+        IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        var baseId = !string.IsNullOrEmpty(spec.BaseModelId) ? spec.BaseModelId
+            : Registry.DefaultFor(AiTaskKind.Inpaint)?.Id
+              ?? throw new AiNotReadyException("No model installed for Generative Fill.");
+
+        var baseModel = await EnsureModelLoadedAsync(baseId, spec.Offload, spec.Loras, ct).ConfigureAwait(false);
+
+        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var req = spec with { BaseModelId = baseModel.Id, Task = AiTaskKind.Inpaint, Image = img, Mask = region };
+
+        var outImg = await Generative!.GenerateAsync(req, ct).ConfigureAwait(false);
+
+        var layer = new PixelLayer(outImg.Width, outImg.Height, target.Name + " (fill)")
+        { OffsetX = target.OffsetX, OffsetY = target.OffsetY };
+        layer.SetBuffer(outImg.Width, outImg.Height, outImg.Rgba);
+
+        // clip the generated layer to the fill region so only the masked area shows
+        if (region.Width == outImg.Width && region.Height == outImg.Height)
+        {
+            layer.Mask = ImageOps.CoverageToRgbaMask(region.Coverage, outImg.Width, outImg.Height);
+            layer.MaskDirty = true;
+        }
+
+        var parent = doc.FindParent(target) ?? doc.Layers;
+        int idx = parent.IndexOf(target) + 1;
+        return new AddLayerCommand(doc, parent, layer, idx);
+    }
+
+    private static string Signature(string baseId, bool offload, IReadOnlyList<AdapterRef>? loras)
+    {
+        var loraSig = loras is null ? "" : string.Join(",", loras.Select(l => $"{l.ModelId}:{l.Weight}"));
+        return $"{baseId}|{offload}|{loraSig}";
     }
 }
 

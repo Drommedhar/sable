@@ -48,6 +48,7 @@ public sealed class ModelManifest
     public long VramBytes { get; init; }                 // required VRAM for this piece
     public int InputSize { get; init; }                  // model's native input resolution (0 = n/a)
     public string? Adapter { get; init; }                // which adapter code runs it
+    public string? SourceId { get; init; }               // which ModelSource this came from (null = native/legacy)
 
     // --- base (diffusion / ONNX) ---
     public ModelComponents? Components { get; init; }

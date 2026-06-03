@@ -43,6 +43,15 @@ public sealed class SableSettings
     /// prompts to download the model set. No AI runs (and no models download) unless the user turns this on.</summary>
     public bool AiEnabled { get; set; }
 
+    /// <summary>External model-source roots (ComfyUI / folder) scanned besides the native folder
+    /// (PHASE8_AI_SIDECAR §2.1). Read-only, referenced in place. The native folder is always present and
+    /// is not stored here.</summary>
+    public List<Sable.Core.Ai.ModelSource> ModelSources { get; set; } = new();
+
+    /// <summary>Explicit Python interpreter for the generative sidecar (PHASE8_AI_SIDECAR §3.1). Null = auto:
+    /// reuse a host-OS-compatible ComfyUI venv if found, else provision Sable's own.</summary>
+    public string? SidecarPython { get; set; }
+
     /// <summary>SAM2 automatic-mask-generation density for the Smart Select tool. Auto = scale by VRAM.</summary>
     public SmartSelectQuality SmartSelectQuality { get; set; } = SmartSelectQuality.Auto;
 

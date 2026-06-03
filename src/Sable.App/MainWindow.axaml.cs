@@ -221,6 +221,7 @@ public partial class MainWindow : Window
         _settings.OpenTabs = _tabs.Where(t => t.Path is not null).Select(t => t.Path!).ToList();
         Sable.Core.Settings.SettingsService.Save(_settings);
         RecoveryService.Clear();   // clean exit → discard autosaved recovery copies
+        try { _sidecar?.Dispose(); } catch { }   // stop the generative sidecar process
     }
 
     /// <summary>Record a file in the recent list + persist + rebuild the menu.</summary>
@@ -320,10 +321,21 @@ public partial class MainWindow : Window
                 var folder = System.IO.Path.Combine(
                     System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Sable", "models");
                 _modelReg = new Sable.Ai.Models.ModelRegistry(folder);
-                try { _modelReg.Load(); } catch { /* no models yet */ }
+                // fast native-only load so the UI thread never blocks on a big/remote ComfyUI tree;
+                // the external sources are scanned on a background thread, then AI visibility re-applies.
+                try { _modelReg.SetSources(_settings.ModelSources, scan: false); } catch { /* no models yet */ }
+                if (_settings.ModelSources.Count > 0) _ = ScanExternalSourcesAsync(_modelReg);
             }
             return _modelReg;
         }
+    }
+
+    /// <summary>Scan external (ComfyUI) sources off the UI thread, then refresh AI-menu visibility.</summary>
+    private async System.Threading.Tasks.Task ScanExternalSourcesAsync(Sable.Ai.Models.ModelRegistry reg)
+    {
+        try { await System.Threading.Tasks.Task.Run(() => reg.Load()); }
+        catch { return; }
+        Avalonia.Threading.Dispatcher.UIThread.Post(ApplyAiVisibility);
     }
 
     private Sable.Ai.AiService CreateAi()
@@ -352,9 +364,12 @@ public partial class MainWindow : Window
         AiSelectItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Segment);
         AiSmartSelectItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Segment);
         AiUpscaleItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Upscale);
-        AiRemoveObjItem.IsVisible = Has(Sable.Core.Ai.AiTaskKind.Inpaint);
-        AiGenFillItem.IsVisible = false;     // generative tier — opt-in sidecar (later)
-        AiGenSep.IsVisible = false;
+        // Inpaint splits by tier: LaMa (light) = Remove Object; a generative checkpoint = Generative Fill.
+        bool HasTier(Sable.Core.Ai.AiTaskKind t, Sable.Core.Ai.AiTier tier) =>
+            ModelReg.Catalog.ForTask(t).Any(m => m.Tier == tier);
+        AiRemoveObjItem.IsVisible = HasTier(Sable.Core.Ai.AiTaskKind.Inpaint, Sable.Core.Ai.AiTier.Light);
+        AiGenFillItem.IsVisible = HasTier(Sable.Core.Ai.AiTaskKind.Inpaint, Sable.Core.Ai.AiTier.Generative);
+        AiGenSep.IsVisible = AiGenFillItem.IsVisible;
     }
 
     private async void OnAiRemoveBackground(object? sender, RoutedEventArgs e)
@@ -549,14 +564,178 @@ public partial class MainWindow : Window
         Doc.SelectedLayer?.RefreshThumbnail();
         doc.ClearSelection();
     }
-    private void OnAiGenerativeFill(object? sender, RoutedEventArgs e) => RunAiTask(Sable.Core.Ai.AiTaskKind.Inpaint, "Generative Fill");
+    private Sable.Ai.Sidecar.SidecarBackend? _sidecar;
+    private GenerativePanel? _genPanel;
+
+    /// <summary>Open the modeless Generative Fill panel (§4.1). Generate is handled by <see cref="OnGenerateFill"/>.</summary>
+    private void OnAiGenerativeFill(object? sender, RoutedEventArgs e)
+    {
+        if (_genPanel is null)
+        {
+            _genPanel = new GenerativePanel(ModelReg) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            _genPanel.GenerateRequested += req => _ = OnGenerateFill(req);
+            _genPanel.Closed += (_, _) => _genPanel = null;
+        }
+        _genPanel.Show(this);
+        _genPanel.Activate();
+    }
+
+    /// <summary>
+    /// Resolve + start the generative sidecar (§3.1) and wire it into <see cref="AiService"/>. Returns
+    /// (false, why) when no usable Python env exists (e.g. a foreign-OS ComfyUI venv on this host → the
+    /// user must pin a Python or install the generative tier). Cheap no-op once running.
+    /// </summary>
+    private async System.Threading.Tasks.Task<(bool Ok, string Message)> EnsureSidecarAsync(System.Threading.CancellationToken ct)
+    {
+        if (_sidecar is { IsAvailable: true }) { Ai.Generative = _sidecar; return (true, ""); }
+
+        var host = Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.CurrentHost();
+        var comfy = ModelReg.Sources.FirstOrDefault(s => s.Kind == Sable.Core.Ai.ModelSourceKind.ComfyUI)?.Path;
+        var ownPy = Sable.Ai.Sidecar.Provisioning.UvEnv.PythonIn(Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVenvDir);
+        string? own = System.IO.File.Exists(ownPy) ? ownPy : null;
+        var opts = new Sable.Ai.Sidecar.Provisioning.EnvResolveOptions(_settings.SidecarPython, comfy, own, host);
+
+        var env = await System.Threading.Tasks.Task.Run(
+            () => Sable.Ai.Sidecar.Provisioning.EnvResolver.ResolveAsync(opts, new Sable.Ai.Sidecar.Provisioning.EnvProbe(), ct), ct);
+        if (env is null)
+            return (false, "No usable Python env for the generative sidecar. Reuse a same-OS ComfyUI venv (with torch + diffusers), set a Python in Settings, or install the generative tier. See AI ▸ Models ▸ Check sidecar.");
+
+        _sidecar ??= new Sable.Ai.Sidecar.SidecarBackend();
+        bool ok = await _sidecar.StartAsync(env, ct: ct);
+        if (!ok) return (false, "The generative sidecar process failed to start.");
+        Ai.Generative = _sidecar;
+        return (true, $"using the '{env.Origin}' Python env");
+    }
+
+    /// <summary>Run a Generative Fill from the panel: validate layer + selection, start the sidecar, generate,
+    /// deposit the result as an undoable layer (§4.2).</summary>
+    private async System.Threading.Tasks.Task OnGenerateFill(GenFillRequest req)
+    {
+        if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
+        { _genPanel?.SetStatus("Select a pixel layer first."); return; }
+
+        var docSel = doc.SnapshotSelectionMask();
+        if (docSel is null) { _genPanel?.SetStatus("Make a selection to mark the fill region."); return; }
+        var region = LayerMaskFromDocSelection(px, docSel, doc.Width, doc.Height);
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, "Generative fill…", cts);
+        System.Exception? error = null;
+        try
+        {
+            var (ok, msg) = await EnsureSidecarAsync(cts.Token);
+            if (!ok) { busy.Done(); _genPanel?.SetStatus(msg); return; }
+            _genPanel?.SetStatus(msg);
+
+            var spec = new Sable.Core.Ai.GenRequest(req.BaseId, Sable.Core.Ai.AiTaskKind.Inpaint, req.Prompt,
+                req.Negative, req.Steps, req.Cfg, req.Seed, Loras: req.Loras, Offload: req.Offload);
+            var cmd = await Ai.GenerativeFillAsync(doc, px, region, spec, busy.Progress, cts.Token);
+            Doc!.Undo.Execute(cmd);
+        }
+        catch (System.OperationCanceledException) { /* cancelled */ }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) _genPanel?.SetStatus($"Failed: {error.Message}");
+    }
+
+    /// <summary>Sample a doc-sized selection coverage into a layer-aligned <see cref="Sable.Core.Ai.AiMask"/>
+    /// (offset-aware), so the fill region lines up with the target layer's buffer.</summary>
+    private static Sable.Core.Ai.AiMask LayerMaskFromDocSelection(Sable.Engine.Layers.PixelLayer px, byte[] docSel, int docW, int docH)
+    {
+        var cov = new byte[px.Width * px.Height];
+        for (int y = 0; y < px.Height; y++)
+        {
+            int dy = y + px.OffsetY;
+            if (dy < 0 || dy >= docH) continue;
+            for (int x = 0; x < px.Width; x++)
+            {
+                int dx = x + px.OffsetX;
+                if (dx < 0 || dx >= docW) continue;
+                cov[y * px.Width + x] = docSel[dy * docW + dx];
+            }
+        }
+        return new Sable.Core.Ai.AiMask(cov, px.Width, px.Height);
+    }
 
     private async void OnAiModels(object? sender, RoutedEventArgs e)
     {
         var win = new ModelsWindow(ModelReg, new Sable.Ai.Gpu.GpuProbe().FreeVramBytes()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
         win.DefaultsChanged += ApplyAiVisibility;   // default/install changes alter which model serves each op
+        win.SourcesChanged += PersistModelSources;  // add/remove a ComfyUI source → save to settings
+        win.CheckSidecarRequested += () => _ = OnCheckSidecar(win);
         await win.ShowDialog(this);
         ApplyAiVisibility();   // installs/removals in the manager change which features are available
+    }
+
+    /// <summary>Save the registry's external (non-native) sources to settings (§2.1).</summary>
+    private void PersistModelSources()
+    {
+        _settings.ModelSources = ModelReg.Sources
+            .Where(s => s.Kind != Sable.Core.Ai.ModelSourceKind.Native)
+            .ToList();
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    /// <summary>Diagnose the generative-sidecar Python env (§3.1): resolve pinned → ComfyUI venv (host-OS
+    /// gated) → own venv, and report what would be used. Answers "is it reusing a venv or building one?".</summary>
+    private async System.Threading.Tasks.Task OnCheckSidecar(Window owner)
+    {
+        const string title = "Generative sidecar — Python env";
+        var host = Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.CurrentHost();
+        var comfy = ModelReg.Sources.FirstOrDefault(s => s.Kind == Sable.Core.Ai.ModelSourceKind.ComfyUI)?.Path;
+        var ownPy = Sable.Ai.Sidecar.Provisioning.UvEnv.PythonIn(Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVenvDir);
+        string? own = System.IO.File.Exists(ownPy) ? ownPy : null;
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(owner, "Probing Python environments…", cts);
+        var sb = new System.Text.StringBuilder();
+        try
+        {
+            sb.AppendLine($"Host OS: {host}");
+
+            // enumerate ComfyUI candidates + the host-OS gate (explains the Linux-on-Windows skip)
+            if (!string.IsNullOrWhiteSpace(comfy))
+            {
+                sb.AppendLine($"ComfyUI: {comfy}");
+                foreach (var c in Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.Candidates(comfy))
+                {
+                    bool exists = System.IO.File.Exists(c.Path);
+                    if (!exists) continue;
+                    bool compat = Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.HostCompatible(c, host);
+                    sb.AppendLine($"  • {c.Path} [{c.Kind}] {(compat ? "compatible" : "INCOMPATIBLE (foreign OS) — venv skipped, weights still used")}");
+                }
+            }
+            else sb.AppendLine("ComfyUI: (no source added)");
+
+            var opts = new Sable.Ai.Sidecar.Provisioning.EnvResolveOptions(_settings.SidecarPython, comfy, own, host);
+            var env = await System.Threading.Tasks.Task.Run(
+                () => Sable.Ai.Sidecar.Provisioning.EnvResolver.ResolveAsync(opts, new Sable.Ai.Sidecar.Provisioning.EnvProbe(), cts.Token));
+
+            sb.AppendLine();
+            if (env is not null)
+            {
+                sb.AppendLine($"RESOLVED: reusing the '{env.Origin}' env");
+                sb.AppendLine($"  python: {env.PythonExe}");
+                sb.AppendLine($"  torch {env.Caps.TorchVersion}, diffusers {env.Caps.DiffusersVersion}");
+                var acc = new List<string>();
+                if (env.Caps.Cuda) acc.Add($"CUDA {env.Caps.CudaVersion}");
+                if (env.Caps.Mps) acc.Add("MPS");
+                if (env.Caps.Rocm) acc.Add("ROCm");
+                if (env.Caps.DirectMl) acc.Add("DirectML");
+                sb.AppendLine($"  accelerator: {(acc.Count > 0 ? string.Join(", ", acc) : "none")}");
+            }
+            else
+            {
+                var uv = Sable.Ai.Sidecar.Provisioning.UvEnv.FindUv();
+                sb.AppendLine("RESOLVED: no reusable env → Sable would PROVISION ITS OWN venv.");
+                sb.AppendLine($"  own venv: {ownPy} (not yet created)");
+                sb.AppendLine($"  uv: {(uv ?? "NOT FOUND on PATH — install uv to provision")}");
+            }
+        }
+        catch (System.Exception ex) { sb.AppendLine($"Probe failed: {ex.Message}"); }
+        finally { busy.Done(); }
+
+        await ConfirmWindow.Ask(owner, title, sb.ToString());
     }
 
     // --- custom title bar (menu-in-header, client-side decorations) ---

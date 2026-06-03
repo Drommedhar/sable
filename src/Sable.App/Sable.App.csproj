@@ -21,6 +21,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- the generative sidecar's Python server, run from {BaseDir}/server (a ProjectReference does not
+       flow the referenced project's content into this output, so copy it here too). -->
+  <ItemGroup>
+    <None Include="..\Sable.Ai.Sidecar\server\**\*.py" CopyToOutputDirectory="PreserveNewest" LinkBase="server" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.0.4" />
     <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
@@ -37,6 +43,7 @@
     <ProjectReference Include="..\Sable.Canvas\Sable.Canvas.csproj" />
     <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
     <ProjectReference Include="..\Sable.Ai\Sable.Ai.csproj" />
+    <ProjectReference Include="..\Sable.Ai.Sidecar\Sable.Ai.Sidecar.csproj" />
     <ProjectReference Include="..\Sable.Format\Sable.Format.csproj" />
   </ItemGroup>
 
