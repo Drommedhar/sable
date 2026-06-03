@@ -84,17 +84,20 @@ public sealed partial class DocumentViewModel : ObservableObject
     {
         for (int i = list.Count - 1; i >= 0; i--)
         {
-            bool expanded = list[i] is not GroupLayer g0 || !_collapsed.Contains(g0);
-            Layers.Add(new LayerViewModel(list[i], depth, expanded));
-            if (list[i] is GroupLayer g && expanded) AddTree(g.Children, depth + 1);
+            var layer = list[i];
+            bool expanded = !_collapsed.Contains(layer);
+            Layers.Add(new LayerViewModel(layer, depth, expanded));
+            // any layer can hold children: a group's content OR a content layer's nested
+            // effect layers (live filters / adjustments) — both flatten as indented rows.
+            if (layer.HasChildren && expanded) AddTree(layer.Children, depth + 1);
         }
     }
 
     /// <summary>Toggle a group row's collapsed state and rebuild the flattened list.</summary>
     public void ToggleExpand(LayerViewModel vm)
     {
-        if (vm.Model is not GroupLayer g) return;
-        if (!_collapsed.Remove(g)) _collapsed.Add(g);
+        if (!vm.Model.HasChildren) return;
+        if (!_collapsed.Remove(vm.Model)) _collapsed.Add(vm.Model);
         Resync();
     }
 
@@ -151,10 +154,30 @@ public sealed partial class DocumentViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void NewAdjustment(AdjustmentKind kind) => AddLayer(new AdjustmentLayer(kind));
+    private void NewAdjustment(AdjustmentKind kind) => AddEffectLayer(new AdjustmentLayer(kind));
 
     [RelayCommand]
-    private void NewFilter(FilterKind kind) => AddLayer(new FilterLayer(kind));
+    private void NewFilter(FilterKind kind) => AddEffectLayer(new FilterLayer(kind));
+
+    /// <summary>
+    /// Add a live filter / adjustment. Affinity model: if a content layer (pixel/shape/
+    /// text/path) is selected, the effect NESTS inside it (clipped to that layer only);
+    /// otherwise it goes in as a sibling and affects the whole composite below it.
+    /// </summary>
+    private void AddEffectLayer(Layer effect)
+    {
+        if (SelectedLayer?.Model is PixelLayer or ShapeLayer or TextLayer or PathLayer)
+        {
+            var host = SelectedLayer.Model;
+            Undo.Execute(new AddLayerCommand(Model, host.Children, effect, host.Children.Count));
+        }
+        else
+        {
+            var parent = TargetParent();
+            Undo.Execute(new AddLayerCommand(Model, parent, effect, InsertIndex(parent)));
+        }
+        SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == effect);
+    }
 
     [RelayCommand]
     private void DeleteLayer()
@@ -226,38 +249,76 @@ public sealed partial class DocumentViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Drag-drop: drop <paramref name="dragged"/> onto <paramref name="target"/>.
-    /// Onto a group → move into it; onto a sibling layer → auto-group the two;
-    /// otherwise reorder into the target's parent.
+    /// Drag-drop ONTO a target row (middle band). Decides the action by what's dragged:
+    /// onto a group → move all in; a live filter / adjustment onto a content layer → NEST it
+    /// as a child (clipped to that layer, Affinity model); otherwise → auto-group target +
+    /// dragged into a new group. Supports a multi-selection drag.
     /// </summary>
-    public void DropLayer(Layer dragged, Layer target)
+    public void DropOnto(IReadOnlyList<Layer> dragged, Layer target)
     {
-        if (dragged == target) return;
-        if (dragged is GroupLayer dg && Contains(dg, target)) return;   // no cycles
+        var items = dragged
+            .Where(d => !ReferenceEquals(d, target) && !(d is GroupLayer dg && Contains(dg, target)))
+            .ToList();
+        if (items.Count == 0) return;
 
-        if (target is GroupLayer g)
+        // 1. onto a group → move all into it
+        if (target is GroupLayer)
         {
-            Undo.Execute(new MoveLayerToCommand(Model, dragged, g.Children, g.Children.Count));
-            SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == dragged);
+            MoveAllInto(items, target.Children);
             return;
         }
 
-        var pT = Model.FindParent(target);
-        var pD = Model.FindParent(dragged);
-        if (pT is null || pD is null) return;
+        // 2. all-effect drag onto a content layer → nest as children (clip to that layer)
+        bool allEffects = items.All(d => d is FilterLayer or AdjustmentLayer);
+        bool targetIsContent = target is PixelLayer or ShapeLayer or TextLayer or PathLayer;
+        if (allEffects && targetIsContent)
+        {
+            MoveAllInto(items, target.Children);
+            return;
+        }
 
-        if (ReferenceEquals(pT, pD))
+        // 3. otherwise auto-group target + dragged
+        AutoGroup(items, target);
+    }
+
+    // move each item into a destination list (top), preserving drag order; select the last.
+    private void MoveAllInto(List<Layer> items, List<Layer> dest)
+    {
+        foreach (var d in items) Undo.Execute(new MoveLayerToCommand(Model, d, dest, dest.Count));
+        SelectModel(items[^1]);
+    }
+
+    private void AutoGroup(List<Layer> items, Layer target)
+    {
+        var parent = Model.FindParent(target);
+        if (parent is null) return;
+        // bring any dragged from other parents next to the target first, so they share a parent
+        foreach (var d in items.Where(d => !ReferenceEquals(Model.FindParent(d), parent)).ToList())
+            Undo.Execute(new MoveLayerToCommand(Model, d, parent, parent.IndexOf(target)));
+        var groupSet = new List<Layer>(items);
+        if (!groupSet.Contains(target)) groupSet.Add(target);
+        var cmd = new GroupLayersCommand(Model, groupSet);
+        Undo.Execute(cmd);
+        SelectModel(cmd.Group);
+    }
+
+    /// <summary>Reorder a multi-selection above/below the target (between-row drop).</summary>
+    public void DropMultipleRelative(IReadOnlyList<Layer> dragged, Layer target, bool above)
+    {
+        if (dragged.Count == 1) { DropLayerRelative(dragged[0], target, above); return; }
+        var parent = Model.FindParent(target) ?? Model.Layers;
+        var items = dragged
+            .Where(d => !ReferenceEquals(d, target) && !(d is GroupLayer dg && Contains(dg, target)))
+            .ToList();
+        if (items.Count == 0) return;
+        int ti = parent.IndexOf(target);
+        int insert = above ? ti + 1 : ti;
+        foreach (var d in items)
         {
-            // auto-group the two sibling layers
-            var cmd = new GroupLayersCommand(Model, new[] { dragged, target });
-            Undo.Execute(cmd);
-            SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == cmd.Group);
+            Undo.Execute(new MoveLayerToCommand(Model, d, parent, Math.Clamp(insert, 0, parent.Count)));
+            insert = parent.IndexOf(d) + 1;   // stack the next one just above the one we placed
         }
-        else
-        {
-            Undo.Execute(new MoveLayerToCommand(Model, dragged, pT, pT.IndexOf(target)));
-            SelectedLayer = Layers.FirstOrDefault(vm => vm.Model == dragged);
-        }
+        SelectModel(items[^1]);
     }
 
     /// <summary>Drop <paramref name="dragged"/> just above/below <paramref name="target"/> (between-row reorder).

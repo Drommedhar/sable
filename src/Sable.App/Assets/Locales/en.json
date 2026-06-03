@@ -37,8 +37,6 @@
   "adjustmentWindow": {
     "adjustment": "Adjustment",
     "reset": "Reset",
-    "opacity": "Opacity",
-    "selectAnAdjustmentOrFilter": "Select an adjustment or filter layer to edit its parameters.",
     "rgb": "RGB",
     "clickToAddAPoint": "Click to add a point. Drag to shape. Right-click a point to delete.",
     "exposureStops": "Exposure (stops)",

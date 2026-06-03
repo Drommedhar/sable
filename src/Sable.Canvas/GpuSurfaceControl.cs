@@ -35,6 +35,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     // pasteboard (canvas surround) colour, 0..1, set by the chrome theme. Defaults to dark.
     private float _pasteR = 0.16f, _pasteG = 0.16f, _pasteB = 0.17f;
     private TextureFormat _format = TextureFormat.Bgra8Unorm;
+    private PresentMode _presentMode = PresentMode.Fifo;
 
     /// <summary>Sets the pasteboard (surround) colour from the active chrome theme (0..255).</summary>
     public void SetPasteboardColor(byte r, byte g, byte b)
@@ -332,6 +333,15 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 if (caps.Formats[i] == TextureFormat.Bgra8Unorm) { _format = TextureFormat.Bgra8Unorm; break; }
         }
 
+        // --- pick a NON-BLOCKING present mode if available ---
+        // Fifo (vsync) blocks SurfaceGetCurrentTexture on the vblank, and the render timer runs at
+        // DispatcherPriority.Render (above Input) — so that block starves Avalonia's input dispatch
+        // and clicks get swallowed app-wide. Mailbox (triple-buffered, no tearing, no CPU vsync wait)
+        // keeps the UI thread free. Fall back to Fifo where Mailbox isn't supported (always is).
+        if (caps.PresentModeCount > 0 && caps.PresentModes is not null)
+            for (uint i = 0; i < caps.PresentModeCount; i++)
+                if (caps.PresentModes[i] == PresentMode.Mailbox) { _presentMode = PresentMode.Mailbox; break; }
+
         _compositor = new GpuCompositor(_gpu);
         _blitter = new SurfaceBlitter(_gpu, _format);
         // no implicit demo — the canvas stays empty until MainWindow opens a document/tab.
@@ -347,7 +357,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             Usage = TextureUsage.RenderAttachment,
             Width = w,
             Height = h,
-            PresentMode = PresentMode.Fifo,
+            PresentMode = _presentMode,
             AlphaMode = CompositeAlphaMode.Auto
         };
         _gpu.Api.SurfaceConfigure(_surface, in config);

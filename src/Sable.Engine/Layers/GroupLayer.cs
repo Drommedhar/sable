@@ -8,17 +8,12 @@ namespace Sable.Engine.Layers;
 /// </summary>
 public sealed class GroupLayer : Layer
 {
-    public List<Layer> Children { get; } = new();
-
     public GroupLayer(string name = "Group")
     {
         Name = name;
     }
 
-    protected override Layer CreateClone()
-    {
-        var c = new GroupLayer(Name);
-        foreach (var child in Children) c.Children.Add(child.Clone());
-        return c;
-    }
+    // Children live on the base Layer now (any layer can hold children). The base
+    // Clone() deep-copies them, so CreateClone just makes the typed shell.
+    protected override Layer CreateClone() => new GroupLayer(Name);
 }

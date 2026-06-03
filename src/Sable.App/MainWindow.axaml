@@ -608,7 +608,19 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- adjustment params now live in the modeless AdjustmentWindow (Window menu) -->
+                        <!-- contextual parameter editor (Affinity-style, docked BELOW the layers panel
+                             instead of a floating window): adjustment/filter params when an effect layer
+                             is selected, shape properties when a shape layer is selected -->
+                        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel}" MaxHeight="400"
+                                BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0"
+                                IsVisible="{Binding SelectedLayer.IsEffect, FallbackValue=False}">
+                            <local:AdjustmentPanel x:Name="AdjPanel" />
+                        </Border>
+                        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel}" MaxHeight="400"
+                                BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0"
+                                IsVisible="{Binding SelectedLayer.IsShape, FallbackValue=False}">
+                            <local:ShapePanel x:Name="ShapePanelCtl" />
+                        </Border>
                         <!-- footer buttons (bound to undoable layer commands) -->
                         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}"
                                 Height="{StaticResource StatusBarHeight}" Padding="6,0">
@@ -733,7 +745,7 @@
                                                     IsVisible="{Binding IsNested}" />
                                             <!-- group disclosure chevron -->
                                             <Button Classes="iconbtn" Width="14" Height="14" Padding="0"
-                                                    Click="OnToggleGroupExpand" IsVisible="{Binding IsGroup}"
+                                                    Click="OnToggleGroupExpand" IsVisible="{Binding HasChildren}"
                                                     VerticalAlignment="Center">
                                                 <Panel>
                                                     <Path Classes="icon" Width="12" Height="12" IsVisible="{Binding IsExpanded}"
@@ -787,6 +799,9 @@
     <Canvas x:Name="DragLayer" IsHitTestVisible="False">
         <!-- between-row drop indicator -->
         <Border x:Name="DropIndicator" IsVisible="False" Height="2" Background="#FF2D7FF9" />
+        <!-- drop-into / auto-group highlight (outline of the target row) -->
+        <Border x:Name="DropIntoBox" IsVisible="False" BorderBrush="#FF2D7FF9" BorderThickness="2"
+                CornerRadius="3" Background="#332D7FF9" />
         <Border x:Name="DragGhost" IsVisible="False" Background="#E6303030"
                 BorderBrush="#FF2D7FF9" BorderThickness="1" CornerRadius="3" Padding="8,4">
             <TextBlock x:Name="DragGhostText" Foreground="White" FontSize="12" />

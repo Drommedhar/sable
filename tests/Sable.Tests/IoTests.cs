@@ -555,6 +555,43 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesNestedChildEffects()   // Affinity nested-child filters/adjustments
+    {
+        var doc = new Document(16, 16);
+        var host = new PixelLayer(16, 16, "host");
+        host.Children.Add(new FilterLayer(FilterKind.GaussianBlur) { Radius = 12f });
+        host.Children.Add(new AdjustmentLayer(AdjustmentKind.BrightnessContrast) { Contrast = 1.4f });
+        doc.Layers.Add(host);
+
+        var path = Path.Combine(Path.GetTempPath(), $"nest_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            var loaded = SableFile.Load(path);
+            var lh = Assert.IsType<PixelLayer>(loaded.Layers[0]);
+            Assert.Equal(2, lh.Children.Count);
+            var flt = Assert.IsType<FilterLayer>(lh.Children[0]);
+            Assert.Equal(12f, flt.Radius, 3);
+            var adj = Assert.IsType<AdjustmentLayer>(lh.Children[1]);
+            Assert.Equal(1.4f, adj.Contrast, 3);
+            // a nested child resolves its parent (the host's Children list), not the doc root
+            Assert.Same(lh.Children, loaded.FindParent(flt));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void Clone_DeepCopiesNestedChildren()
+    {
+        var host = new PixelLayer(8, 8, "host");
+        host.Children.Add(new FilterLayer(FilterKind.GaussianBlur));
+        var c = (PixelLayer)host.Clone();
+        Assert.Single(c.Children);
+        Assert.NotSame(host.Children[0], c.Children[0]);
+        Assert.IsType<FilterLayer>(c.Children[0]);
+    }
+
+    [Fact]
     public void SaveLoad_PreservesSubDocLayerMaskDims()   // audit C3: mask must round-trip at LAYER size, not doc size
     {
         var doc = new Document(100, 80);

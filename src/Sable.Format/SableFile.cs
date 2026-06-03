@@ -289,11 +289,13 @@ public static class SableFile
                 ld.PathStroked = pth.Stroked; ld.PsR = pth.StrokeR; ld.PsG = pth.StrokeG; ld.PsB = pth.StrokeB; ld.PsA = pth.StrokeA;
                 ld.PsWidth = pth.StrokeWidth; ld.PsCap = (int)pth.Cap; ld.PsJoin = (int)pth.Join;
                 break;
-            case GroupLayer g:
+            case GroupLayer:
                 ld.Type = "group";
-                foreach (var c in g.Children) ld.Children.Add(SaveLayer(zip, c, docW, docH, ref next));
                 break;
         }
+        // children: a group's contained layers OR a content layer's nested effect layers
+        // (live filters / adjustments). Saved uniformly for every layer type.
+        foreach (var c in layer.Children) ld.Children.Add(SaveLayer(zip, c, docW, docH, ref next));
         if (layer.Mask is { } mask)
         {
             ld.Mask = $"masks/{id}.raw";
@@ -403,6 +405,9 @@ public static class SableFile
             created.MaskDirty = true;
             created.Dirty = true;
         }
+        // children: group content OR nested effect layers — loaded uniformly for every type.
+        foreach (var c in ld.Children)
+            if (BuildLayer(c, zip, w, h) is { } cl) created.Children.Add(cl);
         return created;
     }
 
@@ -498,13 +503,9 @@ public static class SableFile
         return px;
     }
 
-    private static GroupLayer LoadGroup(LayerDto ld, ZipArchive zip, int w, int h)
-    {
-        var g = new GroupLayer(ld.Name);
-        foreach (var c in ld.Children)
-            if (BuildLayer(c, zip, w, h) is { } l) g.Children.Add(l);
-        return g;
-    }
+    // Children are loaded generically by BuildLayer (any layer can hold them), so this
+    // just makes the typed group shell.
+    private static GroupLayer LoadGroup(LayerDto ld, ZipArchive zip, int w, int h) => new(ld.Name);
 
     private static void WriteEntry(ZipArchive zip, string name, byte[] data)
     {

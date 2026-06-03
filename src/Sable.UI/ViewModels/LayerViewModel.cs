@@ -22,6 +22,8 @@ public sealed partial class LayerViewModel : ObservableObject
     public int Depth { get; }
     public Avalonia.Thickness Indent => new(Depth * 14, 0, 0, 0);
     public bool IsGroup => Model is GroupLayer;
+    /// <summary>Has nested rows (group content OR nested effect layers) → shows a disclosure chevron.</summary>
+    public bool HasChildren => Model.HasChildren;
     /// <summary>A raster layer — gets a live downscaled <see cref="Thumbnail"/>; others show a type icon.</summary>
     public bool IsPixel => Model is PixelLayer;
     /// <summary>Indented below a group — draws a nesting guide.</summary>

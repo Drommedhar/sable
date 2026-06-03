@@ -84,6 +84,9 @@ public sealed unsafe class GpuCompositor : IDisposable
     private ComputePipeline* _noisePipeline;    // add-noise/denoise (reuses _blurBgl)
     private ComputePipeline* _combinePipeline;  // unsharp/high-pass/clarity (2 inputs)
     private BindGroupLayout* _combineBgl;
+    private ComputePipeline* _mixPipeline;      // live-filter REPLACE crossfade (original ↔ filtered)
+    private BindGroupLayout* _mixBgl;
+    private Buffer* _mixParamsBuf;              // 16B: opacity + hasMask
     private Buffer* _filterParamsBuf;           // 32B shared filter params
     private Buffer* _fxLdoc;     // layer rendered in doc space (effect source)
     private Buffer* _fxTint;     // effect sprite (tint / stroke / blur ping)
@@ -146,6 +149,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _stampDimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
         _fxParamsBuf = NewBuffer(48, BufferUsage.Uniform | BufferUsage.CopyDst);
         _filterParamsBuf = NewBuffer(32, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _mixParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
 
         // tile atlas: cap to the device's storage-buffer binding limit (and a sane budget).
         const ulong budget = 768UL * 1024 * 1024;
@@ -184,6 +188,18 @@ public sealed unsafe class GpuCompositor : IDisposable
         var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 5, Entries = entries };
         _combineBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
         _combinePipeline = MakeComputePipeline("filter_combine", _combineBgl);
+
+        // live-filter mix (crossfade original ↔ filtered by opacity × mask): 6 bindings
+        var me = stackalloc BindGroupLayoutEntry[6];
+        me[0] = Entry(0, BufferBindingType.Uniform);
+        me[1] = Entry(1, BufferBindingType.Uniform);
+        me[2] = Entry(2, BufferBindingType.ReadOnlyStorage);    // a (original)
+        me[3] = Entry(3, BufferBindingType.ReadOnlyStorage);    // b (filtered)
+        me[4] = Entry(4, BufferBindingType.Storage);            // out
+        me[5] = Entry(5, BufferBindingType.ReadOnlyStorage);    // mask
+        var mDesc = new BindGroupLayoutDescriptor { EntryCount = 6, Entries = me };
+        _mixBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in mDesc);
+        _mixPipeline = MakeComputePipeline("filter_mix", _mixBgl);
     }
 
     // build a compute pipeline from an embedded WGSL module + an existing bind-group layout
@@ -507,7 +523,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         foreach (var l in list)
         {
             _liveSweep.Add(l);
-            if (l is GroupLayer g) CollectLive(g.Children);
+            CollectLive(l.Children);
         }
     }
 
@@ -583,7 +599,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     private static bool SubtreeDirty(Layer l)
     {
         if (l.Dirty || l.MaskDirty) return true;
-        if (l is GroupLayer g) foreach (var c in g.Children) if (SubtreeDirty(c)) return true;
+        foreach (var c in l.Children) if (SubtreeDirty(c)) return true;
         return false;
     }
 
@@ -602,6 +618,16 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (!layer.Visible || layer.Opacity <= 0f) return;
         var api = _gpu.Api;
         var maskBuf = GetMaskBuffer(layer);
+
+        // A content layer with nested child effects (live filters / adjustments clipped to it):
+        // render own content + the child stack into a doc-space buffer, then FX + blend. This is
+        // the Affinity nested-child model — a filter inside a layer affects ONLY that layer.
+        if (layer.HasChildren && layer is PixelLayer or ShapeLayer or TextLayer or PathLayer)
+        {
+            var docContent = RenderContentWithChildren(layer, maskBuf, depth);
+            BlendDocContentWithFx(ref current, ref other, docContent, layer);
+            return;
+        }
 
         {
             if (layer is PixelLayer px)
@@ -671,9 +697,11 @@ public sealed unsafe class GpuCompositor : IDisposable
             else if (layer is FilterLayer flt)
             {
                 RenderFilter(flt, current, _fxTint);   // filtered backdrop → _fxTint
-                // blend the filtered result back over the backdrop with opacity + mask + fill + clip
-                BlendBufferInto(ref current, ref other, _fxTint, BlendMode.Normal, layer.Opacity, 0f, 0f, maskBuf,
-                    layer.FillOpacity, layer.ClipToBelow ? 1f : 0f);
+                // REPLACE the backdrop with the filtered result (crossfade by opacity × mask). A live
+                // filter SHOWS the filtered version — it must not src-over composite over the original
+                // (that left the original's sharp content visible through a blur's soft edges).
+                DispatchFilterMix(current, _fxTint, other, layer.Opacity, maskBuf);
+                var tmp = current; current = other; other = tmp;
             }
         }
     }
@@ -788,8 +816,30 @@ public sealed unsafe class GpuCompositor : IDisposable
         }
 
         RasterizeLayerToDoc(srcBuf, layer, maskBuf, srcW, srcH, tileTable);   // _fxLdoc = layer in doc space
+        ApplyBehindFx(ref current, ref other, layer);
+        BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH, tileTable);   // the layer itself
+        ApplyFrontFx(ref current, ref other, layer);
+    }
 
-        // behind effects (drop shadow / outer glow), in Effects-list order
+    // Composite a content layer that has nested child effects, plus its own FX, from an
+    // already-doc-space content buffer (transform + mask baked in, transform = identity).
+    private void BlendDocContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* docContent, Layer layer)
+    {
+        float clip = layer.ClipToBelow ? 1f : 0f;
+        if (!layer.HasEffects)
+        {
+            BlendBufferInto(ref current, ref other, docContent, layer.BlendMode, layer.Opacity, 0f, 0f, null, layer.FillOpacity, clip);
+            return;
+        }
+        CopyBuffer(docContent, _fxLdoc, _imgBytes);          // _fxLdoc = doc-space content (post children)
+        ApplyBehindFx(ref current, ref other, layer);
+        BlendBufferInto(ref current, ref other, docContent, layer.BlendMode, layer.Opacity, 0f, 0f, null, layer.FillOpacity, clip);
+        ApplyFrontFx(ref current, ref other, layer);
+    }
+
+    // behind effects (drop shadow / outer glow), in Effects-list order — reads _fxLdoc (doc-space layer)
+    private void ApplyBehindFx(ref Buffer* current, ref Buffer* other, Layer layer)
+    {
         foreach (var fx in layer.Effects)
             if (fx.Enabled && fx.Kind is LayerEffectKind.DropShadow or LayerEffectKind.OuterGlow)
             {
@@ -800,11 +850,11 @@ public sealed unsafe class GpuCompositor : IDisposable
                 float oy = fx.Kind == LayerEffectKind.DropShadow ? fx.OffsetY : 0f;
                 BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, ox, oy, null);
             }
+    }
 
-        // the layer itself
-        BlendInto(ref current, ref other, srcBuf, layer, maskBuf, srcW, srcH, tileTable);
-
-        // front effects, in Effects-list order (so list reordering changes the stacking)
+    // front effects, in Effects-list order (so list reordering changes the stacking) — reads _fxLdoc
+    private void ApplyFrontFx(ref Buffer* current, ref Buffer* other, Layer layer)
+    {
         foreach (var fx in layer.Effects)
         {
             if (!fx.Enabled) continue;
@@ -832,6 +882,56 @@ public sealed unsafe class GpuCompositor : IDisposable
                     continue;   // behind effects already handled
             }
             BlendBufferInto(ref current, ref other, _fxTint, fx.BlendMode, fx.Opacity, 0f, 0f, null);
+        }
+    }
+
+    // Render a content layer's own pixels into a doc-space scratch (transform + mask baked,
+    // Normal blend / full opacity), then composite its child effect layers (filters/adjustments)
+    // on top — each child's backdrop is the parent content + lower children, so the child affects
+    // ONLY this layer. Returns the doc-space result; the parent blend/opacity/FX apply afterwards.
+    private Buffer* RenderContentWithChildren(Layer layer, Buffer* maskBuf, int depth)
+    {
+        ScratchPair(depth + 1, out Buffer* cur, out Buffer* oth);
+        ClearBuffer(cur);
+
+        var content = GetContentBuffer(layer, out int sw, out int sh, out Buffer* tileTable);
+        if (content is not null || tileTable is not null)
+        {
+            var (inv, persp) = LayerInverse(layer, sw, sh);
+            WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null, persp, tileTable is not null ? 1u : 0u);
+            DispatchBlend(cur, content, oth, maskBuf, sw, sh, tileTable);
+            var t = cur; cur = oth; oth = t;
+        }
+
+        foreach (var child in layer.Children) BlendOneLayer(child, ref cur, ref oth, depth + 1);
+        return cur;
+    }
+
+    // The layer's own content buffer (no children/transform applied). Mirrors the per-type
+    // fast-path source selection in BlendOneLayer; handles the brush-preview dab on pixel layers.
+    private Buffer* GetContentBuffer(Layer layer, out int srcW, out int srcH, out Buffer* tileTable)
+    {
+        tileTable = null;
+        switch (layer)
+        {
+            case PixelLayer px:
+                srcW = px.Width; srcH = px.Height;
+                if (Preview is { } pv0 && ReferenceEquals(pv0.Layer, layer))
+                {
+                    var pv = Preview!.Value;
+                    var sb = GetLayerBuffer(px);
+                    int bytes = px.Width * px.Height * 4;
+                    EnsurePreviewBuffer(bytes);
+                    CopyBuffer(sb, _previewBuf, bytes);
+                    DispatchStamp(_previewBuf, sb, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
+                    return _previewBuf;
+                }
+                tileTable = GetLayerTiles(px);
+                return tileTable is not null ? _dummyStore : GetLayerBuffer(px);
+            case ShapeLayer sh: srcW = _width; srcH = _height; return GetShapeBuffer(sh);
+            case TextLayer txt: srcW = _width; srcH = _height; return GetTextBuffer(txt);
+            case PathLayer pth: srcW = _width; srcH = _height; return GetPathBuffer(pth);
+            default: srcW = _width; srcH = _height; return null;
         }
     }
 
@@ -1003,6 +1103,23 @@ public sealed unsafe class GpuCompositor : IDisposable
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
         var bgDesc = new BindGroupDescriptor { Layout = _combineBgl, EntryCount = 5, Entries = bg };
         DispatchPass(_combinePipeline, api.DeviceCreateBindGroup(_gpu.Device, in bgDesc));
+    }
+
+    // live-filter REPLACE: out = mix(a original, b filtered, opacity × mask) — crossfade, not over.
+    private void DispatchFilterMix(Buffer* a, Buffer* b, Buffer* outp, float opacity, Buffer* mask)
+    {
+        var api = _gpu.Api;
+        var prm = stackalloc float[4] { opacity, mask is not null ? 1f : 0f, 0f, 0f };
+        api.QueueWriteBuffer(_gpu.Queue, _mixParamsBuf, 0, prm, 16);
+        var bg = stackalloc BindGroupEntry[6];
+        bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _mixParamsBuf, Size = 16 };
+        bg[2] = new BindGroupEntry { Binding = 2, Buffer = a, Size = (ulong)_imgBytes };
+        bg[3] = new BindGroupEntry { Binding = 3, Buffer = b, Size = (ulong)_imgBytes };
+        bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
+        bg[5] = new BindGroupEntry { Binding = 5, Buffer = mask is not null ? mask : _dummyStore, Size = mask is not null ? (ulong)_imgBytes : 4 };
+        var bgDesc = new BindGroupDescriptor { Layout = _mixBgl, EntryCount = 6, Entries = bg };
+        DispatchPass(_mixPipeline, api.DeviceCreateBindGroup(_gpu.Device, in bgDesc));
     }
 
     // run one compute pass over the whole image with a prepared bind group, then release it
@@ -1499,6 +1616,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (_noisePipeline is not null) api.ComputePipelineRelease(_noisePipeline);
         if (_combinePipeline is not null) api.ComputePipelineRelease(_combinePipeline);
         if (_combineBgl is not null) api.BindGroupLayoutRelease(_combineBgl);
+        if (_mixPipeline is not null) api.ComputePipelineRelease(_mixPipeline);
+        if (_mixBgl is not null) api.BindGroupLayoutRelease(_mixBgl);
+        if (_mixParamsBuf is not null) api.BufferRelease(_mixParamsBuf);
         if (_filterParamsBuf is not null) api.BufferRelease(_filterParamsBuf);
     }
 }
