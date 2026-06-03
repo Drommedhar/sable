@@ -100,7 +100,7 @@ public sealed class Document
         foreach (var l in layers)
         {
             if (l.Dirty) return true;
-            if (l is GroupLayer g && AnyDirty(g.Children)) return true;
+            if (AnyDirty(l.Children)) return true;
         }
         return false;
     }
@@ -119,7 +119,7 @@ public sealed class Document
         foreach (var l in layers)
         {
             l.Dirty = false;
-            if (l is GroupLayer g) ClearDirty(g.Children);
+            ClearDirty(l.Children);
         }
     }
 
@@ -130,11 +130,10 @@ public sealed class Document
     {
         if (list.Contains(layer)) return list;
         foreach (var l in list)
-            if (l is GroupLayer g)
-            {
-                var found = FindParent(g.Children, layer);
-                if (found is not null) return found;
-            }
+        {
+            var found = FindParent(l.Children, layer);
+            if (found is not null) return found;
+        }
         return null;
     }
 

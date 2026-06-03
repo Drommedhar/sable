@@ -284,6 +284,27 @@ unsafe
         bcomp.Preview = null;
     }
 
+    // --- nested child filter (Affinity model): a Gaussian blur INSIDE a pixel layer blurs ONLY that layer ---
+    {
+        var ndoc = new Sable.Engine.Document(64, 64);
+        ndoc.Layers.Add(new Sable.Engine.Layers.PixelLayer(64, 64, "bg"));   // transparent backdrop
+        var host = new Sable.Engine.Layers.PixelLayer(64, 64, "host");
+        for (int y = 24; y < 40; y++)                                        // opaque white square [24,40)
+        for (int x = 24; x < 40; x++) { int i = (y * 64 + x) * 4; host.Pixels[i] = 255; host.Pixels[i + 1] = 255; host.Pixels[i + 2] = 255; host.Pixels[i + 3] = 255; }
+        host.Children.Add(new Sable.Engine.Layers.FilterLayer(Sable.Engine.Layers.FilterKind.GaussianBlur) { Radius = 6f });
+        ndoc.Layers.Add(host);
+        using var ncomp = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var np = ncomp.CompositeToBytes(ndoc);
+        int Idx(int x, int y) => (y * 64 + x) * 4;
+        int edge = Idx(43, 31);     // just outside the square edge (x=39): blur bleeds partial alpha
+        int inner = Idx(38, 31);    // just INSIDE the edge: REPLACE softens it (<255). over-bug left 255
+        int far = Idx(2, 2);        // far away: stays transparent (filter is clipped to the layer)
+        int centre = Idx(31, 31);   // deep interior: stays ~opaque
+        bool nok = np[edge + 3] > 0 && np[edge + 3] < 255 && np[inner + 3] > 0 && np[inner + 3] < 250
+                   && np[far + 3] == 0 && np[centre + 3] > 200;
+        Console.WriteLine($"nested filter blur (replace): edgeA={np[edge+3]} innerA={np[inner+3]} farA={np[far+3]} centreA={np[centre+3]} ok={nok}");
+    }
+
     // --- tiled storage: dirty-tile atlas re-upload across composites (PLAN §3) ---
     {
         var tdoc = new Sable.Engine.Document(300, 300);   // 2x2 tile grid (256-tiled)

@@ -43,7 +43,7 @@ public sealed class ResizeCommand : IUndoableCommand
         {
             if (l is PixelLayer px) _pixSnap.Add((px, px.Pixels, px.Width, px.Height, px.OffsetX, px.OffsetY));
             _maskSnap.Add((l, l.Mask));
-            if (l is GroupLayer g) CaptureList(g.Children);
+            CaptureList(l.Children);
         }
     }
 
@@ -66,15 +66,12 @@ public sealed class ResizeCommand : IUndoableCommand
                     px.MaskDirty = true; px.Dirty = true;
                 }
             }
-            else
+            else if (l.Mask is { } m)   // non-pixel masks are document-sized
             {
-                if (l.Mask is { } m)   // non-pixel masks are document-sized
-                {
-                    l.Mask = RasterTiles.Resample(m, srcW, srcH, _w, _h, _bilinear);
-                    l.MaskDirty = true; l.Dirty = true;
-                }
-                if (l is GroupLayer g) ApplyList(g.Children, srcW, srcH, rx, ry);
+                l.Mask = RasterTiles.Resample(m, srcW, srcH, _w, _h, _bilinear);
+                l.MaskDirty = true; l.Dirty = true;
             }
+            ApplyList(l.Children, srcW, srcH, rx, ry);   // group content / nested effect layers
         }
     }
 

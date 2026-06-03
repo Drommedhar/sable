@@ -23,7 +23,6 @@ public partial class MainWindow : Window
     private string? _currentPath;
     private AdjustmentWindow? _adjWindow;
     private EffectsWindow? _fxWindow;
-    private ShapeWindow? _shapeWindow;
     private TransformWindow? _transformWindow;
     private HistoryWindow? _historyWindow;
     private readonly System.Collections.ObjectModel.ObservableCollection<DocumentTab> _tabs = new();
@@ -31,11 +30,13 @@ public partial class MainWindow : Window
     private int _untitledCounter = 1;
 
     private LayerViewModel? _dragSource;
+    private System.Collections.Generic.List<Sable.Engine.Layers.Layer>? _dragModels;   // whole multi-selection being dragged
     private Point _dragStart;
     private bool _dragging;
     private LayerViewModel? _dropTarget;
     private bool _dropAbove;
-    private bool _dropIntoGroup;
+    private bool _dropInto;        // dropping ONTO the target row (nest / into-group / auto-group)
+    private LayerViewModel? _pendingCollapse;   // row to collapse the selection to on release-without-drag
 
     private static FilePickerFileType SableType => new("Sable document") { Patterns = new[] { "*.sable" } };
 
@@ -56,6 +57,9 @@ public partial class MainWindow : Window
         // Start with no document (welcome / empty state) — New/Open/paste/drop creates the first tab.
         TabStrip.ItemsSource = _tabs;
         UpdateEmptyState();
+
+        // the embedded adjustment/filter editor needs the composite for its Curves/Levels histogram
+        AdjPanel.CompositeProvider = () => Canvas.ReadComposite();
 
         // layer drag-drop (manual pointer DnD: reorder / move into group / auto-group)
         LayerList.AddHandler(PointerPressedEvent, OnLayerPointerPressed, RoutingStrategies.Tunnel);
@@ -1059,6 +1063,43 @@ public partial class MainWindow : Window
         _dragSource = LayerOf(e.Source);
         _dragStart = e.GetPosition(this);
         _dragging = false;
+        _dragModels = null;
+        _pendingCollapse = null;
+        if (_dragSource is null || Doc is not { } d) return;
+        if (!e.GetCurrentPoint(LayerList).Properties.IsLeftButtonPressed) return;
+
+        // capture the drag set BEFORE the ListBox mutates the selection on this press: if the
+        // grabbed row is part of a live multi-selection, drag the whole selection.
+        var sel = d.SelectionModels;
+        bool inMulti = sel.Count > 1 && sel.Contains(_dragSource.Model);
+        _dragModels = inMulti ? sel.ToList()
+            : new System.Collections.Generic.List<Sable.Engine.Layers.Layer> { _dragSource.Model };
+
+        // Delayed-deselect (Explorer/Photoshop): pressing WITHOUT a modifier on a row that is part
+        // of a multi-selection makes the ListBox collapse the selection to just that row on press —
+        // which kills a drag of the whole selection. Suppress the ListBox's press handling + capture
+        // the pointer so the multi-selection survives the press; on release WITHOUT a drag we collapse
+        // to the clicked row. Skip when the press is on a child control (eye/chevron/tag) so they work.
+        bool plain = (e.KeyModifiers & (KeyModifiers.Shift | KeyModifiers.Control)) == 0;
+        if (inMulti && plain && !PressOnInteractive(e.Source))
+        {
+            _pendingCollapse = _dragSource;
+            e.Pointer.Capture(LayerList);
+            e.Handled = true;
+        }
+    }
+
+    // true when the press landed on an interactive child of a layer row (visibility eye, disclosure
+    // chevron, colour-tag button, …) — those must keep working, so we never suppress their press.
+    private static bool PressOnInteractive(object? source)
+    {
+        var v = source as Visual;
+        while (v is not null and not ListBoxItem)
+        {
+            if (v is Button or Avalonia.Controls.Primitives.ToggleButton or Slider or ComboBox or TextBox) return true;
+            v = v.GetVisualParent();
+        }
+        return false;
     }
 
     private void OnLayerPointerMoved(object? sender, PointerEventArgs e)
@@ -1078,31 +1119,51 @@ public partial class MainWindow : Window
         Avalonia.Controls.Canvas.SetLeft(DragGhost, g.X + 12);
         Avalonia.Controls.Canvas.SetTop(DragGhost, g.Y + 4);
 
-        // resolve the row under the cursor → drop position (above/below, or into a group) + indicator
+        // resolve the row under the cursor → drop position. Top/bottom band = reorder above/below;
+        // middle band = drop ONTO (nest a filter/adjustment, drop into a group, or auto-group).
         var hitRow = FindLayerRow(LayerList.InputHitTest(e.GetPosition(LayerList)) as Visual);
-        if (hitRow is { DataContext: LayerViewModel vm } && !ReferenceEquals(vm, _dragSource))
+        if (hitRow is { DataContext: LayerViewModel vm } && (_dragModels is null || !_dragModels.Contains(vm.Model)))
         {
             double rh = hitRow.Bounds.Height;
             double cy = e.GetPosition(hitRow).Y;
             _dropTarget = vm;
             _dropAbove = cy < rh * 0.5;
-            _dropIntoGroup = vm.IsGroup && cy > rh * 0.3 && cy < rh * 0.7;
+            _dropInto = cy > rh * 0.3 && cy < rh * 0.7;
             var top = hitRow.TranslatePoint(new Point(0, 0), DragLayer) ?? default;
-            double iy = _dropAbove ? top.Y : top.Y + rh;
-            Avalonia.Controls.Canvas.SetLeft(DropIndicator, top.X);
-            Avalonia.Controls.Canvas.SetTop(DropIndicator, iy - 1);
-            DropIndicator.Width = hitRow.Bounds.Width;
-            DropIndicator.IsVisible = !_dropIntoGroup;   // line for reorder; group-drop has no line
+            if (_dropInto)
+            {
+                DropIndicator.IsVisible = false;
+                Avalonia.Controls.Canvas.SetLeft(DropIntoBox, top.X);
+                Avalonia.Controls.Canvas.SetTop(DropIntoBox, top.Y);
+                DropIntoBox.Width = hitRow.Bounds.Width;
+                DropIntoBox.Height = rh;
+                DropIntoBox.IsVisible = true;
+            }
+            else
+            {
+                DropIntoBox.IsVisible = false;
+                double iy = _dropAbove ? top.Y : top.Y + rh;
+                Avalonia.Controls.Canvas.SetLeft(DropIndicator, top.X);
+                Avalonia.Controls.Canvas.SetTop(DropIndicator, iy - 1);
+                DropIndicator.Width = hitRow.Bounds.Width;
+                DropIndicator.IsVisible = true;
+            }
         }
-        else { _dropTarget = null; DropIndicator.IsVisible = false; }
+        else { _dropTarget = null; DropIndicator.IsVisible = false; DropIntoBox.IsVisible = false; }
     }
 
     private void OnLayerPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_dragging && _dragSource is { } src && Doc is { } doc && _dropTarget is { } t)
+        if (_dragging && _dragModels is { Count: > 0 } items && Doc is { } doc && _dropTarget is { } t)
         {
-            if (_dropIntoGroup) doc.DropLayer(src.Model, t.Model);                 // into the group
-            else doc.DropLayerRelative(src.Model, t.Model, _dropAbove);            // between-row reorder
+            if (_dropInto) doc.DropOnto(items, t.Model);                       // nest / into-group / auto-group
+            else doc.DropMultipleRelative(items, t.Model, _dropAbove);        // between-row reorder
+        }
+        else if (!_dragging && _pendingCollapse is { } row)
+        {
+            // plain click on a selected row without a drag → NOW collapse to just that row
+            LayerList.SelectedItems!.Clear();
+            LayerList.SelectedItems.Add(row);
         }
         EndDrag();
     }
@@ -1111,9 +1172,12 @@ public partial class MainWindow : Window
     {
         _dragging = false;
         _dragSource = null;
+        _dragModels = null;
         _dropTarget = null;
+        _pendingCollapse = null;
         DragGhost.IsVisible = false;
         DropIndicator.IsVisible = false;
+        DropIntoBox.IsVisible = false;
     }
 
     /// <summary>Walk up to the row container (Control whose DataContext is a LayerViewModel).</summary>
@@ -1916,10 +1980,8 @@ public partial class MainWindow : Window
             if (e.PropertyName != nameof(DocumentViewModel.SelectedLayer)) return;
             if (!ReferenceEquals(_activeTab, tab)) return;       // only the visible tab drives the UI
             UpdateActiveLayer(tab.Vm);
-            if (tab.Vm.SelectedLayer?.IsEffect == true) ShowAdjustmentWindow();
-            else _adjWindow?.Close();
-            if (tab.Vm.SelectedLayer?.IsShape == true) ShowShapeWindow();
-            else _shapeWindow?.Close();
+            // adjustment/filter params + shape properties now live in the docked right-panel
+            // editors (AdjPanel / ShapePanelCtl), shown via IsVisible bindings — no floating window.
         };
         _tabs.Add(tab);
         ActivateTab(tab);
@@ -1951,7 +2013,6 @@ public partial class MainWindow : Window
         UpdateActiveLayer(tab.Vm);
         if (_adjWindow is not null) _adjWindow.DataContext = tab.Vm;
         if (_fxWindow is not null) _fxWindow.DataContext = tab.Vm;
-        if (_shapeWindow is not null) _shapeWindow.DataContext = tab.Vm;
         if (_transformWindow is not null) _transformWindow.DataContext = tab.Vm;
         if (_historyWindow is not null) _historyWindow.DataContext = tab.Vm;
         Canvas.FitView(_settings.LimitInitialZoom);
@@ -2030,16 +2091,6 @@ public partial class MainWindow : Window
         win.Closed += (_, _) => _adjWindow = null;
         _adjWindow = win;
         win.Show(this);            // modeless, owned + centered over main
-    }
-
-    private void ShowShapeWindow()
-    {
-        if (_shapeWindow is not null) { _shapeWindow.Activate(); return; }
-        var win = new ShapeWindow { DataContext = DataContext };
-        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        win.Closed += (_, _) => _shapeWindow = null;
-        _shapeWindow = win;
-        win.Show(this);
     }
 
     private void OnToggleTransform(object? sender, RoutedEventArgs e)

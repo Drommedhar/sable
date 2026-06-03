@@ -37,8 +37,6 @@
   "adjustmentWindow": {
     "adjustment": "Anpassung",
     "reset": "Zurücksetzen",
-    "opacity": "Deckkraft",
-    "selectAnAdjustmentOrFilter": "Wählen Sie eine Anpassungs- oder Filterebene, um ihre Parameter zu bearbeiten.",
     "rgb": "RGB",
     "clickToAddAPoint": "Klicken zum Hinzufügen eines Punkts. Ziehen zum Formen. Rechtsklick auf einen Punkt zum Löschen.",
     "exposureStops": "Belichtung (Blenden)",

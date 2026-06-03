@@ -88,6 +88,17 @@ public abstract class Layer
 
     public bool HasEffects => Effects.Count > 0;
 
+    /// <summary>
+    /// Child layers (bottom→top). For a <see cref="GroupLayer"/> these ARE the group's
+    /// content. For a content layer (pixel/shape/text/path) they are nested effect layers
+    /// (live filters / adjustments) clipped to this layer's own content — the Affinity
+    /// nested-child model: a filter inside a layer affects ONLY that layer, while a
+    /// top-level filter still affects the whole composite below it.
+    /// </summary>
+    public List<Layer> Children { get; } = new();
+
+    public bool HasChildren => Children.Count > 0;
+
     /// <summary>Attach a white (fully-revealing) mask sized to the document.</summary>
     public void AddWhiteMask(int width, int height)
     {
@@ -124,6 +135,7 @@ public abstract class Layer
         if (PerspCorners is not null) c.PerspCorners = (float[])PerspCorners.Clone();
         if (Mask is not null) { c.Mask = (byte[])Mask.Clone(); c.MaskDirty = true; }
         foreach (var fx in Effects) c.Effects.Add(fx.Clone());
+        foreach (var ch in Children) c.Children.Add(ch.Clone());
         c.Dirty = true;
         return c;
     }
