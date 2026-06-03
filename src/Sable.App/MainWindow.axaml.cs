@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private LayerViewModel? _dropTarget;
     private bool _dropAbove;
     private bool _dropInto;        // dropping ONTO the target row (nest / into-group / auto-group)
+    private LayerViewModel? _pendingCollapse;   // row to collapse the selection to on release-without-drag
 
     private static FilePickerFileType SableType => new("Sable document") { Patterns = new[] { "*.sable" } };
 
@@ -884,15 +885,42 @@ public partial class MainWindow : Window
         _dragStart = e.GetPosition(this);
         _dragging = false;
         _dragModels = null;
+        _pendingCollapse = null;
+        if (_dragSource is null || Doc is not { } d) return;
+        if (!e.GetCurrentPoint(LayerList).Properties.IsLeftButtonPressed) return;
+
         // capture the drag set BEFORE the ListBox mutates the selection on this press: if the
         // grabbed row is part of a live multi-selection, drag the whole selection.
-        if (_dragSource is not null && Doc is { } d)
+        var sel = d.SelectionModels;
+        bool inMulti = sel.Count > 1 && sel.Contains(_dragSource.Model);
+        _dragModels = inMulti ? sel.ToList()
+            : new System.Collections.Generic.List<Sable.Engine.Layers.Layer> { _dragSource.Model };
+
+        // Delayed-deselect (Explorer/Photoshop): pressing WITHOUT a modifier on a row that is part
+        // of a multi-selection makes the ListBox collapse the selection to just that row on press —
+        // which kills a drag of the whole selection. Suppress the ListBox's press handling + capture
+        // the pointer so the multi-selection survives the press; on release WITHOUT a drag we collapse
+        // to the clicked row. Skip when the press is on a child control (eye/chevron/tag) so they work.
+        bool plain = (e.KeyModifiers & (KeyModifiers.Shift | KeyModifiers.Control)) == 0;
+        if (inMulti && plain && !PressOnInteractive(e.Source))
         {
-            var sel = d.SelectionModels;
-            _dragModels = sel.Count > 1 && sel.Contains(_dragSource.Model)
-                ? sel.ToList()
-                : new System.Collections.Generic.List<Sable.Engine.Layers.Layer> { _dragSource.Model };
+            _pendingCollapse = _dragSource;
+            e.Pointer.Capture(LayerList);
+            e.Handled = true;
         }
+    }
+
+    // true when the press landed on an interactive child of a layer row (visibility eye, disclosure
+    // chevron, colour-tag button, …) — those must keep working, so we never suppress their press.
+    private static bool PressOnInteractive(object? source)
+    {
+        var v = source as Visual;
+        while (v is not null and not ListBoxItem)
+        {
+            if (v is Button or Avalonia.Controls.Primitives.ToggleButton or Slider or ComboBox or TextBox) return true;
+            v = v.GetVisualParent();
+        }
+        return false;
     }
 
     private void OnLayerPointerMoved(object? sender, PointerEventArgs e)
@@ -952,6 +980,12 @@ public partial class MainWindow : Window
             if (_dropInto) doc.DropOnto(items, t.Model);                       // nest / into-group / auto-group
             else doc.DropMultipleRelative(items, t.Model, _dropAbove);        // between-row reorder
         }
+        else if (!_dragging && _pendingCollapse is { } row)
+        {
+            // plain click on a selected row without a drag → NOW collapse to just that row
+            LayerList.SelectedItems!.Clear();
+            LayerList.SelectedItems.Add(row);
+        }
         EndDrag();
     }
 
@@ -961,6 +995,7 @@ public partial class MainWindow : Window
         _dragSource = null;
         _dragModels = null;
         _dropTarget = null;
+        _pendingCollapse = null;
         DragGhost.IsVisible = false;
         DropIndicator.IsVisible = false;
         DropIntoBox.IsVisible = false;
