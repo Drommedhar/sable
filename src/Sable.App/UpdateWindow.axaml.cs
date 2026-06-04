@@ -31,8 +31,8 @@ public partial class UpdateWindow : Window
         VersionText.Text = $"Sable {update.TagName} is available — you have {VersionInfo.Version}.";
         if (!string.IsNullOrWhiteSpace(update.Body))
         {
-            NotesText.Text = update.Body;
-            NotesScroll.IsVisible = true;
+            NotesScroll.Markdown = update.Body;
+            NotesBox.IsVisible = true;
         }
         // no downloadable asset for this platform → only offer the release page
         if (string.IsNullOrEmpty(update.DownloadUrl))

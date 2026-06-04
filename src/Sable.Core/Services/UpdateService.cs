@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace Sable.Core.Services;
@@ -31,7 +32,9 @@ public interface IUpdateService
 /// </summary>
 public sealed class UpdateService : IUpdateService
 {
-    private const string ReleasesApiUrl = "https://api.github.com/repos/Drommedhar/sable/releases/latest";
+    // Full release list (newest-first); we aggregate every release newer than the running build so the
+    // changelog spans all skipped versions, not just the latest one.
+    private const string ReleasesApiUrl = "https://api.github.com/repos/Drommedhar/sable/releases?per_page=100";
 
     private static readonly HttpClient SharedHttp = CreateHttpClient();
 
@@ -59,29 +62,78 @@ public sealed class UpdateService : IUpdateService
 
     public async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken ct = default)
     {
-        var release = await _http.GetFromJsonAsync<GitHubRelease>(ReleasesApiUrl, ct);
-        if (release is null || string.IsNullOrEmpty(release.TagName))
+        var releases = await _http.GetFromJsonAsync<GitHubRelease[]>(ReleasesApiUrl, ct);
+        if (releases is null || releases.Length == 0)
             return null;
 
-        var remoteVersion = release.TagName.TrimStart('v', 'V');
         var currentVersion = StripPreRelease(VersionInfo.Version);
-        if (!IsNewer(remoteVersion, currentVersion))
+
+        // every published, stable release newer than the running build, newest-first
+        var newer = releases
+            .Where(r => !r.Draft && !r.Prerelease && !string.IsNullOrEmpty(r.TagName))
+            .Select(r => new { Release = r, Version = r.TagName!.TrimStart('v', 'V') })
+            .Where(x => IsNewer(x.Version, currentVersion))
+            .OrderByDescending(x => x.Version, Comparer<string>.Create(CompareVersions))
+            .ToList();
+
+        if (newer.Count == 0)
             return null;
 
-        var asset = FindPlatformAsset(release);
+        // the newest release drives the version + downloadable asset
+        var latest = newer[0].Release;
+        var asset = FindPlatformAsset(latest);
         if (asset is null)
             return null;
 
+        var changelog = BuildChangelog(
+            newer.Select(x => (Heading: ReleaseHeading(x.Release), Body: x.Release.Body ?? string.Empty)));
+
         return new UpdateInfo
         {
-            Version = remoteVersion,
-            TagName = release.TagName,
-            HtmlUrl = release.HtmlUrl ?? string.Empty,
-            Body = release.Body ?? string.Empty,
+            Version = newer[0].Version,
+            TagName = latest.TagName!,
+            HtmlUrl = latest.HtmlUrl ?? string.Empty,
+            Body = changelog,
             DownloadUrl = asset.BrowserDownloadUrl ?? string.Empty,
             AssetName = asset.Name ?? string.Empty,
             AssetSize = asset.Size,
         };
+    }
+
+    private static string ReleaseHeading(GitHubRelease r)
+        => !string.IsNullOrWhiteSpace(r.Name) ? r.Name! : (r.TagName ?? string.Empty);
+
+    /// <summary>
+    /// Concatenates per-release notes into one markdown changelog, each version under a level-2
+    /// heading and separated by a horizontal rule. Pure so the formatting is unit-testable.
+    /// </summary>
+    public static string BuildChangelog(IEnumerable<(string Heading, string Body)> releases)
+    {
+        var sb = new StringBuilder();
+        var first = true;
+        foreach (var (heading, body) in releases)
+        {
+            if (!first) sb.Append("\n\n---\n\n");
+            first = false;
+            sb.Append("## ").Append(heading).Append("\n\n");
+            var notes = (body ?? string.Empty).Trim();
+            sb.Append(notes.Length == 0 ? "_No release notes._" : notes);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Semver comparison (-1/0/1) over the first three numeric parts; missing parts = 0.</summary>
+    public static int CompareVersions(string a, string b)
+    {
+        var x = ParseParts(a);
+        var y = ParseParts(b);
+        for (var i = 0; i < 3; i++)
+        {
+            var xp = i < x.Length ? x[i] : 0;
+            var yp = i < y.Length ? y[i] : 0;
+            if (xp != yp) return xp.CompareTo(yp);
+        }
+        return 0;
     }
 
     public async Task<string> DownloadUpdateAsync(UpdateInfo update, IProgress<double>? progress = null, CancellationToken ct = default)
@@ -191,8 +243,10 @@ public sealed class UpdateService : IUpdateService
     private sealed class GitHubRelease
     {
         [JsonPropertyName("tag_name")] public string? TagName { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
         [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
         [JsonPropertyName("body")] public string? Body { get; set; }
+        [JsonPropertyName("draft")] public bool Draft { get; set; }
         [JsonPropertyName("prerelease")] public bool Prerelease { get; set; }
         [JsonPropertyName("assets")] public GitHubReleaseAsset[]? Assets { get; set; }
     }
