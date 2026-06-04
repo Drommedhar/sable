@@ -50,6 +50,18 @@ public sealed class SableSettings
     /// driver timeout (TDR) running SAM2, so later runs skip the GPU instead of re-hanging it.</summary>
     public bool SmartSelectForceCpu { get; set; }
 
+    /// <summary>Where downloaded AI model weights are stored. Empty = the default
+    /// (<see cref="DefaultModelsFolder"/>). Changed via the model manager, which moves existing models.</summary>
+    public string ModelsFolder { get; set; } = "";
+
+    /// <summary>The default models location when none is configured: %AppData%/Sable/models.</summary>
+    public static string DefaultModelsFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sable", "models");
+
+    /// <summary>The folder the registry should actually use: the configured override, else the default.</summary>
+    public string EffectiveModelsFolder() =>
+        string.IsNullOrWhiteSpace(ModelsFolder) ? DefaultModelsFolder : ModelsFolder;
+
     /// <summary>
     /// SAM2 AMG grid side for a quality level — the decoder runs grid² times, so this dominates GPU load.
     /// 32×32 = 1024 runs (heavy, strong GPUs only); 12×12 = 144 (light). <see cref="SmartSelectQuality.Auto"/>

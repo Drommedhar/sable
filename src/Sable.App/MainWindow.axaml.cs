@@ -313,6 +313,10 @@ public partial class MainWindow : Window
     // visibility + VRAM + the Settings/Models dialogs use the backend-free ModelReg/GpuProbe instead.
     private Sable.Ai.AiService Ai => _aiService ??= CreateAi();
 
+    // One shared GPU probe: the first query shells out to nvidia-smi (slow); caching it here means
+    // the model manager / Smart Select reuse the warm result instead of each spawning nvidia-smi anew.
+    private readonly Sable.Ai.Gpu.GpuProbe _gpuProbe = new();
+
     private Sable.Ai.Models.ModelRegistry? _modelReg;
     /// <summary>The model registry, independent of the (ORT-loading) AI backend — safe to touch any time.</summary>
     private Sable.Ai.Models.ModelRegistry ModelReg
@@ -321,9 +325,7 @@ public partial class MainWindow : Window
         {
             if (_modelReg is null)
             {
-                var folder = System.IO.Path.Combine(
-                    System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Sable", "models");
-                _modelReg = new Sable.Ai.Models.ModelRegistry(folder);
+                _modelReg = new Sable.Ai.Models.ModelRegistry(_settings.EffectiveModelsFolder());
                 try { _modelReg.Load(); } catch { /* no models yet */ }
             }
             return _modelReg;
@@ -449,7 +451,7 @@ public partial class MainWindow : Window
             // SAM2 density is configurable (Settings ▸ Machine Learning); Auto scales by detected VRAM so a
             // weak/low-VRAM laptop GPU doesn't hit a driver timeout (TDR) running 1024 decoder passes.
             int grid = Sable.Core.Settings.SableSettings.SmartSelectGrid(
-                _settings.SmartSelectQuality, new Sable.Ai.Gpu.GpuProbe().TotalVramBytes());
+                _settings.SmartSelectQuality, _gpuProbe.TotalVramBytes());
             bool forceCpu = _settings.SmartSelectForceCpu;   // this GPU previously couldn't run SAM2 → CPU only
 
             // a layer with a non-translation transform (scale/rotate/shear/perspective) can't be mapped back
@@ -557,8 +559,14 @@ public partial class MainWindow : Window
 
     private async void OnAiModels(object? sender, RoutedEventArgs e)
     {
-        var win = new ModelsWindow(ModelReg, new Sable.Ai.Gpu.GpuProbe().FreeVramBytes()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var win = new ModelsWindow(ModelReg, _gpuProbe) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
         win.DefaultsChanged += ApplyAiVisibility;   // default/install changes alter which model serves each op
+        win.ModelsFolderChanged += newPath =>      // registry already moved; persist the choice + rebuild the AI backend
+        {
+            _settings.ModelsFolder = newPath;
+            Sable.Core.Settings.SettingsService.Save(_settings);
+            _aiService = null;   // next AI op rebuilds the backend against the moved registry
+        };
         await win.ShowDialog(this);
         ApplyAiVisibility();   // installs/removals in the manager change which features are available
     }

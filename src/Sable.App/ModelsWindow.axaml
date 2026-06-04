@@ -9,9 +9,11 @@
     <DockPanel>
         <!-- footer: model folder + close -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="14,8">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto">
                 <TextBlock x:Name="FolderLabel" Classes="settingHint" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <Button Grid.Column="1" Content="{loc:Loc modelsWindow.close}" Classes="opt" Padding="18,0" Click="OnClose" />
+                <Button Grid.Column="1" Content="{loc:Loc modelsWindow.changeFolder}" Classes="opt"
+                        Padding="14,0" Margin="0,0,6,0" Click="OnChangeFolder" />
+                <Button Grid.Column="2" Content="{loc:Loc modelsWindow.close}" Classes="opt" Padding="18,0" Click="OnClose" />
             </Grid>
         </Border>
 

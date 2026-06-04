@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Sable.Ai.Download;
 using Sable.Ai.Models;
@@ -24,22 +25,40 @@ public partial class ModelsWindow : Window
 {
     private readonly ModelRegistry _registry;
     private readonly ModelDownloader _downloader;
-    private readonly ulong _freeVram;     // 0 = unknown (probe stub) → VRAM badges show requirement only
+    private ulong _freeVram;     // 0 = unknown → VRAM badges show requirement only (filled by the bg probe)
     private bool _busy;
+    private bool _closed;
 
     /// <summary>Raised when the user changes a per-task default — host refreshes which model serves each op.</summary>
     public event Action? DefaultsChanged;
 
-    public ModelsWindow() : this(new ModelRegistry(System.IO.Path.GetTempPath()), 0) { }
+    /// <summary>Raised after the model folder is changed + models moved (arg = the new folder). The host
+    /// persists the choice and rebuilds the AI backend; the registry itself is already re-pointed.</summary>
+    public event Action<string>? ModelsFolderChanged;
 
-    public ModelsWindow(ModelRegistry registry, ulong freeVram = 0)
+    public ModelsWindow() : this(new ModelRegistry(System.IO.Path.GetTempPath())) { }
+
+    public ModelsWindow(ModelRegistry registry, Sable.Ai.Gpu.GpuProbe? probe = null)
     {
         InitializeComponent();
         _registry = registry;
-        _freeVram = freeVram;
         _downloader = new ModelDownloader(registry);
         FolderLabel.Text = $"Model folder: {registry.ModelsFolder}";
-        BuildOnnxCards();
+        Closed += (_, _) => _closed = true;
+        BuildOnnxCards();   // instant; VRAM badges show requirement-only until the probe returns
+        // free-VRAM probe shells out to nvidia-smi (slow, ~seconds cold) — never block the dialog on it.
+        // Run it on a background thread and re-render the fit badges once it lands.
+        if (probe is not null) _ = ProbeVramAsync(probe);
+    }
+
+    private async System.Threading.Tasks.Task ProbeVramAsync(Sable.Ai.Gpu.GpuProbe probe)
+    {
+        ulong free;
+        try { free = await System.Threading.Tasks.Task.Run(probe.FreeVramBytes); }
+        catch { return; }
+        if (_closed || free == _freeVram) return;
+        _freeVram = free;
+        BuildOnnxCards();   // back on the UI thread (Avalonia sync context) → re-render with the fit verdict
     }
 
     // Friendly task names for the default-model chip on each installed card.
@@ -282,6 +301,40 @@ public partial class ModelsWindow : Window
         }
         catch (Exception ex) { ShowStatus($"Download failed: {ex.Message}"); }
         finally { _busy = false; }
+    }
+
+    /// <summary>Pick a new model folder and move the installed models there (paths inside each
+    /// model.json are rewritten by the registry). Confirmed first; runs off the UI thread with progress.</summary>
+    private async void OnChangeFolder(object? sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var picks = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+        {
+            Title = "Choose model folder",
+            AllowMultiple = false,
+        });
+        var target = picks.FirstOrDefault()?.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(target)) return;
+        if (string.Equals(System.IO.Path.GetFullPath(target), System.IO.Path.GetFullPath(_registry.ModelsFolder),
+            StringComparison.OrdinalIgnoreCase)) return;   // same folder → nothing to do
+
+        bool ok = await ConfirmWindow.Ask(this, "Move models",
+            $"Move installed models from\n{_registry.ModelsFolder}\nto\n{target}?");
+        if (!ok) return;
+
+        _busy = true;
+        var busy = BusyWindow.Begin(this, "Moving models…");
+        try
+        {
+            var progress = busy.Progress;
+            await System.Threading.Tasks.Task.Run(() => _registry.MoveTo(target, progress));
+            FolderLabel.Text = $"Model folder: {_registry.ModelsFolder}";
+            ModelsFolderChanged?.Invoke(_registry.ModelsFolder);
+            BuildOnnxCards();
+            ShowStatus($"Models moved to {_registry.ModelsFolder}.");
+        }
+        catch (Exception ex) { ShowStatus($"Move failed: {ex.Message}"); }
+        finally { busy.Done(); _busy = false; }
     }
 
     private void ShowStatus(string text) { Status.Text = text; Status.IsVisible = true; }

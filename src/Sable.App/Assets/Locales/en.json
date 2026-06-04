@@ -289,6 +289,7 @@
     "download": "Download",
     "downloadRecommendedSetLightAI": "Download recommended set (light AI)",
     "close": "Close",
+    "changeFolder": "Change folder…",
     "onnxTab": "ONNX",
     "generativeTab": "Generative AI",
     "generativeTitle": "Generative AI is not available yet",
