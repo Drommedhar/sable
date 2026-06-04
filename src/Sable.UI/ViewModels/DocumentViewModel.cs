@@ -80,16 +80,18 @@ public sealed partial class DocumentViewModel : ObservableObject
     private readonly HashSet<Layer> _collapsed = new();
 
     // top→bottom: a group row appears above its (indented) children
-    private void AddTree(List<Layer> list, int depth)
+    private void AddTree(List<Layer> list, int depth, LayerViewModel? parentVm = null)
     {
         for (int i = list.Count - 1; i >= 0; i--)
         {
             var layer = list[i];
             bool expanded = !_collapsed.Contains(layer);
-            Layers.Add(new LayerViewModel(layer, depth, expanded));
+            var vm = new LayerViewModel(layer, depth, expanded) { ParentVm = parentVm };
+            parentVm?.ChildVms.Add(vm);   // link so toggling a group refreshes its children's eye icons
+            Layers.Add(vm);
             // any layer can hold children: a group's content OR a content layer's nested
             // effect layers (live filters / adjustments) — both flatten as indented rows.
-            if (layer.HasChildren && expanded) AddTree(layer.Children, depth + 1);
+            if (layer.HasChildren && expanded) AddTree(layer.Children, depth + 1, vm);
         }
     }
 

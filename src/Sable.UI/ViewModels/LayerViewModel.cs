@@ -31,6 +31,11 @@ public sealed partial class LayerViewModel : ObservableObject
     /// <summary>Group disclosure state (set by the document VM; only meaningful for groups).</summary>
     public bool IsExpanded { get; }
 
+    /// <summary>Parent row VM in the flattened tree (set by the document VM when building rows); null at top level.</summary>
+    internal LayerViewModel? ParentVm { get; set; }
+    /// <summary>Child row VMs shown beneath this one (only populated for expanded parents).</summary>
+    internal readonly System.Collections.Generic.List<LayerViewModel> ChildVms = new();
+
     public LayerViewModel(Layer model, int depth = 0, bool expanded = true)
     {
         Model = model;
@@ -147,7 +152,20 @@ public sealed partial class LayerViewModel : ObservableObject
             Model.Visible = value;
             Model.Dirty = true;
             OnPropertyChanged();
+            // a hidden ancestor hides this row's descendants too — refresh their eye icons (EffectiveVisible)
+            RaiseEffectiveVisible();
         }
+    }
+
+    /// <summary>Visible AND every ancestor visible — what the eye icon shows. Hiding a group dims its
+    /// children's eyes without touching their own <see cref="IsVisible"/> flag (so re-showing restores it).</summary>
+    public bool EffectiveVisible => Model.Visible && (ParentVm?.EffectiveVisible ?? true);
+
+    /// <summary>Notify this row + all descendant rows that their <see cref="EffectiveVisible"/> may have changed.</summary>
+    private void RaiseEffectiveVisible()
+    {
+        OnPropertyChanged(nameof(EffectiveVisible));
+        foreach (var c in ChildVms) c.RaiseEffectiveVisible();
     }
 
     /// <summary>Opacity as 0..100 for the slider.</summary>
