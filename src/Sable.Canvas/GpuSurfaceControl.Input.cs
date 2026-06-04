@@ -256,7 +256,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     /// </summary>
     private bool EyedropperSampling =>
         ActiveTool == ToolKind.Eyedropper
-        || (_lastMods.HasFlag(CanvasMods.Alt) && ActiveLayer is not null
+        // Alt-click samples colour — but ONLY when Alt is the sole modifier. Ctrl+Alt is the
+        // brush size/hardness HUD (and Shift+Alt etc. aren't sampling), so don't show the loupe then.
+        || (_lastMods == CanvasMods.Alt && ActiveLayer is not null
             && ActiveTool is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser or ToolKind.Fill);
 
     void ICanvasInputSink.PointerDown(CanvasButton button, double sx, double sy, CanvasMods mods)

@@ -289,9 +289,10 @@
     "download": "Herunterladen",
     "downloadRecommendedSetLightAI": "Empfohlenen Satz herunterladen (leichte KI)",
     "close": "Schließen",
-    "recommendedDownloadsFromTheSource": "Empfohlen (Download von der Quelle; Lizenz pro Modell angezeigt)",
-    "defaultModelPerTask": "Standardmodell pro Aufgabe",
-    "installed": "Installiert"
+    "onnxTab": "ONNX",
+    "generativeTab": "Generative KI",
+    "generativeTitle": "Generative KI ist noch nicht verfügbar",
+    "generativeBody": "Generative Modelle laufen in der optionalen Diffusers-Sidecar-Ebene, die in einer späteren Version erscheint. Sobald sie verfügbar ist, werden Bilddiffusionsmodelle (SD / SDXL / Flux) hier installiert und verwaltet."
   },
   "newDocumentWindow": {
     "newDocument": "Neues Dokument",

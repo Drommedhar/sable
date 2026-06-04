@@ -289,9 +289,10 @@
     "download": "Download",
     "downloadRecommendedSetLightAI": "Download recommended set (light AI)",
     "close": "Close",
-    "recommendedDownloadsFromTheSource": "Recommended (downloads from the source; licence shown per model)",
-    "defaultModelPerTask": "Default model per task",
-    "installed": "Installed"
+    "onnxTab": "ONNX",
+    "generativeTab": "Generative AI",
+    "generativeTitle": "Generative AI is not available yet",
+    "generativeBody": "Generative models run in the opt-in Diffusers sidecar tier, which ships in a later release. When it lands, image-diffusion models (SD / SDXL / Flux) will be installed and managed here."
   },
   "newDocumentWindow": {
     "newDocument": "New Document",
