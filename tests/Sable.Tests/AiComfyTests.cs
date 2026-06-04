@@ -12,52 +12,6 @@ namespace Sable.Tests;
 
 public class WorkflowBuilderTests
 {
-    private static readonly ComfyModelRef Sdxl = new("SDXL", ComfyModelKind.Checkpoint, "sdxl_base.safetensors");
-
-    private static JsonElement Parse(IReadOnlyDictionary<string, object> g)
-        => JsonDocument.Parse(WorkflowBuilder.ToJson(g)).RootElement;
-
-    [Fact]
-    public void Txt2Img_HasCheckpointSamplerDecodeSave()
-    {
-        var g = WorkflowBuilder.Txt2Img(new GenRequest("m", AiTaskKind.Txt2Img, "a fox", "blurry", Steps: 30, Cfg: 6.5, Seed: 42), Sdxl, 1024, 768);
-        var root = Parse(g);
-
-        Assert.Equal("CheckpointLoaderSimple", root.GetProperty("ckpt").GetProperty("class_type").GetString());
-        Assert.Equal("sdxl_base.safetensors", root.GetProperty("ckpt").GetProperty("inputs").GetProperty("ckpt_name").GetString());
-
-        var sampler = root.GetProperty("sampler").GetProperty("inputs");
-        Assert.Equal(30, sampler.GetProperty("steps").GetInt32());
-        Assert.Equal(6.5, sampler.GetProperty("cfg").GetDouble());
-        Assert.Equal(42, sampler.GetProperty("seed").GetInt64());
-
-        Assert.Equal("a fox", root.GetProperty("pos").GetProperty("inputs").GetProperty("text").GetString());
-        Assert.Equal("blurry", root.GetProperty("neg").GetProperty("inputs").GetProperty("text").GetString());
-        var latent = root.GetProperty("latent").GetProperty("inputs");
-        Assert.Equal(1024, latent.GetProperty("width").GetInt32());
-        Assert.Equal(768, latent.GetProperty("height").GetInt32());
-        Assert.Equal("SaveImage", root.GetProperty("save").GetProperty("class_type").GetString());
-    }
-
-    [Fact]
-    public void Txt2Img_LoraChain_LinksModelAndClip()
-    {
-        var req = new GenRequest("m", AiTaskKind.Txt2Img, "x", Loras: new[] { new AdapterRef("lid", 0.8) });
-        var g = WorkflowBuilder.Txt2Img(req, Sdxl, 512, 512, loraName: _ => "detail.safetensors");
-        var root = Parse(g);
-
-        var lora = root.GetProperty("lora0").GetProperty("inputs");
-        Assert.Equal("detail.safetensors", lora.GetProperty("lora_name").GetString());
-        Assert.Equal(0.8, lora.GetProperty("strength_model").GetDouble());
-        // the checkpoint feeds the lora...
-        Assert.Equal("ckpt", lora.GetProperty("model")[0].GetString());
-        // ...and the sampler reads the lora's MODEL output, not the checkpoint's
-        Assert.Equal("lora0", root.GetProperty("sampler").GetProperty("inputs").GetProperty("model")[0].GetString());
-        // CLIPTextEncode reads the lora's CLIP output (index 1)
-        Assert.Equal("lora0", root.GetProperty("pos").GetProperty("inputs").GetProperty("clip")[0].GetString());
-        Assert.Equal(1, root.GetProperty("pos").GetProperty("inputs").GetProperty("clip")[1].GetInt32());
-    }
-
     [Theory]
     [InlineData(@"D:\comfy\models\checkpoints\sdxl.safetensors", ComfyModelKind.Checkpoint)]
     [InlineData(@"D:\comfy\models\diffusion_models\flux2.safetensors", ComfyModelKind.Unet)]
@@ -76,30 +30,117 @@ public class WorkflowBuilderTests
         // flat → just the filename
         Assert.Equal("sdxl.safetensors", WorkflowBuilder.ComfyName("D:/comfy/models/checkpoints/sdxl.safetensors"));
     }
+}
+
+public class WorkflowTemplateTests
+{
+    // a synthetic API-format graph with a conditioning passthrough between KSampler and the positive encoder
+    private const string Api = @"{
+      ""1"": { ""class_type"":""LoadImage"", ""inputs"":{ ""image"":""old.png"" } },
+      ""2"": { ""class_type"":""CLIPTextEncode"", ""_meta"":{""title"":""Positive Prompt""}, ""inputs"":{ ""text"":""old pos"", ""clip"":[""5"",0] } },
+      ""3"": { ""class_type"":""CLIPTextEncode"", ""_meta"":{""title"":""Negative Prompt""}, ""inputs"":{ ""text"":""old neg"", ""clip"":[""5"",0] } },
+      ""8"": { ""class_type"":""FluxKontextMultiReferenceLatentMethod"", ""inputs"":{ ""conditioning"":[""2"",0], ""reference_latents_method"":""x"" } },
+      ""4"": { ""class_type"":""KSampler"", ""inputs"":{ ""model"":[""6"",0], ""positive"":[""8"",0], ""negative"":[""3"",0], ""latent_image"":[""7"",0], ""seed"":1, ""steps"":10, ""cfg"":5.0, ""denoise"":1.0 } }
+    }";
 
     [Fact]
-    public void Inpaint_UsesLoadImageAndVAEEncodeForInpaint()
+    public void Apply_InjectsImagePromptAndSamplerParams()
     {
-        var g = WorkflowBuilder.Inpaint(new GenRequest("m", AiTaskKind.Inpaint, "fill it"), Sdxl, "up.png", 512, 512, denoise: 0.75);
-        var root = Parse(g);
-        Assert.Equal("up.png", root.GetProperty("image").GetProperty("inputs").GetProperty("image").GetString());
-        Assert.Equal("VAEEncodeForInpaint", root.GetProperty("encode").GetProperty("class_type").GetString());
-        Assert.Equal("image", root.GetProperty("encode").GetProperty("inputs").GetProperty("mask")[0].GetString());
-        Assert.Equal(0.75, root.GetProperty("sampler").GetProperty("inputs").GetProperty("denoise").GetDouble());
+        var outJson = WorkflowTemplate.Apply(Api, new WorkflowTemplate.Inject("new pos", "new neg", "new.png", 42, 20, 2.5, 0.8));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        Assert.Equal("new.png", root.GetProperty("1").GetProperty("inputs").GetProperty("image").GetString());
+        Assert.Equal("new pos", root.GetProperty("2").GetProperty("inputs").GetProperty("text").GetString());   // traced through node 8
+        Assert.Equal("new neg", root.GetProperty("3").GetProperty("inputs").GetProperty("text").GetString());
+        var k = root.GetProperty("4").GetProperty("inputs");
+        Assert.Equal(42, k.GetProperty("seed").GetInt64());
+        Assert.Equal(20, k.GetProperty("steps").GetInt32());
+        Assert.Equal(2.5, k.GetProperty("cfg").GetDouble());
+        Assert.Equal(0.8, k.GetProperty("denoise").GetDouble());
+    }
+
+    private const string LoraApi = @"{
+      ""5"": { ""class_type"":""UNETLoader"", ""inputs"":{ ""unet_name"":""u"" } },
+      ""6"": { ""class_type"":""LoraLoaderModelOnly"", ""inputs"":{ ""model"":[""5"",0], ""lora_name"":""baked.safetensors"", ""strength_model"":1.0 } },
+      ""4"": { ""class_type"":""KSampler"", ""inputs"":{ ""model"":[""6"",0], ""positive"":[""2"",0], ""negative"":[""3"",0], ""latent_image"":[""7"",0], ""seed"":1, ""steps"":10, ""cfg"":5.0, ""denoise"":1.0 } }
+    }";
+
+    [Fact]
+    public void ModelLoaders_OverriddenByPreset()
+    {
+        const string api = @"{
+          ""5"": { ""class_type"":""UNETLoader"", ""inputs"":{ ""unet_name"":""Flux/old.safetensors"", ""weight_dtype"":""default"" } },
+          ""6"": { ""class_type"":""DualCLIPLoader"", ""inputs"":{ ""clip_name1"":""old1"", ""clip_name2"":""old2"", ""type"":""flux"" } },
+          ""7"": { ""class_type"":""VAELoader"", ""inputs"":{ ""vae_name"":""oldvae"" } }
+        }";
+        var outJson = WorkflowTemplate.Apply(api, new WorkflowTemplate.Inject("p", "n", "i.png", 1, 10, 5, 1.0,
+            UnetName: "flux2_dev.safetensors", ClipNames: new[] { "clip_l.sft", "t5.sft" }, VaeName: "flux2_vae.sft"));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        Assert.Equal("flux2_dev.safetensors", root.GetProperty("5").GetProperty("inputs").GetProperty("unet_name").GetString());
+        Assert.Equal("clip_l.sft", root.GetProperty("6").GetProperty("inputs").GetProperty("clip_name1").GetString());
+        Assert.Equal("t5.sft", root.GetProperty("6").GetProperty("inputs").GetProperty("clip_name2").GetString());
+        Assert.Equal("flux2_vae.sft", root.GetProperty("7").GetProperty("inputs").GetProperty("vae_name").GetString());
     }
 
     [Fact]
-    public void Unet_AssembledUsesUnetClipVaeLoaders()
+    public void NoLoraSelected_BypassesLoaderAndRewires()
     {
-        var flux = new ComfyModelRef("Flux", ComfyModelKind.Unet, "flux2-dev.safetensors",
-            ClipNames: new[] { "clip_l.safetensors", "t5xxl.safetensors" }, VaeName: "flux2-vae.safetensors");
-        var g = WorkflowBuilder.Txt2Img(new GenRequest("m", AiTaskKind.Txt2Img, "x"), flux, 1024, 1024);
-        var root = Parse(g);
-        Assert.Equal("UNETLoader", root.GetProperty("unet").GetProperty("class_type").GetString());
-        Assert.Equal("flux2-dev.safetensors", root.GetProperty("unet").GetProperty("inputs").GetProperty("unet_name").GetString());
-        Assert.Equal("DualCLIPLoader", root.GetProperty("clip").GetProperty("class_type").GetString());
-        Assert.Equal("flux", root.GetProperty("clip").GetProperty("inputs").GetProperty("type").GetString());
-        Assert.Equal("VAELoader", root.GetProperty("vae").GetProperty("class_type").GetString());
+        var outJson = WorkflowTemplate.Apply(LoraApi, new WorkflowTemplate.Inject("p", "n", "i.png", 1, 10, 5, 1.0));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        Assert.False(root.TryGetProperty("6", out _));   // loader removed
+        // KSampler.model now points straight at the UNET (rewired around the bypassed loader)
+        var m = root.GetProperty("4").GetProperty("inputs").GetProperty("model");
+        Assert.Equal("5", m[0].GetString());
+    }
+
+    [Fact]
+    public void ReadDefaults_FromFluxStylePrimitivesAndGuidance()
+    {
+        const string api = @"{
+          ""90"": { ""class_type"":""PrimitiveInt"", ""_meta"":{""title"":""Steps""}, ""inputs"":{ ""value"":20 } },
+          ""26"": { ""class_type"":""FluxGuidance"", ""inputs"":{ ""guidance"":4, ""conditioning"":[""6"",0] } }
+        }";
+        var (steps, cfg) = WorkflowTemplate.ReadDefaults(api);
+        Assert.Equal(20, steps);
+        Assert.Equal(4, cfg);
+    }
+
+    [Fact]
+    public void PromptByTitle_InjectsIntoPositiveNode()
+    {
+        const string api = @"{
+          ""6"": { ""class_type"":""CLIPTextEncode"", ""_meta"":{""title"":""CLIP Text Encode (Positive Prompt)""}, ""inputs"":{ ""text"":""old"", ""clip"":[""38"",0] } },
+          ""13"": { ""class_type"":""SamplerCustomAdvanced"", ""inputs"":{ ""noise_seed"":1, ""guider"":[""22"",0] } }
+        }";
+        var outJson = WorkflowTemplate.Apply(api, new WorkflowTemplate.Inject("new prompt", "", "i.png", 7, 10, 5, 1.0));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        Assert.Equal("new prompt", root.GetProperty("6").GetProperty("inputs").GetProperty("text").GetString());
+        Assert.Equal(7, root.GetProperty("13").GetProperty("inputs").GetProperty("noise_seed").GetInt64());
+    }
+
+    [Fact]
+    public void OptionalPatchNode_IsBypassed()
+    {
+        const string api = @"{
+          ""5"": { ""class_type"":""UNETLoader"", ""inputs"":{ ""unet_name"":""u"" } },
+          ""9"": { ""class_type"":""PatchSageAttentionKJ"", ""inputs"":{ ""model"":[""5"",0], ""sage_attention"":""auto"" } },
+          ""4"": { ""class_type"":""KSampler"", ""inputs"":{ ""model"":[""9"",0], ""positive"":[""2"",0], ""negative"":[""3"",0], ""latent_image"":[""7"",0], ""seed"":1, ""steps"":10, ""cfg"":5.0, ""denoise"":1.0 } }
+        }";
+        var outJson = WorkflowTemplate.Apply(api, new WorkflowTemplate.Inject("p", "n", "i.png", 1, 10, 5, 1.0));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        Assert.False(root.TryGetProperty("9", out _));   // sage-attention patch removed
+        Assert.Equal("5", root.GetProperty("4").GetProperty("inputs").GetProperty("model")[0].GetString());   // rewired to UNET
+    }
+
+    [Fact]
+    public void SelectedLora_IsAssigned()
+    {
+        var outJson = WorkflowTemplate.Apply(LoraApi, new WorkflowTemplate.Inject("p", "n", "i.png", 1, 10, 5, 1.0,
+            new[] { ("mylora.safetensors", 0.8) }));
+        var root = JsonDocument.Parse(outJson).RootElement;
+        var li = root.GetProperty("6").GetProperty("inputs");
+        Assert.Equal("mylora.safetensors", li.GetProperty("lora_name").GetString());
+        Assert.Equal(0.8, li.GetProperty("strength_model").GetDouble());
+        Assert.Equal("6", root.GetProperty("4").GetProperty("inputs").GetProperty("model")[0].GetString());   // kept
     }
 }
 

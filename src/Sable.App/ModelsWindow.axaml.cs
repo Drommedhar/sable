@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Sable.Ai.Download;
 using Sable.Ai.Models;
 using Sable.Core.Ai;
+using Sable.Core.Settings;
 
 namespace Sable.App;
 
@@ -340,6 +341,134 @@ public partial class ModelsWindow : Window
     private void ShowStatus(string text) { Status.Text = text; Status.IsVisible = true; }
 
     private static long Mb(long bytes) => bytes / (1024 * 1024);
+
+    // ===== Generative presets (base + encoder(s) + VAE + workflow per op) =====
+
+    private SableSettings? _genSettings;
+
+    /// <summary>Raised after a generative preset is added/removed — host persists + refreshes the gen dialog.</summary>
+    public event Action? PresetsChanged;
+
+    /// <summary>Raised when the user wants to open Sable's bundled ComfyUI (to export a workflow as API format).</summary>
+    public event Action? OpenComfyRequested;
+
+    /// <summary>Give the window the settings so its Generative tab can manage presets (call after construct).</summary>
+    public void InitGenerative(SableSettings settings)
+    {
+        _genSettings = settings;
+        BuildGenPresets();
+    }
+
+    private static bool IsGenBase(ModelManifest m) => m.Kind == ModelKind.Base && m.Tier == AiTier.Generative;
+    private static bool IsEncoder(ModelManifest m) => m.Kind == ModelKind.Component && m.ComponentFamily is { } f
+        && ((f.StartsWith("CLIP", StringComparison.Ordinal) && f != "CLIP-Vision") || f.StartsWith("T5", StringComparison.Ordinal));
+    private static bool IsVae(ModelManifest m) => m.Kind == ModelKind.Component && (m.ComponentFamily?.StartsWith("VAE", StringComparison.Ordinal) ?? false);
+    private static string ShortId(string id) { int i = id.IndexOf(':'); return i >= 0 ? id[(i + 1)..] : id; }
+
+    private void BuildGenPresets()
+    {
+        if (GenPresetRoot is null || _genSettings is null) return;
+        GenPresetRoot.Children.Clear();
+
+        GenPresetRoot.Children.Add(Text("Generative model presets", "ChromeText", 15));
+        GenPresetRoot.Children.Add(Text("Configure base + text encoder(s) + VAE + workflow. Only configured presets appear in Generative Fill — so you control which models are usable.", "ChromeTextDim", 11, wrap: true));
+
+        foreach (var p in _genSettings.GenerativePresets.ToList())
+        {
+            var info = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+            info.Children.Add(Text(p.Name, "ChromeText", 13));
+            var detail = string.IsNullOrEmpty(p.WorkflowFile)
+                ? ShortId(p.BaseModelId)
+                : $"workflow: {System.IO.Path.GetFileName(p.WorkflowFile)} · {ShortId(p.BaseModelId)}";
+            info.Children.Add(Text(detail, "ChromeTextDim", 11, wrap: true));
+            var rm = new Button { Content = "Remove", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0), VerticalAlignment = VerticalAlignment.Center };
+            rm.Click += (_, _) => { _genSettings.GenerativePresets.Remove(p); PresetsChanged?.Invoke(); BuildGenPresets(); };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            row.Children.Add(info); Grid.SetColumn(rm, 1); row.Children.Add(rm);
+            var b = new Border { CornerRadius = new Avalonia.CornerRadius(4), Padding = new Avalonia.Thickness(10, 6) };
+            Bg(b, "ChromePanel2"); b.Child = row;
+            GenPresetRoot.Children.Add(b);
+        }
+
+        BuildPresetEditor();
+    }
+
+    private void BuildPresetEditor()
+    {
+        var bases = _registry.Catalog.All.Where(IsGenBase).OrderBy(m => m.Name).ToList();
+        GenPresetRoot.Children.Add(Text("Add preset", "ChromeText", 13, weight: FontWeight.SemiBold));
+        if (bases.Count == 0)
+        {
+            GenPresetRoot.Children.Add(Text("No generative base models found. Add a ComfyUI source (Settings ▸ Machine Learning) with checkpoints or diffusion_models.", "ChromeTextFaint", 11, wrap: true));
+            return;
+        }
+
+        var nameBox = new TextBox { PlaceholderText = "Preset name (e.g. Qwen Edit)", FontSize = 12 };
+        GenPresetRoot.Children.Add(nameBox);
+
+        var baseCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
+        foreach (var m in bases) baseCombo.Items.Add(new ComboBoxItem { Content = $"{m.Name}  ({m.SourceId ?? "native"})", Tag = m.Id });
+        baseCombo.SelectedIndex = 0;
+        GenPresetRoot.Children.Add(Text("Base model", "ChromeTextDim", 11));
+        GenPresetRoot.Children.Add(baseCombo);
+
+        // encoders + VAE (only meaningful for a standalone transformer; shown always, optional for checkpoints)
+        GenPresetRoot.Children.Add(Text("Text encoder(s)", "ChromeTextDim", 11));
+        var encPanel = new StackPanel { Spacing = 1 };
+        var encChecks = new List<(string Id, CheckBox Cb)>();
+        foreach (var c in _registry.Catalog.All.Where(IsEncoder).OrderBy(c => c.Name))
+        {
+            var cb = new CheckBox { Content = $"{c.Name}  ({c.ComponentFamily})", FontSize = 11 };
+            encPanel.Children.Add(cb); encChecks.Add((c.Id, cb));
+        }
+        if (encChecks.Count == 0) encPanel.Children.Add(Text("(none found)", "ChromeTextFaint", 11));
+        GenPresetRoot.Children.Add(encPanel);
+
+        GenPresetRoot.Children.Add(Text("VAE", "ChromeTextDim", 11));
+        var vaeCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 11 };
+        vaeCombo.Items.Add(new ComboBoxItem { Content = "(none)", Tag = (string?)null });
+        foreach (var v in _registry.Catalog.All.Where(IsVae).OrderBy(v => v.Name)) vaeCombo.Items.Add(new ComboBoxItem { Content = v.Name, Tag = v.Id });
+        vaeCombo.SelectedIndex = 0;
+        GenPresetRoot.Children.Add(vaeCombo);
+
+        // optional: run the user's own exported workflow (overrides base/encoder/VAE above)
+        GenPresetRoot.Children.Add(Text("Workflow file (exported ComfyUI 'API Format' .json) — optional, runs your exact graph", "ChromeTextDim", 11, wrap: true));
+        string? wfPath = null;
+        var wfLabel = Text("(none)", "ChromeTextFaint", 11, wrap: true);
+        var wfBtn = new Button { Content = "Choose workflow…", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
+        wfBtn.Click += async (_, _) =>
+        {
+            var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            { Title = "Pick an exported API-format workflow", AllowMultiple = false, FileTypeFilter = new[] { new FilePickerFileType("JSON") { Patterns = new[] { "*.json" } } } });
+            var p = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            if (!string.IsNullOrWhiteSpace(p)) { wfPath = p; wfLabel.Text = System.IO.Path.GetFileName(p); }
+        };
+        var openComfy = new Button { Content = "Open ComfyUI (to export)", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
+        openComfy.Click += (_, _) => OpenComfyRequested?.Invoke();
+        var wfRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Avalonia.Thickness(0, 2, 0, 0) };
+        wfRow.Children.Add(wfBtn); wfRow.Children.Add(openComfy);
+        GenPresetRoot.Children.Add(wfLabel);
+        GenPresetRoot.Children.Add(wfRow);
+
+        var save = new Button { Content = "Save preset", Classes = { "opt" }, Padding = new Avalonia.Thickness(16, 2), Margin = new Avalonia.Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        save.Click += (_, _) =>
+        {
+            var baseId = (baseCombo.SelectedItem as ComboBoxItem)?.Tag as string;
+            if (_genSettings is null || (string.IsNullOrEmpty(baseId) && string.IsNullOrEmpty(wfPath))) return;
+            var name = string.IsNullOrWhiteSpace(nameBox.Text) ? (baseCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Preset" : nameBox.Text!.Trim();
+            _genSettings.GenerativePresets.Add(new GenerativePreset
+            {
+                Name = name,
+                BaseModelId = baseId ?? "",
+                EncoderIds = encChecks.Where(e => e.Cb.IsChecked == true).Select(e => e.Id).ToList(),
+                VaeId = (vaeCombo.SelectedItem as ComboBoxItem)?.Tag as string,
+                WorkflowFile = wfPath,
+            });
+            PresetsChanged?.Invoke();
+            BuildGenPresets();
+        };
+        GenPresetRoot.Children.Add(save);
+    }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 }

@@ -226,7 +226,6 @@ public partial class MainWindow : Window
         _settings.OpenTabs = _tabs.Where(t => t.Path is not null).Select(t => t.Path!).ToList();
         Sable.Core.Settings.SettingsService.Save(_settings);
         RecoveryService.Clear();   // clean exit → discard autosaved recovery copies
-        try { _sidecar?.Dispose(); } catch { }   // stop the generative sidecar process
         try { _comfy?.Dispose(); } catch { }     // stop the ComfyUI process
     }
 
@@ -377,8 +376,8 @@ public partial class MainWindow : Window
         bool HasTier(Sable.Core.Ai.AiTaskKind t, Sable.Core.Ai.AiTier tier) =>
             ModelReg.Catalog.ForTask(t).Any(m => m.Tier == tier);
         AiRemoveObjItem.IsVisible = HasTier(Sable.Core.Ai.AiTaskKind.Inpaint, Sable.Core.Ai.AiTier.Light);
-        // Generative Fill needs the opt-in generative tier ON (Preferences) + a generative inpaint checkpoint.
-        AiGenFillItem.IsVisible = _settings.GenerativeAiEnabled && HasTier(Sable.Core.Ai.AiTaskKind.Inpaint, Sable.Core.Ai.AiTier.Generative);
+        // Generative Fill needs the opt-in generative tier ON + at least one configured preset.
+        AiGenFillItem.IsVisible = _settings.GenerativeAiEnabled && _settings.GenerativePresets.Count > 0;
         AiGenSep.IsVisible = AiGenFillItem.IsVisible;
     }
 
@@ -574,20 +573,18 @@ public partial class MainWindow : Window
         Doc.SelectedLayer?.RefreshThumbnail();
         doc.ClearSelection();
     }
-    private Sable.Ai.Sidecar.SidecarBackend? _sidecar;
     private Sable.Ai.Comfy.ComfyBackend? _comfy;
     private GenerativePanel? _genPanel;
-    private System.Collections.Generic.IReadOnlyList<string> _selEncoderIds = System.Array.Empty<string>();
-    private string? _selVaeId;   // assembled-model encoder/VAE picks from the panel, read by the Comfy resolver
+    private Sable.Core.Ai.GenerativePreset? _curPreset;   // the preset for the in-flight gen run (read by the Comfy resolver)
 
     /// <summary>Open the modeless Generative Fill panel (§4.1). Generate is handled by <see cref="OnGenerateFill"/>.</summary>
     private void OnAiGenerativeFill(object? sender, RoutedEventArgs e)
     {
         if (_genPanel is null)
         {
-            _genPanel = new GenerativePanel(ModelReg) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            _genPanel = new GenerativePanel(ModelReg, _settings.GenerativePresets) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
             _genPanel.GenerateRequested += req => _ = OnGenerateFill(req);
-            _genPanel.Closed += (_, _) => _genPanel = null;
+            _genPanel.Closed += (_, _) => { _genPanel = null; if (_comfy is not null) _ = _comfy.FreeMemoryAsync(); };   // free comfy VRAM when done
         }
         _genPanel.Show(this);
         _genPanel.Activate();
@@ -602,9 +599,7 @@ public partial class MainWindow : Window
     {
         if (!_settings.GenerativeAiEnabled)
             return System.Threading.Tasks.Task.FromResult((false, Sable.App.Localization.Loc.T("generative.sidecarOff")));
-        return _settings.GenerativeBackend == Sable.Core.Settings.GenerativeBackendKind.ComfyUI
-            ? EnsureComfyAsync(ct)
-            : EnsureDiffusersAsync(ct);
+        return EnsureComfyAsync(ct);   // ComfyUI is the only generative backend
     }
 
     private async System.Threading.Tasks.Task<(bool Ok, string Message)> EnsureComfyAsync(System.Threading.CancellationToken ct)
@@ -636,32 +631,12 @@ public partial class MainWindow : Window
         return (true, Sable.App.Localization.Loc.T("generative.usingEnv", "ComfyUI"));
     }
 
-    private async System.Threading.Tasks.Task<(bool Ok, string Message)> EnsureDiffusersAsync(System.Threading.CancellationToken ct)
-    {
-        if (_sidecar is { IsAvailable: true }) { Ai.Generative = _sidecar; return (true, ""); }
-
-        var host = Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.CurrentHost();
-        var comfy = ModelReg.Sources.FirstOrDefault(s => s.Kind == Sable.Core.Ai.ModelSourceKind.ComfyUI)?.Path;
-        var ownPy = Sable.Ai.Sidecar.Provisioning.UvEnv.PythonIn(Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVenvDir);
-        string? own = System.IO.File.Exists(ownPy) ? ownPy : null;
-        var opts = new Sable.Ai.Sidecar.Provisioning.EnvResolveOptions(_settings.SidecarPython, comfy, own, host);
-
-        var env = await System.Threading.Tasks.Task.Run(
-            () => Sable.Ai.Sidecar.Provisioning.EnvResolver.ResolveAsync(opts, new Sable.Ai.Sidecar.Provisioning.EnvProbe(), ct), ct);
-        if (env is null)
-            return (false, Sable.App.Localization.Loc.T("generative.runtimeNotInstalled"));
-
-        _sidecar ??= new Sable.Ai.Sidecar.SidecarBackend();
-        bool started = await _sidecar.StartAsync(env, ct: ct);
-        if (!started) return (false, Sable.App.Localization.Loc.T("generative.sidecarFailedStart"));
-        Ai.Generative = _sidecar;
-        return (true, Sable.App.Localization.Loc.T("generative.usingEnv", env.Origin));
-    }
 
     /// <summary>Wire the ComfyUI backend's App-side glue: manifest→graph model ref, LoRA names, PNG codec.</summary>
     private void WireComfy(Sable.Ai.Comfy.ComfyBackend comfy)
     {
-        comfy.ResolveModel = id => BuildComfyModelRef(ModelReg.Catalog.ById(id), _selEncoderIds, _selVaeId, ModelReg);
+        comfy.ResolveModel = id => BuildComfyModelRef(ModelReg.Catalog.ById(id),
+            _curPreset?.EncoderIds ?? (System.Collections.Generic.IReadOnlyList<string>)System.Array.Empty<string>(), _curPreset?.VaeId, ModelReg);
         comfy.LoraName = id =>
         {
             var f = ModelReg.Catalog.ById(id)?.Files?.FirstOrDefault();
@@ -705,8 +680,7 @@ public partial class MainWindow : Window
         if (docSel is null) { _genPanel?.SetStatus(Sable.App.Localization.Loc.T("generative.makeSelection")); return; }
         var region = LayerMaskFromDocSelection(px, docSel, doc.Width, doc.Height);
 
-        _selEncoderIds = req.EncoderIds;   // read by the Comfy ResolveModel closure when building the graph
-        _selVaeId = req.VaeId;
+        _curPreset = req.Preset;   // read by the Comfy ResolveModel closure when building the graph
 
         using var cts = new System.Threading.CancellationTokenSource();
         var busy = BusyWindow.Begin(this, Sable.App.Localization.Loc.T("generative.startingBackend"), cts);
@@ -717,9 +691,14 @@ public partial class MainWindow : Window
             if (!ok) { busy.Done(); _genPanel?.SetStatus(msg); return; }
             _genPanel?.SetStatus(msg);
             busy.SetMessage(Sable.App.Localization.Loc.T("generative.fillBusy"));
-            if (_comfy is not null) _comfy.Progress = busy.Progress;   // ComfyUI WS step progress → the bar
+            if (_comfy is not null)
+            {
+                _comfy.Progress = busy.Progress;          // ComfyUI WS step progress → the bar
+                _comfy.Denoise = req.Denoise;
+                _comfy.WorkflowJsonPath = req.Preset.WorkflowFile;   // run the user's exported workflow
+            }
 
-            var spec = new Sable.Core.Ai.GenRequest(req.BaseId, Sable.Core.Ai.AiTaskKind.Inpaint, req.Prompt,
+            var spec = new Sable.Core.Ai.GenRequest(req.Preset.BaseModelId, Sable.Core.Ai.AiTaskKind.Inpaint, req.Prompt,
                 req.Negative, req.Steps, req.Cfg, req.Seed, Loras: req.Loras, Offload: req.Offload);
             var cmd = await Ai.GenerativeFillAsync(doc, px, region, spec, busy.Progress, cts.Token);
             Doc!.Undo.Execute(cmd);
@@ -753,14 +732,31 @@ public partial class MainWindow : Window
     {
         var win = new ModelsWindow(ModelReg, _gpuProbe) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
         win.DefaultsChanged += ApplyAiVisibility;   // default/install changes alter which model serves each op
+        win.PresetsChanged += () => { Sable.Core.Settings.SettingsService.Save(_settings); _genPanel?.Close(); };
+        win.OpenComfyRequested += () => _ = OpenBundledComfyAsync();
         win.ModelsFolderChanged += newPath =>      // registry already moved; persist the choice + rebuild the AI backend
         {
             _settings.ModelsFolder = newPath;
             Sable.Core.Settings.SettingsService.Save(_settings);
             _aiService = null;   // next AI op rebuilds the backend against the moved registry
         };
+        win.InitGenerative(_settings);   // build the Generative preset tab
         await win.ShowDialog(this);
         ApplyAiVisibility();   // installs/removals in the manager change which features are available
+    }
+
+    /// <summary>Start Sable's bundled ComfyUI (if needed) and open its web UI in the browser — so the user
+    /// can load a workflow and "Save (API Format)" for a preset (PHASE8_AI_COMFY).</summary>
+    private async System.Threading.Tasks.Task OpenBundledComfyAsync()
+    {
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, Sable.App.Localization.Loc.T("generative.startingBackend"), cts);
+        (bool Ok, string Message) r;
+        try { r = await EnsureComfyAsync(cts.Token); } catch (System.Exception ex) { busy.Done(); await ConfirmWindow.Ask(this, "ComfyUI", ex.Message); return; }
+        busy.Done();
+        if (!r.Ok || _comfy?.BaseUri is not { } uri) { await ConfirmWindow.Ask(this, "ComfyUI", r.Message); return; }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.ToString()) { UseShellExecute = true }); }
+        catch (System.Exception ex) { await ConfirmWindow.Ask(this, "ComfyUI", $"Open {uri} in your browser. ({ex.Message})"); }
     }
 
     /// <summary>Save the registry's external (non-native) sources to settings (§2.1).</summary>

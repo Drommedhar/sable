@@ -29,6 +29,15 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
     /// <summary>Progress sink for the next generation (KSampler step progress from the WS). Set per-run by the App.</summary>
     public IProgress<double>? Progress { get; set; }
 
+    /// <summary>Sampler denoise (0..1) for the next run. 1.0 = full regen; lower keeps more of the source.</summary>
+    public double Denoise { get; set; } = 1.0;
+    /// <summary>The exported API-format ComfyUI workflow (the user's own graph) to run — Sable injects the
+    /// image/prompt/seed/steps/cfg/denoise + model/LoRA names. Required (every preset carries one).</summary>
+    public string? WorkflowJsonPath { get; set; }
+
+    /// <summary>The running ComfyUI base URL (for "Open ComfyUI"), or null if not started.</summary>
+    public Uri? BaseUri => _client?.BaseUri;
+
     // --- App-injected glue (keeps this project free of registry + image-codec deps) ---
     /// <summary>baseModelId → how ComfyUI loads it (ckpt/unet name + clip/vae for assembled).</summary>
     public Func<string, ComfyModelRef?>? ResolveModel { get; set; }
@@ -109,47 +118,35 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
     public Task<LoadModelResult> LoadModelAsync(LoadModelRequest req, CancellationToken ct = default)
         => Task.FromResult(new LoadModelResult(true));
 
+    /// <summary>Unload models + free VRAM (call when the user closes the gen dialog — ComfyUI keeps weights
+    /// resident across runs otherwise).</summary>
+    public Task FreeMemoryAsync(CancellationToken ct = default)
+        => _client?.FreeAsync(true, ct) ?? Task.CompletedTask;
+
     public async Task<AiImage> GenerateAsync(GenRequest req, CancellationToken ct = default)
     {
         if (_client is null || !_healthy) throw new InvalidOperationException("ComfyUI is not running.");
-        if (ResolveModel is null || DecodePng is null) throw new InvalidOperationException("ComfyBackend not wired (App must set resolvers).");
+        if (DecodePng is null || EncodePng is null) throw new InvalidOperationException("ComfyBackend not wired (App must set the codec).");
+        if (string.IsNullOrWhiteSpace(WorkflowJsonPath) || !System.IO.File.Exists(WorkflowJsonPath))
+            throw new InvalidOperationException("This preset has no workflow file. Configure one in AI ▸ Models ▸ Generative.");
+        if (req.Image is not { } img) throw new InvalidOperationException("No image to send.");
 
-        var model = ResolveModel(req.BaseModelId) ?? throw new InvalidOperationException($"Unknown model '{req.BaseModelId}'.");
-        if (!ArchTemplates.IsImageArch(model.Family))
-            throw new InvalidOperationException($"'{model.Family}' is a video/unsupported architecture — no image graph yet.");
-        if (model.Kind == ComfyModelKind.Unet && (model.ClipNames is null || model.ClipNames.Count == 0))
-            throw new InvalidOperationException(
-                $"'{model.Name}' is a standalone transformer (diffusion_models) — it needs a text encoder + VAE chosen. " +
-                "That picker isn't built yet; pick a full checkpoint (checkpoints/ folder) for now.");
-
-        Dictionary<string, object> graph;
-        if (req.Task == AiTaskKind.Inpaint && req.Image is { } img && req.Mask is { } mask)
-        {
-            if (EncodePng is null) throw new InvalidOperationException("ComfyBackend not wired (no PNG encoder).");
-            var rgba = CombineAlpha(img.Rgba, mask.Coverage, img.Width, img.Height);
-            var name = await _client.UploadImageAsync(EncodePng(rgba, img.Width, img.Height), "sable_inpaint.png", ct).ConfigureAwait(false);
-            graph = WorkflowBuilder.Inpaint(req, model, name, img.Width, img.Height, denoise: 1.0, LoraName);
-        }
-        else if (req.Task == AiTaskKind.Txt2Img)
-        {
-            int w = req.Image?.Width ?? 1024, h = req.Image?.Height ?? 1024;
-            graph = WorkflowBuilder.Txt2Img(req, model, w, h, LoraName);
-        }
-        else throw new InvalidOperationException($"ComfyUI backend: task {req.Task} not supported yet.");
-
+        // run the user's exported workflow (the user's own graph): inject our image/prompt/seed/params + the
+        // preset's model + LoRA names (overriding the workflow's baked, possibly wrong-OS, loader names).
+        var iname = await _client.UploadImageAsync(EncodePng(img.Rgba, img.Width, img.Height), "sable_in.png", ct).ConfigureAwait(false);
+        var apiJson = await System.IO.File.ReadAllTextAsync(WorkflowJsonPath, ct).ConfigureAwait(false);
+        var tLoras = (req.Loras ?? (IReadOnlyList<AdapterRef>)System.Array.Empty<AdapterRef>())
+            .Select(l => (Name: LoraName?.Invoke(l.ModelId) ?? "", l.Weight))
+            .Where(l => !string.IsNullOrEmpty(l.Name)).ToList();
+        var mref = string.IsNullOrEmpty(req.BaseModelId) ? null : ResolveModel?.Invoke(req.BaseModelId);
+        var graph = WorkflowTemplate.Build(apiJson, new WorkflowTemplate.Inject(
+            req.Prompt ?? "", req.Negative ?? "", iname, req.Seed, req.Steps, req.Cfg, Denoise, tLoras,
+            UnetName: mref?.Kind == ComfyModelKind.Unet ? mref.Name : null,
+            CheckpointName: mref?.Kind == ComfyModelKind.Checkpoint ? mref.Name : null,
+            ClipNames: mref?.ClipNames, VaeName: mref?.VaeName));
         var png = await _client.RunPromptAsync(graph, Progress, ct).ConfigureAwait(false);
         var (outRgba, ow, oh) = DecodePng(png);
         return new AiImage(outRgba, ow, oh);
-    }
-
-    /// <summary>RGB from <paramref name="rgba"/>, alpha = INVERTED mask. ComfyUI's LoadImage computes
-    /// mask = 1 - alpha, so the selected (coverage 255) region must be alpha 0 → ComfyUI mask 1 → inpainted.</summary>
-    private static byte[] CombineAlpha(byte[] rgba, byte[] mask, int w, int h)
-    {
-        var outp = (byte[])rgba.Clone();
-        int n = w * h;
-        for (int i = 0; i < n && i < mask.Length; i++) outp[i * 4 + 3] = (byte)(255 - mask[i]);
-        return outp;
     }
 
     public void Stop()

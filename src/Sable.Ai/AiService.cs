@@ -249,25 +249,70 @@ public sealed class AiService
         if (Generative.RequiresExplicitLoad)
             await EnsureModelLoadedAsync(baseId, spec.Offload, spec.Loras, ct).ConfigureAwait(false);
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
-        var req = spec with { BaseModelId = baseId, Task = AiTaskKind.Inpaint, Image = img, Mask = region };
+        // send exactly what the user selected: crop to the selection's bounding box (whole layer if whole-selected)
+        var (bx, by, bw, bh) = Bounds(region.Coverage, region.Width, region.Height);
+        var cropRgba = CropRgba(target.Pixels, target.Width, target.Height, bx, by, bw, bh);
+        var cropMask = CropChannel(region.Coverage, region.Width, region.Height, bx, by, bw, bh);
 
+        var req = spec with
+        {
+            BaseModelId = baseId, Task = AiTaskKind.Inpaint,
+            Image = new AiImage(cropRgba, bw, bh), Mask = new AiMask(cropMask, bw, bh),
+        };
         var outImg = await Generative!.GenerateAsync(req, ct).ConfigureAwait(false);
 
-        var layer = new PixelLayer(outImg.Width, outImg.Height, target.Name + " (fill)")
-        { OffsetX = target.OffsetX, OffsetY = target.OffsetY };
-        layer.SetBuffer(outImg.Width, outImg.Height, outImg.Rgba);
+        // the model may change resolution (e.g. Qwen-Edit scales to ~1 MP) → resize back to the selection
+        // bbox so the result deposits exactly where the user selected.
+        var outRgba = outImg.Rgba;
+        if (outImg.Width != bw || outImg.Height != bh)
+            outRgba = ImageOps.ResizeRgba(outImg.Rgba, outImg.Width, outImg.Height, bw, bh);
 
-        // clip the generated layer to the fill region so only the masked area shows
-        if (region.Width == outImg.Width && region.Height == outImg.Height)
-        {
-            layer.Mask = ImageOps.CoverageToRgbaMask(region.Coverage, outImg.Width, outImg.Height);
-            layer.MaskDirty = true;
-        }
+        // deposit the result as a NEW layer positioned at the selection bbox (in doc space)
+        var layer = new PixelLayer(bw, bh, target.Name + " (gen)")
+        { OffsetX = target.OffsetX + bx, OffsetY = target.OffsetY + by };
+        layer.SetBuffer(bw, bh, outRgba);
+
+        // always clip to the selection shape — only the pixels the user selected change (works for ellipse /
+        // polygon / lasso; a rectangular selection makes this a no-op).
+        layer.Mask = ImageOps.CoverageToRgbaMask(cropMask, bw, bh);
+        layer.MaskDirty = true;
 
         var parent = doc.FindParent(target) ?? doc.Layers;
         int idx = parent.IndexOf(target) + 1;
         return new AddLayerCommand(doc, parent, layer, idx);
+    }
+
+    /// <summary>Tight bounding box of the non-zero coverage; the whole image when coverage is empty.</summary>
+    private static (int X, int Y, int W, int H) Bounds(byte[] cov, int w, int h)
+    {
+        int minx = w, miny = h, maxx = -1, maxy = -1;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if (cov[y * w + x] > 0) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
+        if (maxx < 0) return (0, 0, w, h);
+        return (minx, miny, maxx - minx + 1, maxy - miny + 1);
+    }
+
+    private static byte[] CropRgba(byte[] src, int w, int h, int x, int y, int cw, int ch)
+    {
+        var outp = new byte[cw * ch * 4];
+        for (int row = 0; row < ch; row++)
+        {
+            int sy = y + row; if (sy < 0 || sy >= h) continue;
+            System.Array.Copy(src, (sy * w + x) * 4, outp, row * cw * 4, cw * 4);
+        }
+        return outp;
+    }
+
+    private static byte[] CropChannel(byte[] src, int w, int h, int x, int y, int cw, int ch)
+    {
+        var outp = new byte[cw * ch];
+        for (int row = 0; row < ch; row++)
+        {
+            int sy = y + row; if (sy < 0 || sy >= h) continue;
+            System.Array.Copy(src, sy * w + x, outp, row * cw, cw);
+        }
+        return outp;
     }
 
     private static string Signature(string baseId, bool offload, IReadOnlyList<AdapterRef>? loras)

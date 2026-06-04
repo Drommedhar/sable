@@ -16,6 +16,7 @@ namespace Sable.Ai.Comfy.Provisioning;
 public sealed class ComfyProvisioner
 {
     private const string ComfyGit = "https://github.com/comfyanonymous/ComfyUI.git";
+    private const string ManagerGit = "https://github.com/ltdrdata/ComfyUI-Manager.git";
 
     public string ComfyDir { get; }
     public string VenvDir => Path.Combine(ComfyDir, "venv");
@@ -51,6 +52,9 @@ public sealed class ComfyProvisioner
         log?.Report("Installing ComfyUI requirements…");
         await RunAsync(uv, new[] { "pip", "install", "--python", PythonExe, "-r", Path.Combine(ComfyDir, "requirements.txt") }, null, log, ct).ConfigureAwait(false);
 
+        // ship ComfyUI-Manager so the user can install any custom nodes their workflows need via the web UI
+        await EnsureComfyManagerAsync(uv, log, ct).ConfigureAwait(false);
+
         if (!string.IsNullOrWhiteSpace(userModelsDir) && Directory.Exists(userModelsDir))
         {
             WriteExtraModelPaths(userModelsDir);
@@ -65,6 +69,24 @@ public sealed class ComfyProvisioner
     {
         try { File.WriteAllText(Path.Combine(ComfyDir, "extra_model_paths.yaml"), ComfyReuse.BuildExtraModelPaths(userModelsDir)); }
         catch { }
+    }
+
+    /// <summary>Clone ComfyUI-Manager into the provisioned ComfyUI's custom_nodes (so the user can install
+    /// custom nodes their workflows need from the web UI). Best-effort.</summary>
+    private async Task EnsureComfyManagerAsync(string uv, IProgress<string>? log, CancellationToken ct)
+    {
+        var dir = Path.Combine(ComfyDir, "custom_nodes", "ComfyUI-Manager");
+        if (Directory.Exists(dir)) return;
+        Directory.CreateDirectory(Path.Combine(ComfyDir, "custom_nodes"));
+        log?.Report("Installing ComfyUI-Manager…");
+        try
+        {
+            await RunAsync("git", new[] { "clone", "--depth", "1", ManagerGit, dir }, null, log, ct).ConfigureAwait(false);
+            var reqs = Path.Combine(dir, "requirements.txt");
+            if (File.Exists(reqs))
+                await RunAsync(uv, new[] { "pip", "install", "--python", PythonExe, "-r", reqs }, null, log, ct).ConfigureAwait(false);
+        }
+        catch (System.Exception ex) { log?.Report($"ComfyUI-Manager install failed: {ex.Message}"); }
     }
 
     private async Task LinkCustomNodesAsync(string userModelsDir, string uv, IProgress<string>? log, CancellationToken ct)

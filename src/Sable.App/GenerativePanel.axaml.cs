@@ -12,43 +12,38 @@ using Sable.Core.Ai;
 
 namespace Sable.App;
 
-/// <summary>The parameters a Generative Fill run needs (PHASE8_AI_SIDECAR §4.1). Image/mask are added by
-/// the host from the active layer + selection.</summary>
+/// <summary>What a Generative run needs: the chosen preset (base + encoder(s) + VAE + workflow) + prompt +
+/// params + a LoRA stack. The image/mask are added by the host from the active layer + selection.</summary>
 public sealed record GenFillRequest(
-    string BaseId, string Prompt, string Negative, int Steps, double Cfg, long Seed, bool Offload,
-    IReadOnlyList<AdapterRef> Loras,
-    IReadOnlyList<string> EncoderIds, string? VaeId);   // assembled (diffusion_models) models: chosen encoder/VAE component ids
+    GenerativePreset Preset, string Prompt, string Negative, int Steps, double Cfg, long Seed, double Denoise,
+    bool Offload, IReadOnlyList<AdapterRef> Loras);
 
 /// <summary>
-/// Modeless Generative Fill panel (PHASE8_AI_SIDECAR §4.1): pick the inpaint base (across all sources,
-/// ComfyUI checkpoints included), a compatible LoRA stack with per-LoRA weights, prompt/negative, and
-/// steps/cfg/seed/offload. The host (MainWindow) reads the active layer + selection, runs
-/// <c>AiService.GenerativeFillAsync</c>, and deposits the result as an undoable layer. Rows are built in
-/// code with theme-bound colours (a plain code-time lookup misses the active theme variant).
+/// Modeless Generative dialog (PHASE8_AI_COMFY). The model is chosen from the user's configured PRESETS
+/// (Models ▸ Generative) — which pin base + encoder(s) + VAE + workflow — so here the user only picks a
+/// preset, a LoRA stack, the prompt, and a few params. Rows built in code with theme-bound colours.
 /// </summary>
 public partial class GenerativePanel : Window
 {
     private readonly ModelRegistry _reg;
-    private ComboBox _modelCombo = null!;
-    private TextBox _prompt = null!, _negative = null!, _steps = null!, _cfg = null!, _seed = null!;
+    private readonly List<GenerativePreset> _presets;
+    private ComboBox _presetCombo = null!;
+    private TextBox _prompt = null!, _negative = null!, _steps = null!, _cfg = null!, _seed = null!, _denoise = null!;
     private CheckBox _offload = null!;
     private StackPanel _loraRows = null!;
-    private StackPanel _assembled = null!, _encoderRows = null!;
-    private ComboBox _vaeCombo = null!;
     private TextBlock _status = null!;
     private Button _generate = null!;
     private readonly List<(string Id, CheckBox Cb, TextBox Weight)> _loras = new();
-    private readonly List<(string Id, CheckBox Cb)> _encoders = new();
 
-    /// <summary>Raised when the user clicks Generate with a valid base model.</summary>
     public event Action<GenFillRequest>? GenerateRequested;
 
-    public GenerativePanel() : this(new ModelRegistry(System.IO.Path.GetTempPath())) { }
+    public GenerativePanel() : this(new ModelRegistry(System.IO.Path.GetTempPath()), System.Array.Empty<GenerativePreset>()) { }
 
-    public GenerativePanel(ModelRegistry reg)
+    public GenerativePanel(ModelRegistry reg, IReadOnlyList<GenerativePreset> presets)
     {
         InitializeComponent();
         _reg = reg;
+        _presets = presets.ToList();
         BuildUi();
     }
 
@@ -63,32 +58,17 @@ public partial class GenerativePanel : Window
 
     private void BuildUi()
     {
-        // --- model ---
         Root.Children.Add(Label(Loc.T("generative.modelLabel")));
-        _modelCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
-        // generative bases only (LaMa inpaint is the light tier — that's "Remove Object", not gen fill)
-        foreach (var m in _reg.Catalog.ForTask(AiTaskKind.Inpaint).Where(m => m.Tier == AiTier.Generative))
-            _modelCombo.Items.Add(new ComboBoxItem { Content = $"{m.Name}  ({m.SourceId ?? "native"})", Tag = m.Id });
-        _modelCombo.SelectionChanged += (_, _) => { BuildLoras(); UpdateAssembled(); };
-        if (_modelCombo.Items.Count > 0) _modelCombo.SelectedIndex = 0;
-        Root.Children.Add(_modelCombo);
+        _presetCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
+        foreach (var p in _presets) _presetCombo.Items.Add(new ComboBoxItem { Content = p.Name, Tag = p });
+        _presetCombo.SelectionChanged += (_, _) => { BuildLoras(); LoadWorkflowDefaults(); };
+        if (_presetCombo.Items.Count > 0) _presetCombo.SelectedIndex = 0;
+        Root.Children.Add(_presetCombo);
 
-        // --- assembled model: text encoder(s) + VAE (shown only for diffusion_models/unet bases) ---
-        _assembled = new StackPanel { Spacing = 2, IsVisible = false };
-        _assembled.Children.Add(Label(Loc.T("generative.textEncoders")));
-        _encoderRows = new StackPanel { Spacing = 1 };
-        _assembled.Children.Add(_encoderRows);
-        _assembled.Children.Add(Label(Loc.T("generative.vae")));
-        _vaeCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 11 };
-        _assembled.Children.Add(_vaeCombo);
-        Root.Children.Add(_assembled);
-
-        // --- LoRA stack ---
         Root.Children.Add(Label(Loc.T("generative.lorasLabel")));
         _loraRows = new StackPanel { Spacing = 2 };
         Root.Children.Add(_loraRows);
 
-        // --- prompt / negative ---
         Root.Children.Add(Label(Loc.T("generative.prompt")));
         _prompt = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64 };
         Root.Children.Add(_prompt);
@@ -96,16 +76,15 @@ public partial class GenerativePanel : Window
         _negative = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 40 };
         Root.Children.Add(_negative);
 
-        // --- params ---
         _steps = NumRow(Loc.T("generative.steps"), "25", isSeed: false);
         _cfg = NumRow(Loc.T("generative.cfg"), "7.0", isSeed: false);
+        _denoise = NumRow(Loc.T("generative.denoise"), "1.0", isSeed: false);
         _seed = NumRow(Loc.T("generative.seed"), "-1", out var randomBtn, isSeed: true);
         randomBtn!.Click += (_, _) => _seed.Text = new Random().Next(0, int.MaxValue).ToString(CultureInfo.InvariantCulture);
 
         _offload = new CheckBox { Content = Loc.T("generative.offload"), FontSize = 12, Margin = new Avalonia.Thickness(0, 6, 0, 0) };
         Root.Children.Add(_offload);
 
-        // --- generate + status ---
         _generate = new Button { Content = Loc.T("generative.generate"), Classes = { "opt" }, Padding = new Avalonia.Thickness(18, 4), Margin = new Avalonia.Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         _generate.Click += OnGenerate;
         Root.Children.Add(_generate);
@@ -114,49 +93,28 @@ public partial class GenerativePanel : Window
         Fg(_status);
         Root.Children.Add(_status);
 
-        if (_modelCombo.Items.Count == 0)
+        if (_presetCombo.Items.Count == 0)
         {
-            SetStatus(Loc.T("generative.noModel"));
+            SetStatus(Loc.T("generative.noPresets"));
             _generate.IsEnabled = false;
         }
         BuildLoras();
-        UpdateAssembled();
+        LoadWorkflowDefaults();
     }
 
-    private static bool IsEncoder(ModelManifest m)
-        => m.Kind == ModelKind.Component && m.ComponentFamily is { } f
-           && ((f.StartsWith("CLIP", StringComparison.Ordinal) && f != "CLIP-Vision") || f.StartsWith("T5", StringComparison.Ordinal));
-
-    private static bool IsVae(ModelManifest m)
-        => m.Kind == ModelKind.Component && (m.ComponentFamily?.StartsWith("VAE", StringComparison.Ordinal) ?? false);
-
-    /// <summary>Show + populate the encoder/VAE pickers when the selected base is a standalone transformer.</summary>
-    private void UpdateAssembled()
+    /// <summary>Pre-fill steps/cfg from the selected preset's workflow file (best-effort).</summary>
+    private void LoadWorkflowDefaults()
     {
-        if (_assembled is null) return;
-        var baseId = (_modelCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-        var m = baseId is null ? null : _reg.Catalog.ById(baseId);
-        var file = m?.Files?.FirstOrDefault();
-        bool unet = file is not null && Sable.Ai.Comfy.Workflow.WorkflowBuilder.KindForPath(file) == Sable.Ai.Comfy.Workflow.ComfyModelKind.Unet;
-        _assembled.IsVisible = unet;
-        _encoderRows.Children.Clear(); _encoders.Clear(); _vaeCombo.Items.Clear();
-        if (!unet) return;
-
-        foreach (var c in _reg.Catalog.All.Where(IsEncoder).OrderBy(c => c.Name))
+        if (_steps is null || _cfg is null) return;
+        var wf = SelectedPreset?.WorkflowFile;
+        if (string.IsNullOrEmpty(wf) || !System.IO.File.Exists(wf)) return;
+        try
         {
-            var cb = new CheckBox { Content = $"{c.Name}  ({c.ComponentFamily})", FontSize = 11 };
-            _encoderRows.Children.Add(cb);
-            _encoders.Add((c.Id, cb));
+            var (s, c) = Sable.Ai.Comfy.Workflow.WorkflowTemplate.ReadDefaults(System.IO.File.ReadAllText(wf));
+            if (s > 0) _steps.Text = s.ToString(CultureInfo.InvariantCulture);
+            if (c > 0) _cfg.Text = c.ToString("0.##", CultureInfo.InvariantCulture);
         }
-        if (_encoders.Count == 0)
-        {
-            var t = new TextBlock { Text = Loc.T("generative.noEncoders"), FontSize = 11 };
-            t.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeTextFaint"));
-            _encoderRows.Children.Add(t);
-        }
-        foreach (var v in _reg.Catalog.All.Where(IsVae).OrderBy(v => v.Name))
-            _vaeCombo.Items.Add(new ComboBoxItem { Content = v.Name, Tag = v.Id });
-        if (_vaeCombo.Items.Count > 0) _vaeCombo.SelectedIndex = 0;
+        catch { }
     }
 
     private TextBox NumRow(string label, string def, bool isSeed) => NumRow(label, def, out _, isSeed);
@@ -179,22 +137,19 @@ public partial class GenerativePanel : Window
             Grid.SetColumn(inner, 1);
             grid.Children.Add(inner);
         }
-        else
-        {
-            Grid.SetColumn(box, 1);
-            grid.Children.Add(box);
-        }
+        else { Grid.SetColumn(box, 1); grid.Children.Add(box); }
         Root.Children.Add(grid);
         return box;
     }
 
+    private GenerativePreset? SelectedPreset => (_presetCombo.SelectedItem as ComboBoxItem)?.Tag as GenerativePreset;
+
     private void BuildLoras()
     {
-        if (_loraRows is null) return;   // SelectedIndex set fires this during BuildUi before _loraRows exists
+        if (_loraRows is null) return;
         _loraRows.Children.Clear();
         _loras.Clear();
-        var baseId = (_modelCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-        var baseModel = baseId is null ? null : _reg.Catalog.ById(baseId);
+        var baseModel = SelectedPreset is { } p ? _reg.Catalog.ById(p.BaseModelId) : null;
         if (baseModel is null) return;
 
         var compat = _reg.Catalog.AdaptersFor(baseModel).ToList();
@@ -220,22 +175,16 @@ public partial class GenerativePanel : Window
 
     private void OnGenerate(object? sender, RoutedEventArgs e)
     {
-        var baseId = (_modelCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-        if (string.IsNullOrEmpty(baseId)) { SetStatus(Loc.T("generative.pickModelFirst")); return; }
-
-        int steps = ParseInt(_steps.Text, 25);
-        double cfg = ParseDouble(_cfg.Text, 7.0);
-        long seed = ParseLong(_seed.Text, -1);
+        if (SelectedPreset is not { } preset) { SetStatus(Loc.T("generative.pickModelFirst")); return; }
 
         var loras = new List<AdapterRef>();
         foreach (var (id, cb, weight) in _loras)
             if (cb.IsChecked == true) loras.Add(new AdapterRef(id, ParseDouble(weight.Text, 1.0)));
 
-        var encoderIds = _encoders.Where(e => e.Cb.IsChecked == true).Select(e => e.Id).ToList();
-        var vaeId = (_vaeCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-
         GenerateRequested?.Invoke(new GenFillRequest(
-            baseId, _prompt.Text ?? "", _negative.Text ?? "", steps, cfg, seed, _offload.IsChecked == true, loras, encoderIds, vaeId));
+            preset, _prompt.Text ?? "", _negative.Text ?? "",
+            ParseInt(_steps.Text, 25), ParseDouble(_cfg.Text, 7.0), ParseLong(_seed.Text, -1),
+            Math.Clamp(ParseDouble(_denoise.Text, 1.0), 0.0, 1.0), _offload.IsChecked == true, loras));
     }
 
     public void SetStatus(string text) => _status.Text = text;

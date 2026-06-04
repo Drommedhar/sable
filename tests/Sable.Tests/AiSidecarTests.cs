@@ -402,8 +402,8 @@ public class GenerativeFillTests
 
         Assert.Equal(2, doc.Layers.Count);
         Assert.Equal(0, doc.Layers.IndexOf(target));    // base stays at bottom
-        var added = doc.Layers[1];                      // new fill layer sits above it
-        Assert.Contains("fill", added.Name);
+        var added = doc.Layers[1];                      // new gen layer sits above it
+        Assert.Contains("gen", added.Name);
         Assert.True(added.HasMask);                              // clipped to the fill region
         Assert.Equal(1, fake.LoadCount);
         Assert.Equal(PipelineKind.SingleFile, fake.LastLoad!.Kind);

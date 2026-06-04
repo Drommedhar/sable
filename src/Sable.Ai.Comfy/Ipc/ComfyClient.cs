@@ -56,8 +56,9 @@ public sealed class ComfyClient : IDisposable
     }
 
     /// <summary>POST /prompt → prompt_id. Throws with detail if ComfyUI REJECTS the graph (missing node /
-    /// bad inputs) — otherwise a rejected prompt has no prompt_id and the WS would hang forever.</summary>
-    public async Task<string> QueuePromptAsync(IReadOnlyDictionary<string, object> graph, CancellationToken ct = default)
+    /// bad inputs) — otherwise a rejected prompt has no prompt_id and the WS would hang forever. The graph is
+    /// a hand-built node dict OR a loaded-workflow <c>JsonObject</c>.</summary>
+    public async Task<string> QueuePromptAsync(object graph, CancellationToken ct = default)
     {
         var body = new Dictionary<string, object> { ["prompt"] = graph, ["client_id"] = ClientId };
         var resp = await _http.PostAsJsonAsync("prompt", body, ct).ConfigureAwait(false);
@@ -113,11 +114,22 @@ public sealed class ComfyClient : IDisposable
         try { await _http.PostAsync("interrupt", new StringContent(""), ct).ConfigureAwait(false); } catch { }
     }
 
+    /// <summary>POST /free — unload models + free VRAM (after the user is done generating).</summary>
+    public async Task FreeAsync(bool unloadModels = true, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = new Dictionary<string, object> { ["unload_models"] = unloadModels, ["free_memory"] = true };
+            await _http.PostAsJsonAsync("free", body, ct).ConfigureAwait(false);
+        }
+        catch { }
+    }
+
     /// <summary>
     /// Queue a graph and follow it to completion over the WS, reporting 0..1 progress; returns the first
     /// output image's PNG bytes. Manual-integration (needs a live ComfyUI).
     /// </summary>
-    public async Task<byte[]> RunPromptAsync(IReadOnlyDictionary<string, object> graph, IProgress<double>? progress, CancellationToken ct = default)
+    public async Task<byte[]> RunPromptAsync(object graph, IProgress<double>? progress, CancellationToken ct = default)
     {
         using var ws = new ClientWebSocket();
         var wsUri = new Uri((BaseUri.Scheme == "https" ? "wss://" : "ws://") + BaseUri.Authority + "/ws?clientId=" + ClientId);
@@ -127,19 +139,28 @@ public sealed class ComfyClient : IDisposable
 
         ComfyImageRef? result = null;
         var buf = new byte[1 << 16];
-        while (ws.State == WebSocketState.Open)
+        try
         {
-            var seg = new ArraySegment<byte>(buf);
-            using var ms = new System.IO.MemoryStream();
-            WebSocketReceiveResult r;
-            do { r = await ws.ReceiveAsync(seg, ct).ConfigureAwait(false); ms.Write(buf, 0, r.Count); } while (!r.EndOfMessage);
-            if (r.MessageType != WebSocketMessageType.Text) continue;
+            while (ws.State == WebSocketState.Open)
+            {
+                var seg = new ArraySegment<byte>(buf);
+                using var ms = new System.IO.MemoryStream();
+                WebSocketReceiveResult r;
+                do { r = await ws.ReceiveAsync(seg, ct).ConfigureAwait(false); ms.Write(buf, 0, r.Count); } while (!r.EndOfMessage);
+                if (r.MessageType != WebSocketMessageType.Text) continue;
 
-            var ev = ParseEvent(Encoding.UTF8.GetString(ms.ToArray()));
-            if (ev.Kind == ComfyEventKind.Progress && ev.Max > 0) progress?.Report(ev.Value / ev.Max);
-            else if (ev.Kind == ComfyEventKind.Error) throw new InvalidOperationException("ComfyUI error: " + (ev.Message ?? "execution failed"));
-            else if (ev.Kind == ComfyEventKind.Executed && ev.Images is { Count: > 0 }) { result = ev.Images[0]; break; }
-            else if (ev.Kind == ComfyEventKind.Executing && ev.Node is null) break;   // null node = run finished
+                var ev = ParseEvent(Encoding.UTF8.GetString(ms.ToArray()));
+                if (ev.Kind == ComfyEventKind.Progress && ev.Max > 0) progress?.Report(ev.Value / ev.Max);
+                else if (ev.Kind == ComfyEventKind.Error) throw new InvalidOperationException("ComfyUI error: " + (ev.Message ?? "execution failed"));
+                else if (ev.Kind == ComfyEventKind.Executed && ev.Images is { Count: > 0 }) { result = ev.Images[0]; break; }
+                else if (ev.Kind == ComfyEventKind.Executing && ev.Node is null) break;   // null node = run finished
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // user cancelled → tell ComfyUI to actually STOP the running prompt (else it keeps generating server-side)
+            await InterruptAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).ConfigureAwait(false); } catch { }
 

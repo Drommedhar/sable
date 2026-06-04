@@ -38,14 +38,11 @@
                 </DockPanel>
             </TabItem>
 
-            <!-- Generative (sidecar tier): placeholder until the Diffusers sidecar ships -->
+            <!-- Generative: configure model presets (base + encoder(s) + VAE + workflow) per operation -->
             <TabItem Header="{loc:Loc modelsWindow.generativeTab}">
-                <StackPanel Margin="24" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <TextBlock Text="{loc:Loc modelsWindow.generativeTitle}" FontSize="16"
-                               Foreground="{DynamicResource ChromeText}" HorizontalAlignment="Center" />
-                    <TextBlock Text="{loc:Loc modelsWindow.generativeBody}" Classes="settingHint"
-                               MaxWidth="430" TextAlignment="Center" HorizontalAlignment="Center" />
-                </StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="GenPresetRoot" Margin="16" Spacing="8" />
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </DockPanel>

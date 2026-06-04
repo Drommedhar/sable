@@ -103,12 +103,6 @@
                     <local:SettingRow Label="Generative AI"><ToggleSwitch x:Name="GenerativeEnabledSwitch" IsCheckedChanged="OnGenerativeEnabledChanged" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,0"
                                Text="{loc:Loc settingsWindow.generativeHint}" />
-                    <local:SettingRow Label="Generative backend">
-                        <ComboBox x:Name="GenBackendCombo" Width="200" SelectedIndex="0">
-                            <ComboBoxItem>ComfyUI (broad model support)</ComboBoxItem>
-                            <ComboBoxItem>Diffusers (lean, standard models)</ComboBoxItem>
-                        </ComboBox>
-                    </local:SettingRow>
 
                     <!-- Model sources (ComfyUI reuse) — only when the generative tier is enabled -->
                     <StackPanel x:Name="GenSourcesPanel" Spacing="2" IsVisible="False">

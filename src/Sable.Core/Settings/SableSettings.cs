@@ -6,9 +6,6 @@ namespace Sable.Core.Settings;
 /// <summary>App theme (chrome variant). Dark default; Gray/Light selectable in Preferences (PLAN §17.1).</summary>
 public enum AppTheme { Dark, Gray, Light }
 
-/// <summary>Generative backend choice (PHASE8_AI_COMFY §0).</summary>
-public enum GenerativeBackendKind { ComfyUI, Diffusers }
-
 /// <summary>
 /// SAM2 Smart-Select sampling density. Higher = more objects found but more GPU work — a weak / low-VRAM
 /// GPU can hit a driver timeout (TDR / device-hung) at high density. <see cref="SmartSelectQuality.Auto"/>
@@ -50,9 +47,9 @@ public sealed class SableSettings
     /// provisions/validates the runtime. Generative Fill is hidden + never installs on first use until on.</summary>
     public bool GenerativeAiEnabled { get; set; }
 
-    /// <summary>Which generative backend runs (PHASE8_AI_COMFY §0): ComfyUI (broad model support, drives a
-    /// hidden ComfyUI) or the Diffusers sidecar (lean, standard pipelines only). Default ComfyUI.</summary>
-    public GenerativeBackendKind GenerativeBackend { get; set; } = GenerativeBackendKind.ComfyUI;
+    /// <summary>User-configured generative model presets (base + encoder(s) + VAE per op). The Generative
+    /// dialog shows ONLY these, so the user controls which models are available (PHASE8_AI_COMFY).</summary>
+    public List<Sable.Core.Ai.GenerativePreset> GenerativePresets { get; set; } = new();
 
     /// <summary>External model-source roots (ComfyUI / folder) scanned besides the native folder
     /// (PHASE8_AI_SIDECAR §2.1). Read-only, referenced in place. The native folder is always present and

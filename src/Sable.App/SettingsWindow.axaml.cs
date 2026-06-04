@@ -74,7 +74,6 @@ public partial class SettingsWindow : Window
         // Machine Learning
         AiEnabledSwitch.IsChecked = _s.AiEnabled;
         GenerativeEnabledSwitch.IsChecked = _s.GenerativeAiEnabled;
-        GenBackendCombo.SelectedIndex = (int)_s.GenerativeBackend;
         GenSourcesPanel.IsVisible = _s.GenerativeAiEnabled;
         SmartSelectCombo.SelectedIndex = (int)_s.SmartSelectQuality;
         BuildGenSources();
@@ -218,9 +217,8 @@ public partial class SettingsWindow : Window
             if (useComfy) await AddComfyFolderAsync();
         }
 
-        // 2) provision the chosen backend
-        if (_s.GenerativeBackend == Sable.Core.Settings.GenerativeBackendKind.ComfyUI) await EnableComfyFlow();
-        else await EnableDiffusersFlow();
+        // 2) provision ComfyUI (the only generative backend)
+        await EnableComfyFlow();
     }
 
     private string? ComfySourcePath() =>
@@ -249,51 +247,6 @@ public partial class SettingsWindow : Window
             var log = new Progress<string>(line => busy.SetMessage(line.Length > 90 ? line.Substring(0, 90) + "…" : line));
             await Task.Run(() => prov.EnsureAsync(comfyPath ?? "", vendor, log, cts.Token), cts.Token);
             busy.Done();
-        }
-        catch (System.OperationCanceledException) { busy.Done(); RevertGenerative(); }
-        catch (System.Exception ex)
-        {
-            busy.Done();
-            await ConfirmWindow.Ask(this, Sable.App.Localization.Loc.T("generative.installRuntimeTitle"), Sable.App.Localization.Loc.T("generative.installFailed", ex.Message));
-            RevertGenerative();
-        }
-    }
-
-    private async Task EnableDiffusersFlow()
-    {
-        var host = Sable.Ai.Sidecar.Provisioning.ComfyEnvLocator.CurrentHost();
-        var comfy = _registry?.Sources.FirstOrDefault(s => s.Kind == Sable.Core.Ai.ModelSourceKind.ComfyUI)?.Path
-            ?? _s.ModelSources.FirstOrDefault(s => s.Kind == Sable.Core.Ai.ModelSourceKind.ComfyUI)?.Path;
-        var ownPy = Sable.Ai.Sidecar.Provisioning.UvEnv.PythonIn(Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVenvDir);
-        string? own = System.IO.File.Exists(ownPy) ? ownPy : null;
-        var opts = new Sable.Ai.Sidecar.Provisioning.EnvResolveOptions(_s.SidecarPython, comfy, own, host);
-
-        var env = await Task.Run(() =>
-            Sable.Ai.Sidecar.Provisioning.EnvResolver.ResolveAsync(opts, new Sable.Ai.Sidecar.Provisioning.EnvProbe()));
-        if (env is not null) return;   // a usable env exists (reused ComfyUI / pinned / already provisioned)
-
-        // nothing usable → install Sable's own runtime (consent for the multi-GB download)
-        var vendor = Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVendor(new Sable.Ai.Gpu.GpuProbe().IsNvidiaPresent);
-        bool consent = await ConfirmWindow.Ask(this, Sable.App.Localization.Loc.T("generative.installRuntimeTitle"),
-            Sable.App.Localization.Loc.T("generative.installRuntimeBody", vendor),
-            okText: Sable.App.Localization.Loc.T("generative.install"), cancelText: Sable.App.Localization.Loc.T("generative.cancel"));
-        if (!consent) { RevertGenerative(); return; }
-
-        var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, Sable.App.Localization.Loc.T("generative.installing"), cts);
-        try
-        {
-            var uvEnv = new Sable.Ai.Sidecar.Provisioning.UvEnv(Sable.Ai.Sidecar.Provisioning.UvEnv.DefaultVenvDir);
-            var log = new Progress<string>(line => busy.SetMessage(line.Length > 90 ? line.Substring(0, 90) + "…" : line));
-            var python = await Task.Run(() => uvEnv.EnsureAsync(vendor, log, cts.Token), cts.Token);
-            var caps = await new Sable.Ai.Sidecar.Provisioning.EnvProbe().ProbeAsync(python, cts.Token);
-            busy.Done();
-            string? why = caps is null ? Sable.App.Localization.Loc.T("generative.probeFailed") : (caps.IsUsable(out var r) ? null : r);
-            if (why is not null)
-            {
-                await ConfirmWindow.Ask(this, Sable.App.Localization.Loc.T("generative.installRuntimeTitle"), Sable.App.Localization.Loc.T("generative.notUsable", why));
-                RevertGenerative();
-            }
         }
         catch (System.OperationCanceledException) { busy.Done(); RevertGenerative(); }
         catch (System.Exception ex)
@@ -548,7 +501,6 @@ public partial class SettingsWindow : Window
         _s.UndoLimit = (int)UndoSlider.Value;
         _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.GenerativeAiEnabled = GenerativeEnabledSwitch.IsChecked == true;
-        _s.GenerativeBackend = (GenerativeBackendKind)System.Math.Clamp(GenBackendCombo.SelectedIndex, 0, 1);
         _s.SmartSelectQuality = (SmartSelectQuality)System.Math.Clamp(SmartSelectCombo.SelectedIndex, 0, 3);
         _s.AutoCheckUpdates = AutoUpdateSwitch.IsChecked == true;
         // keyboard: store only the overrides that differ from the catalog default (keeps JSON small)
