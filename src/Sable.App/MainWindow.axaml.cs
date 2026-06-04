@@ -798,6 +798,31 @@ public partial class MainWindow : Window
         if (DocInfoLabel is null) return;
         if (_activeTab?.Doc is { } d) DocInfoLabel.Text = $"{d.Width} x {d.Height} px ({d.Dpi:0} ppi)";
         else DocInfoLabel.Text = "—";
+        // colour mode + working depth of the active document (RGB only for now; 8/16/32-bit via Image ▸ Mode)
+        if (ColorSpaceLabel is not null)
+            ColorSpaceLabel.Text = _activeTab?.Doc is { } cd ? $"RGB · {(int)cd.Depth}-bit" : "—";
+        SyncDepthMenu();
+    }
+
+    /// <summary>Tick the Image ▸ Mode radio matching the active document's bit depth.</summary>
+    private void SyncDepthMenu()
+    {
+        var depth = _activeTab?.Doc.Depth;
+        if (Depth8Item is not null) Depth8Item.IsChecked = depth == Sable.Core.BitDepth.Eight;
+        if (Depth16Item is not null) Depth16Item.IsChecked = depth == Sable.Core.BitDepth.Sixteen;
+        if (Depth32Item is not null) Depth32Item.IsChecked = depth == Sable.Core.BitDepth.ThirtyTwo;
+    }
+
+    private void OnSetDepth8(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.Eight);
+    private void OnSetDepth16(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.Sixteen);
+    private void OnSetDepth32(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.ThirtyTwo);
+
+    private void SetDepth(Sable.Core.BitDepth depth)
+    {
+        if (_activeTab is not { } tab || tab.Doc.Depth == depth) return;
+        tab.Doc.Depth = depth;
+        tab.IsDirty = true;       // a document-metadata change to save
+        UpdateDocInfo();
     }
 
     private void OnCheckUpdatesMenu(object? sender, RoutedEventArgs e) => _ = CheckForUpdatesAsync(manual: true);
@@ -2267,7 +2292,7 @@ public partial class MainWindow : Window
         var dlg = new NewDocumentWindow(_settings.DefaultDpi);
         if (await dlg.ShowDialog<bool>(this))
         {
-            var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi };
+            var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi, Depth = dlg.DocDepth };
             var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
             if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
             bg.Dirty = true;

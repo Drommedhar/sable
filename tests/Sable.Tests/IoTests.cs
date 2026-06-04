@@ -72,6 +72,27 @@ public class SableFileTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesBitDepth()
+    {
+        var doc = new Document(16, 16) { Depth = BitDepth.Sixteen };
+        doc.Layers.Add(new PixelLayer(16, 16, "bg"));
+        var path = Path.Combine(Path.GetTempPath(), $"sable_test_{Guid.NewGuid():N}.sable");
+        try
+        {
+            SableFile.Save(doc, path);
+            Assert.Equal(BitDepth.Sixteen, SableFile.Load(path).Depth);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+
+        // legacy file (no Depth field) → defaults to 8-bit
+        var legacy = new Document(8, 8);
+        legacy.Layers.Add(new PixelLayer(8, 8, "bg"));
+        var p2 = Path.Combine(Path.GetTempPath(), $"sable_test_{Guid.NewGuid():N}.sable");
+        try { SableFile.Save(legacy, p2); Assert.Equal(BitDepth.Eight, SableFile.Load(p2).Depth); }
+        finally { if (File.Exists(p2)) File.Delete(p2); }
+    }
+
+    [Fact]
     public void SaveLoad_PreservesSubDocLayerBoundsAndOffset()
     {
         // a layer smaller than the document, positioned partly off-canvas (negative offset)

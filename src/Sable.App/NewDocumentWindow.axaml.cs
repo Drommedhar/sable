@@ -41,6 +41,7 @@ public partial class NewDocumentWindow : Window
     public int DocHeight { get; private set; } = 1080;
     public double Dpi { get; private set; } = 96;
     public bool Transparent { get; private set; }
+    public Sable.Core.BitDepth DocDepth { get; private set; } = Sable.Core.BitDepth.Eight;
 
     private string _unit = "px";
     private bool _loading;
@@ -206,6 +207,7 @@ public partial class NewDocumentWindow : Window
         DocHeight = Math.Clamp(ToPx(ParseD(HBox.Text), _unit, dpi), 1, 16384);
         Dpi = dpi;
         Transparent = BgCombo.SelectedIndex == 1;
+        DocDepth = DepthCombo.SelectedIndex switch { 1 => Sable.Core.BitDepth.Sixteen, 2 => Sable.Core.BitDepth.ThirtyTwo, _ => Sable.Core.BitDepth.Eight };
         Close(true);
     }
 

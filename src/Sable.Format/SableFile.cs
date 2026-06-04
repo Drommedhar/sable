@@ -21,6 +21,7 @@ public static class SableFile
         public int Version { get; set; } = 1;
         public int Width { get; set; }
         public int Height { get; set; }
+        public int Depth { get; set; } = 8;   // bits per channel (8/16/32); 0/absent → 8 (legacy)
         public List<LayerDto> Layers { get; set; } = new();
         public List<float> GuidesX { get; set; } = new();
         public List<float> GuidesY { get; set; } = new();
@@ -179,7 +180,7 @@ public static class SableFile
         using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
 
         int next = 0;
-        var dto = new DocDto { Width = doc.Width, Height = doc.Height };
+        var dto = new DocDto { Width = doc.Width, Height = doc.Height, Depth = (int)doc.Depth };
         dto.GuidesX.AddRange(doc.GuidesX);
         dto.GuidesY.AddRange(doc.GuidesY);
         if (doc.SavedSelection is { } sel) { dto.SavedSelection = "selection.raw"; WriteEntry(zip, dto.SavedSelection, sel); }
@@ -321,6 +322,7 @@ public static class SableFile
 
         ValidateDim(dto.Width, dto.Height, "document");
         var doc = new Document(dto.Width, dto.Height);
+        doc.Depth = dto.Depth switch { 16 => Sable.Core.BitDepth.Sixteen, 32 => Sable.Core.BitDepth.ThirtyTwo, _ => Sable.Core.BitDepth.Eight };
         doc.GuidesX.AddRange(dto.GuidesX);
         doc.GuidesY.AddRange(dto.GuidesY);
         if (dto.SavedSelection is not null && zip.GetEntry(dto.SavedSelection) is { } se)

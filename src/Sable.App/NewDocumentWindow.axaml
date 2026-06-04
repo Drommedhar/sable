@@ -92,6 +92,14 @@
                     </ComboBox>
                 </local:SettingRow>
 
+                <local:SettingRow Label="Depth">
+                    <ComboBox x:Name="DepthCombo" Width="100" SelectedIndex="0">
+                        <ComboBoxItem>8-bit</ComboBoxItem>
+                        <ComboBoxItem>16-bit</ComboBoxItem>
+                        <ComboBoxItem>32-bit</ComboBoxItem>
+                    </ComboBox>
+                </local:SettingRow>
+
                 <TextBlock x:Name="PxLabel" Margin="0,10,0,0" FontSize="11"
                            Foreground="{DynamicResource ChromeTextFaint}" />
             </StackPanel>

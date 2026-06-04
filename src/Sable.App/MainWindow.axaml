@@ -74,6 +74,12 @@
                 <MenuItem Header="{loc:Loc menu.edit.preferences}" Click="OnPreferences" />
             </MenuItem>
             <MenuItem x:Name="ImageMenu" Header="{loc:Loc menu.image}">
+                <MenuItem Header="{loc:Loc menu.image.mode}">
+                    <MenuItem x:Name="Depth8Item" Header="{loc:Loc menu.image.depth8}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth8" />
+                    <MenuItem x:Name="Depth16Item" Header="{loc:Loc menu.image.depth16}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth16" />
+                    <MenuItem x:Name="Depth32Item" Header="{loc:Loc menu.image.depth32}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth32" />
+                </MenuItem>
+                <Separator />
                 <MenuItem Header="{loc:Loc menu.image.resizeDocument}" Click="OnResizeDocument" />
                 <MenuItem Header="{loc:Loc menu.image.resizeCanvas}" Click="OnResizeCanvas" />
             </MenuItem>
@@ -429,7 +435,8 @@
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock x:Name="SelSizeLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="90" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
-                            <TextBlock Text="{loc:Loc mainWindow.rgba16fLinear}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ColorSpaceLabel" Text="—" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center"
+                                       ToolTip.Tip="{loc:Loc mainWindow.documentColourModeDepth}" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                         </StackPanel>
                         <!-- active-tool modifier hints (Affinity-style) -->
