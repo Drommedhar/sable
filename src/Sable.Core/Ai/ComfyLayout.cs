@@ -38,8 +38,11 @@ public static class ComfyLayout
         "checkpoints" or "checkpoints_xl" =>
             new Role(ModelKind.Base, AiTier.Generative, AdapterType.None, CheckpointTasks, null, null),
 
+        // Modern ComfyUI keeps the diffusion transformer standalone (Flux/SD3/Qwen/…). Treat it as a
+        // selectable BASE so it shows in the picker; the sidecar pairs encoders/VAE at load (or surfaces a
+        // clear error if Diffusers can't load that arch).
         "unet" or "diffusion_models" =>
-            new Role(ModelKind.Component, AiTier.Generative, AdapterType.None, NoTasks, "DENOISER", null),
+            new Role(ModelKind.Base, AiTier.Generative, AdapterType.None, CheckpointTasks, null, null),
 
         "loras" or "lora" or "lycoris" =>
             new Role(ModelKind.Adapter, AiTier.Generative, AdapterType.Lora, NoTasks, null, null),
@@ -167,6 +170,11 @@ public static class ComfyLayout
         var n = name.ToLowerInvariant();
         if (n.Contains("flux")) return "Flux";
         if (n.Contains("sd3") || n.Contains("sd_3") || n.Contains("stable-diffusion-3")) return "SD3";
+        if (n.Contains("qwen")) return "Qwen";
+        if (n.Contains("hidream") || n.Contains("hidream_")) return "HiDream";
+        if (n.Contains("ltx")) return "LTX";
+        if (n.Contains("wan")) return "Wan";
+        if (n.Contains("hunyuan")) return "Hunyuan";
         if (n.Contains("sdxl") || n.Contains("xl-base") || n.Contains("_xl") || n.Contains("-xl")
             || n.Contains("pony") || n.Contains("illustrious") || n.Contains("playground")) return "SDXL";
         if (n.Contains("sd15") || n.Contains("sd_15") || n.Contains("v1-5") || n.Contains("v1.5")) return "SD1.5";

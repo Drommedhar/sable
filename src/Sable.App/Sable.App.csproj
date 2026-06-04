@@ -44,6 +44,7 @@
     <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
     <ProjectReference Include="..\Sable.Ai\Sable.Ai.csproj" />
     <ProjectReference Include="..\Sable.Ai.Sidecar\Sable.Ai.Sidecar.csproj" />
+    <ProjectReference Include="..\Sable.Ai.Comfy\Sable.Ai.Comfy.csproj" />
     <ProjectReference Include="..\Sable.Format\Sable.Format.csproj" />
   </ItemGroup>
 

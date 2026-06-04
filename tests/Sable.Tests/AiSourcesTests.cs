@@ -67,11 +67,14 @@ public class ComfyLayoutTests
     }
 
     [Fact]
-    public void Unet_IsDenoiserComponent()
+    public void DiffusionModels_IsSelectableBase()
     {
-        var m = ComfyLayout.DraftOne(Src, "unet/flux1-dev.safetensors");
-        Assert.Equal(ModelKind.Component, m!.Kind);
-        Assert.StartsWith("DENOISER", m.ComponentFamily);
+        // modern ComfyUI keeps the transformer standalone — surface it as a base so it shows in the picker
+        var m = ComfyLayout.DraftOne(Src, "diffusion_models/flux1-dev.safetensors");
+        Assert.Equal(ModelKind.Base, m!.Kind);
+        Assert.Equal(AiTier.Generative, m.Tier);
+        Assert.Contains(AiTaskKind.Inpaint, m.Tasks);
+        Assert.Equal("Flux", m.Family);
     }
 
     [Fact]

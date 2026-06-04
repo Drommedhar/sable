@@ -25,16 +25,7 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="4">
-                <TextBlock Text="{loc:Loc modelsWindow.sources}" Classes="settingHeader" />
-                <TextBlock Text="{loc:Loc modelsWindow.sourcesHint}" Classes="settingHint" TextWrapping="Wrap" />
-                <StackPanel x:Name="SourceRows" Spacing="3" />
-                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
-                    <Button x:Name="AddSourceBtn" Content="{loc:Loc modelsWindow.addComfyUIFolder}"
-                            Classes="opt" Padding="14,0" Click="OnAddComfyFolder" />
-                    <Button x:Name="CheckSidecarBtn" Content="{loc:Loc modelsWindow.checkSidecar}"
-                            Classes="opt" Padding="14,0" Click="OnCheckSidecar" />
-                </StackPanel>
-                <TextBlock Text="{loc:Loc modelsWindow.recommendedDownloadsFromTheSource}" Classes="settingHeader" Margin="0,12,0,0" />
+                <TextBlock Text="{loc:Loc modelsWindow.recommendedDownloadsFromTheSource}" Classes="settingHeader" />
                 <StackPanel x:Name="RecoRows" Spacing="6" />
                 <TextBlock x:Name="DefaultsHeader" Text="{loc:Loc modelsWindow.defaultModelPerTask}" Classes="settingHeader" Margin="0,12,0,0" IsVisible="False" />
                 <StackPanel x:Name="DefaultRows" Spacing="4" />

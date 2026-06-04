@@ -201,11 +201,38 @@ public class UvEnvTests
     public void TorchArgs_DirectMlAddsPackage()
         => Assert.Contains("torch-directml", UvEnv.TorchInstallArgs(TorchVendor.DirectMl));
 
+    [Theory]
+    [InlineData(12.0, 12.8, "cu128")]   // Blackwell (RTX 50xx) — needs cu128
+    [InlineData(12.0, 12.4, "cu128")]   // Blackwell on older driver still maps to cu128 (only option)
+    [InlineData(8.9, 12.8, "cu128")]    // Ada on new driver → newest
+    [InlineData(8.6, 12.4, "cu124")]    // Ampere, driver caps at 12.4
+    [InlineData(7.5, 12.1, "cu121")]    // Turing, older driver
+    [InlineData(7.0, 11.8, "cu118")]    // Volta, old driver
+    public void CudaWheelTag(double cap, double driver, string expect)
+        => Assert.Equal(expect, CudaWheel.Tag(cap, driver));
+
     [Fact]
     public void PythonIn_MatchesHostLayout()
     {
         var py = UvEnv.PythonIn("/x/venv");
         Assert.True(py.EndsWith("python.exe") || py.EndsWith(Path.Combine("bin", "python")));
+    }
+
+    [Theory]
+    [InlineData("Windows", "X64", "uv-x86_64-pc-windows-msvc.zip")]
+    [InlineData("Windows", "Arm64", "uv-aarch64-pc-windows-msvc.zip")]
+    [InlineData("Linux", "X64", "uv-x86_64-unknown-linux-gnu.tar.gz")]
+    [InlineData("OSX", "Arm64", "uv-aarch64-apple-darwin.tar.gz")]
+    public void UvAssetName_PerOsArch(string os, string arch, string expect)
+    {
+        var plat = os switch
+        {
+            "Windows" => System.Runtime.InteropServices.OSPlatform.Windows,
+            "OSX" => System.Runtime.InteropServices.OSPlatform.OSX,
+            _ => System.Runtime.InteropServices.OSPlatform.Linux,
+        };
+        var a = arch == "Arm64" ? System.Runtime.InteropServices.Architecture.Arm64 : System.Runtime.InteropServices.Architecture.X64;
+        Assert.Equal(expect, UvEnv.UvAssetName(plat, a));
     }
 }
 

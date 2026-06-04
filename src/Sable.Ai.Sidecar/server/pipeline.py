@@ -62,18 +62,28 @@ class PipelineHolder:
         family = (req.get("family") or "").lower()
         dtype = torch.float16
 
+        # tolerate a missing/odd kind: infer it from which paths are present
+        if kind not in ("SingleFile", "Pretrained", "Assembled"):
+            if paths.get("checkpoint"):
+                kind = "SingleFile"
+            elif paths.get("pretrainedDir"):
+                kind = "Pretrained"
+            elif paths.get("denoiser"):
+                kind = "Assembled"
+            else:
+                return {"ok": False, "error": f"can't determine how to load this model (kind={kind!r}, no paths)"}
+
         self.unload()
         self._reset_peak()
 
         try:
             if kind == "SingleFile":
-                pipe = self._from_single_file(paths.get("checkpoint"), family, dtype)
+                # a standalone denoiser (diffusion_models/) lands in 'denoiser'; a full checkpoint in 'checkpoint'
+                pipe = self._from_single_file(paths.get("checkpoint") or paths.get("denoiser"), family, dtype)
             elif kind == "Pretrained":
                 pipe = self._from_pretrained(paths.get("pretrainedDir"), dtype)
-            elif kind == "Assembled":
+            else:  # Assembled
                 pipe = self._assemble(paths, family, dtype)
-            else:
-                return {"ok": False, "error": f"unknown pipeline kind: {kind}"}
         except Exception as ex:
             return {"ok": False, "error": f"load failed: {ex}"}
 
@@ -108,14 +118,29 @@ class PipelineHolder:
     def _from_single_file(self, path, family, dtype):
         if not path:
             raise ValueError("no checkpoint path")
-        from diffusers import (StableDiffusionPipeline, StableDiffusionXLPipeline,
-                               StableDiffusion3Pipeline, FluxPipeline)
-        cls = {
-            "sdxl": StableDiffusionXLPipeline,
-            "sd3": StableDiffusion3Pipeline,
-            "flux": FluxPipeline,
-        }.get(family, StableDiffusionPipeline)
-        return cls.from_single_file(path, torch_dtype=dtype)
+        import diffusers
+        # map a Sable family to a Diffusers pipeline class, but only if this diffusers build has it
+        name = {
+            "sdxl": "StableDiffusionXLPipeline",
+            "sd3": "StableDiffusion3Pipeline",
+            "flux": "FluxPipeline",
+            "qwen": "QwenImagePipeline",
+            "hidream": "HiDreamImagePipeline",
+            "sd1.5": "StableDiffusionPipeline",
+            "sd2": "StableDiffusionPipeline",
+        }.get(family)
+        cls = getattr(diffusers, name) if name and hasattr(diffusers, name) else None
+        if cls is not None:
+            return cls.from_single_file(path, torch_dtype=dtype)
+        # unknown / video / not-in-this-diffusers arch → let the auto pipeline try; clearer error if it can't
+        try:
+            from diffusers import AutoPipelineForText2Image
+            return AutoPipelineForText2Image.from_single_file(path, torch_dtype=dtype)
+        except Exception as ex:
+            raise RuntimeError(
+                f"Diffusers can't load this model ('{family or 'unknown'}') as a single file. Many ComfyUI "
+                f"transformers (Flux2 / Qwen-Image / LTX / Wan / video models) aren't supported by Diffusers' "
+                f"single-file loader. Underlying error: {ex}")
 
     def _from_pretrained(self, path, dtype):
         if not path:

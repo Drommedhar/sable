@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <!-- reuse the sidecar's env primitives (HostOs gate, UvEnv, EnvProbe) for ComfyUI provisioning -->
+    <ProjectReference Include="..\Sable.Ai.Sidecar\Sable.Ai.Sidecar.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

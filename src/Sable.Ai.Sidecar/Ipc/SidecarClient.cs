@@ -59,20 +59,26 @@ public sealed class SidecarClient : IDisposable
     {
         try
         {
-            var resp = await _http.PostAsJsonAsync("load_model", req, J, ct).ConfigureAwait(false);
-            var r = await resp.Content.ReadFromJsonAsync<LoadModelResult>(J, ct).ConfigureAwait(false);
-            return r ?? new LoadModelResult(false, Error: "empty response");
+            return await PostJsonAsync<LoadModelRequest, LoadModelResult>("load_model", req, ct).ConfigureAwait(false)
+                   ?? new LoadModelResult(false, Error: "empty response");
         }
         catch (Exception ex) { return new LoadModelResult(false, Error: ex.Message); }
     }
 
+    /// <summary>POST JSON with an explicit Content-Length (buffered StringContent) — the stdlib server reads
+    /// Content-Length, and HttpClient otherwise streams JsonContent CHUNKED (no length) → server reads 0 bytes.</summary>
+    private async Task<TResp?> PostJsonAsync<TReq, TResp>(string url, TReq body, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(body, J);
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var resp = await _http.PostAsync(url, content, ct).ConfigureAwait(false);
+        return await resp.Content.ReadFromJsonAsync<TResp>(J, ct).ConfigureAwait(false);
+    }
+
     /// <summary>POST /{endpoint} (inpaint/outpaint/txt2img) with a <see cref="GenRequest"/> → result image (§4).</summary>
     public async Task<GenResult> GenerateAsync(string endpoint, GenRequest req, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync(endpoint, req, J, ct).ConfigureAwait(false);
-        var r = await resp.Content.ReadFromJsonAsync<GenResult>(J, ct).ConfigureAwait(false);
-        return r ?? new GenResult(System.Array.Empty<byte>(), 0, 0, Error: "empty response");
-    }
+        => await PostJsonAsync<GenRequest, GenResult>(endpoint, req, ct).ConfigureAwait(false)
+           ?? new GenResult(System.Array.Empty<byte>(), 0, 0, Error: "empty response");
 
     /// <summary>Poll /health until ok or the deadline; true if the server came up.</summary>
     public async Task<bool> WaitHealthyAsync(TimeSpan timeout, CancellationToken ct = default)

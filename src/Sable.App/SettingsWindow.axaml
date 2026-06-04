@@ -100,6 +100,26 @@
                     <local:SettingRow Label="Enable on-device AI"><ToggleSwitch x:Name="AiEnabledSwitch" IsCheckedChanged="OnAiEnabledChanged" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,0"
                                Text="{loc:Loc settingsWindow.gpuOnlyNoCPUFallback}" />
+                    <local:SettingRow Label="Generative AI"><ToggleSwitch x:Name="GenerativeEnabledSwitch" IsCheckedChanged="OnGenerativeEnabledChanged" /></local:SettingRow>
+                    <TextBlock Classes="settingHint" Margin="0,2,0,0"
+                               Text="{loc:Loc settingsWindow.generativeHint}" />
+                    <local:SettingRow Label="Generative backend">
+                        <ComboBox x:Name="GenBackendCombo" Width="200" SelectedIndex="0">
+                            <ComboBoxItem>ComfyUI (broad model support)</ComboBoxItem>
+                            <ComboBoxItem>Diffusers (lean, standard models)</ComboBoxItem>
+                        </ComboBox>
+                    </local:SettingRow>
+
+                    <!-- Model sources (ComfyUI reuse) — only when the generative tier is enabled -->
+                    <StackPanel x:Name="GenSourcesPanel" Spacing="2" IsVisible="False">
+                        <TextBlock Text="{loc:Loc modelsWindow.sources}" Classes="settingHeader" Margin="0,10,0,0" />
+                        <TextBlock Classes="settingHint" Text="{loc:Loc modelsWindow.sourcesHint}" TextWrapping="Wrap" />
+                        <StackPanel x:Name="GenSourceRows" Spacing="3" Margin="0,4,0,0" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+                            <Button x:Name="AddSourceBtn" Content="{loc:Loc modelsWindow.addComfyUIFolder}" Classes="opt" Padding="14,0" Click="OnAddComfyFolder" />
+                            <Button x:Name="CheckSidecarBtn" Content="{loc:Loc modelsWindow.checkSidecar}" Classes="opt" Padding="14,0" Click="OnCheckSidecar" />
+                        </StackPanel>
+                    </StackPanel>
                     <local:SettingRow Label="Smart Select quality">
                         <ComboBox Width="150" x:Name="SmartSelectCombo" SelectedIndex="0">
                             <ComboBoxItem>Auto (by VRAM)</ComboBoxItem>

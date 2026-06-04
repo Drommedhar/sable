@@ -12,8 +12,8 @@
             <TextBlock x:Name="TitleText" Classes="panelHeader" Padding="0" />
             <TextBlock x:Name="BodyText" Foreground="{DynamicResource ChromeText}" FontSize="12" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="{loc:Loc confirmWindow.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" />
-                <Button Content="{loc:Loc confirmWindow.discard}" Classes="opt" Padding="14,0" Click="OnOk" />
+                <Button x:Name="CancelBtn" Content="{loc:Loc confirmWindow.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" />
+                <Button x:Name="OkBtn" Content="{loc:Loc confirmWindow.discard}" Classes="opt" Padding="14,0" Click="OnOk" />
             </StackPanel>
         </StackPanel>
     </Border>

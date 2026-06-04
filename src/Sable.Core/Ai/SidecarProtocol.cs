@@ -59,5 +59,11 @@ public sealed record GenResult(byte[] Rgba, int Width, int Height, long Seed = -
 public interface IGenerativeBackend : IGenerativeModel
 {
     bool IsAvailable { get; }
+
+    /// <summary>True if the model must be loaded up-front via <see cref="LoadModelAsync"/> (Diffusers sidecar);
+    /// false if it loads per-prompt inside the request (ComfyUI graph). The orchestrator skips the LoadPlan +
+    /// component gating when false.</summary>
+    bool RequiresExplicitLoad => true;
+
     Task<LoadModelResult> LoadModelAsync(LoadModelRequest req, System.Threading.CancellationToken ct = default);
 }

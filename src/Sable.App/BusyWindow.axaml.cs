@@ -42,8 +42,12 @@ public partial class BusyWindow : Window
 
     private void CoverOwner(Window owner)
     {
-        Position = owner.Position;                 // screen px (top-left of the owner)
-        Width = owner.ClientSize.Width;            // DIP
+        // PointToScreen maps the owner's CLIENT (0,0) to a PHYSICAL screen pixel — DPI- and chrome-correct,
+        // unlike owner.Position (the outer window top-left incl. border/shadow). ClientSize is DIP; same
+        // monitor → same scaling → matching physical extent. (owner.Position mixed with a DIP size was the
+        // misalignment.)
+        Position = owner.PointToScreen(new Point(0, 0));
+        Width = owner.ClientSize.Width;
         Height = owner.ClientSize.Height;
     }
 
@@ -69,7 +73,7 @@ public partial class BusyWindow : Window
     private void OnCancel(object? sender, RoutedEventArgs e)
     {
         CancelBtn.IsEnabled = false;
-        MessageText.Text = "Cancelling…";
+        MessageText.Text = Sable.App.Localization.Loc.T("busyWindow.cancelling");
         _cts?.Cancel();
     }
 }

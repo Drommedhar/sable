@@ -238,14 +238,19 @@ public sealed class AiService
         Document doc, PixelLayer target, AiMask region, GenRequest spec,
         IProgress<double>? progress = null, CancellationToken ct = default)
     {
+        if (Generative is null || !Generative.IsAvailable)
+            throw new AiNotReadyException("Generative backend is not running. Enable it in Settings.");
+
         var baseId = !string.IsNullOrEmpty(spec.BaseModelId) ? spec.BaseModelId
             : Registry.DefaultFor(AiTaskKind.Inpaint)?.Id
               ?? throw new AiNotReadyException("No model installed for Generative Fill.");
 
-        var baseModel = await EnsureModelLoadedAsync(baseId, spec.Offload, spec.Loras, ct).ConfigureAwait(false);
+        // ComfyUI loads per-prompt → skip the Diffusers LoadPlan + component gating.
+        if (Generative.RequiresExplicitLoad)
+            await EnsureModelLoadedAsync(baseId, spec.Offload, spec.Loras, ct).ConfigureAwait(false);
 
         var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
-        var req = spec with { BaseModelId = baseModel.Id, Task = AiTaskKind.Inpaint, Image = img, Mask = region };
+        var req = spec with { BaseModelId = baseId, Task = AiTaskKind.Inpaint, Image = img, Mask = region };
 
         var outImg = await Generative!.GenerateAsync(req, ct).ConfigureAwait(false);
 
