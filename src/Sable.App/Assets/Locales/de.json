@@ -181,6 +181,8 @@
     "showGrid": "Raster anzeigen",
     "showPixelGrid": "Pixelraster anzeigen",
     "snapToGuidesGrid": "An Hilfslinien/Raster ausrichten",
+    "gridSettings": "Rastereinstellungen…",
+    "snappingSettings": "Einrasten…",
     "clearGuides": "Hilfslinien löschen",
     "ai": "_KI",
     "removeBackground": "Hintergrund entfernen",
@@ -294,6 +296,28 @@
     "generativeTab": "Generative KI",
     "generativeTitle": "Generative KI ist noch nicht verfügbar",
     "generativeBody": "Generative Modelle laufen in der optionalen Diffusers-Sidecar-Ebene, die in einer späteren Version erscheint. Sobald sie verfügbar ist, werden Bilddiffusionsmodelle (SD / SDXL / Flux) hier installiert und verwaltet."
+  },
+  "gridWindow": {
+    "title": "Raster und Achse",
+    "showGrid": "Raster anzeigen",
+    "spacing": "Abstand",
+    "subdivisions": "Unterteilungen",
+    "colour": "Farbe",
+    "snapToGrid": "Am Raster einrasten",
+    "close": "Schließen"
+  },
+  "snapWindow": {
+    "title": "Einrasten",
+    "enable": "Einrasten aktivieren",
+    "tolerance": "Bildschirmtoleranz",
+    "pageSnapping": "Seiteneinrasten",
+    "snapToGrid": "Am Raster einrasten",
+    "snapToGuides": "An Hilfslinien einrasten",
+    "snapToCanvas": "An Leinwandkanten und Mitte einrasten",
+    "objectSnapping": "Objekteinrasten",
+    "snapToObjects": "An Objektbegrenzungen einrasten",
+    "onlyVisible": "Nur an sichtbaren Objekten einrasten",
+    "close": "Schließen"
   },
   "newDocumentWindow": {
     "newDocument": "Neues Dokument",

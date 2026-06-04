@@ -59,6 +59,7 @@ public struct BlitOverlay
     // document grid (doc px spacing) + 1px pixel grid (shown only when zoomed in)
     public bool GridOn;
     public float GridSpacing;
+    public float GridSubdivisions;   // minor lines per major cell (1 = none)
     public bool PixelGrid;
 
     // guide lines (document px): vertical (constant X) + horizontal (constant Y)

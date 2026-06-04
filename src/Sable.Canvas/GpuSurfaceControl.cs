@@ -124,6 +124,8 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     /// <summary>Show the document grid (spacing in doc px) — toggled from View ▸ Show Grid.</summary>
     public bool ShowGrid { get; set; }
     public float GridSpacing { get; set; } = 50f;
+    /// <summary>Minor grid lines per major cell (1 = none). Set from the Grid &amp; Axis dialog.</summary>
+    public int GridSubdivisions { get; set; } = 1;
     /// <summary>Show a 1px pixel grid when zoomed in far enough.</summary>
     public bool ShowPixelGrid { get; set; } = true;
 
@@ -609,7 +611,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             }
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
-        ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.PixelGrid = ShowPixelGrid;
+        ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.GridSubdivisions = GridSubdivisions; ov.PixelGrid = ShowPixelGrid;
         if (_overlayColorsSet)
         {
             ov.HasOverlayColors = true;

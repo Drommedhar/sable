@@ -582,18 +582,27 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private int _guideAxis;
     private int _guideIdx;
 
-    /// <summary>Snap to guides / grid / document edges (View ▸ Snap). PLAN §2.5.</summary>
+    /// <summary>Snapping master toggle (View ▸ Snapping). PLAN §2.5.</summary>
     public bool SnapEnabled { get; set; } = true;
+    /// <summary>Snap pull distance in SCREEN px (converted to doc units by the live scale).</summary>
+    public double SnapTolerance { get; set; } = 6.0;
+    public bool SnapToGrid { get; set; } = true;     // grid lines
+    public bool SnapToGuides { get; set; } = true;   // user guides
+    public bool SnapToCanvas { get; set; } = true;   // document/page edges + centre
+    public bool SnapToObjects { get; set; } = true;  // other layers' bounding boxes + mid points
+    public bool SnapVisibleOnly { get; set; } = true;// ignore hidden layers as snap targets
+
+    private double SnapDocTolerance => SnapTolerance / Math.Max(0.0001, EffectiveScale);
 
     private double SnapAxis(double v, bool xAxis)
     {
         if (!SnapEnabled || _doc is not { } d) return v;
-        double th = 6.0 / Math.Max(0.0001, EffectiveScale);   // ~6 screen px in doc units
+        double th = SnapDocTolerance;
         double best = v, bestD = th;
         void Try(double c) { double dd = Math.Abs(v - c); if (dd < bestD) { bestD = dd; best = c; } }
-        Try(0); Try(xAxis ? d.Width : d.Height);                       // document edges
-        foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);       // guides
-        if (ShowGrid && GridSpacing > 0) Try(Math.Round(v / GridSpacing) * GridSpacing);   // grid
+        if (SnapToCanvas) { Try(0); Try(xAxis ? d.Width : d.Height); }                    // document edges
+        if (SnapToGuides) foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);        // guides
+        if (SnapToGrid && GridSpacing > 0) Try(Math.Round(v / GridSpacing) * GridSpacing);// grid (independent of grid visibility)
         return best;
     }
 
@@ -604,12 +613,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double SnapScaleHandle(double v, bool xAxis, List<float> lines)
     {
         if (!SnapEnabled || _doc is not { } d) return v;
-        double th = 6.0 / Math.Max(0.0001, EffectiveScale);
+        double th = SnapDocTolerance;
         double best = v, bestD = th, line = 0; bool found = false;
         void Try(double c) { double dd = Math.Abs(v - c); if (dd < bestD) { bestD = dd; best = c; found = true; line = c; } }
         double ext = xAxis ? d.Width : d.Height;
-        Try(0); Try(ext); Try(ext / 2.0);                              // canvas borders + centre
-        foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);       // guides
+        if (SnapToCanvas) { Try(0); Try(ext); Try(ext / 2.0); }        // canvas borders + centre
+        if (SnapToGuides) foreach (var g in xAxis ? d.GuidesX : d.GuidesY) Try(g);   // guides
+        if (SnapToGrid && GridSpacing > 0) Try(Math.Round(v / GridSpacing) * GridSpacing);
         if (found) lines.Add((float)line);
         return best;
     }
@@ -627,13 +637,23 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     {
         _smartX.Clear(); _smartY.Clear();
         if (!SnapEnabled || _doc is not { } d) return (rawX, rawY);
-        double th = 6.0 / Math.Max(0.0001, EffectiveScale);
+        double th = SnapDocTolerance;
         var cb = moving.ContentBounds(d.Width, d.Height);
         double mw = cb.w, mh = cb.h;
 
-        var vcand = new List<double> { 0, d.Width / 2.0, d.Width };
-        var hcand = new List<double> { 0, d.Height / 2.0, d.Height };
-        CollectLayerLines(d.Layers, moving, vcand, hcand);
+        var vcand = new List<double>();
+        var hcand = new List<double>();
+        if (SnapToCanvas) { vcand.Add(0); vcand.Add(d.Width / 2.0); vcand.Add(d.Width); hcand.Add(0); hcand.Add(d.Height / 2.0); hcand.Add(d.Height); }
+        if (SnapToGuides) { foreach (var g in d.GuidesX) vcand.Add(g); foreach (var g in d.GuidesY) hcand.Add(g); }
+        if (SnapToObjects) CollectLayerLines(d.Layers, moving, vcand, hcand);
+        if (SnapToGrid && GridSpacing > 0)
+        {
+            // grid candidates near the moving layer's current edges (left/centre/right, top/centre/bottom)
+            double sp = GridSpacing;
+            double lx = rawX + cb.x, ty = rawY + cb.y;
+            foreach (var e in stackalloc[] { lx, lx + mw / 2.0, lx + mw }) vcand.Add(Math.Round(e / sp) * sp);
+            foreach (var e in stackalloc[] { ty, ty + mh / 2.0, ty + mh }) hcand.Add(Math.Round(e / sp) * sp);
+        }
 
         double Best(double raw, double origin, double size, List<double> cand, List<float> lines)
         {
@@ -659,7 +679,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     {
         foreach (var l in layers)
         {
-            if (ReferenceEquals(l, moving) || !l.Visible) continue;
+            if (ReferenceEquals(l, moving)) continue;
+            if (SnapVisibleOnly && !l.Visible) continue;
             if (l is Sable.Engine.Layers.GroupLayer g) { CollectLayerLines(g.Children, moving, vcand, hcand); continue; }
             if (l is not (Sable.Engine.Layers.PixelLayer or Sable.Engine.Layers.ShapeLayer or Sable.Engine.Layers.TextLayer or Sable.Engine.Layers.PathLayer)) continue;
             var cb = l.ContentBounds(_doc!.Width, _doc.Height);

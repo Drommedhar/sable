@@ -163,6 +163,7 @@ public partial class MainWindow : Window
         if (_settings.WinMaximized) WindowState = WindowState.Maximized;
         ApplyTheme(_settings.Theme);
         ApplyOverlayColors();
+        ApplyGridAndSnap();
         ApplyAiVisibility();
         RebuildRecentMenu();
     }
@@ -694,13 +695,61 @@ public partial class MainWindow : Window
         RulerH.IsVisible = on; RulerV.IsVisible = on;
     }
 
-    private void OnToggleSnap(object? sender, RoutedEventArgs e) => Canvas.SnapEnabled = SnapMenuItem.IsChecked;
+    private void OnToggleSnap(object? sender, RoutedEventArgs e)
+    {
+        Canvas.SnapEnabled = SnapMenuItem.IsChecked;
+        _settings.SnapEnabled = SnapMenuItem.IsChecked;
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
     private void OnClearGuides(object? sender, RoutedEventArgs e)
     {
         if (_activeTab?.Doc is { } d) { d.GuidesX.Clear(); d.GuidesY.Clear(); }
     }
 
-    private void OnToggleGrid(object? sender, RoutedEventArgs e) => Canvas.ShowGrid = GridMenuItem.IsChecked;
+    private void OnToggleGrid(object? sender, RoutedEventArgs e)
+    {
+        Canvas.ShowGrid = GridMenuItem.IsChecked;
+        _settings.ShowGrid = GridMenuItem.IsChecked;
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    /// <summary>Push the grid + snapping settings to the canvas and sync the View-menu quick toggles.</summary>
+    private void ApplyGridAndSnap()
+    {
+        Canvas.ShowGrid = _settings.ShowGrid;
+        Canvas.GridSpacing = (float)_settings.GridSpacing;
+        Canvas.GridSubdivisions = _settings.GridSubdivisions;
+        Canvas.SnapEnabled = _settings.SnapEnabled;
+        Canvas.SnapTolerance = _settings.SnapTolerance;
+        Canvas.SnapToGrid = _settings.SnapToGrid;
+        Canvas.SnapToGuides = _settings.SnapToGuides;
+        Canvas.SnapToCanvas = _settings.SnapToCanvas;
+        Canvas.SnapToObjects = _settings.SnapToObjects;
+        Canvas.SnapVisibleOnly = _settings.SnapVisibleOnly;
+        if (GridMenuItem is not null) GridMenuItem.IsChecked = _settings.ShowGrid;
+        if (SnapMenuItem is not null) SnapMenuItem.IsChecked = _settings.SnapEnabled;
+    }
+
+    private void OnGridSettings(object? sender, RoutedEventArgs e)
+    {
+        var win = new GridSettingsWindow(_settings, () =>
+        {
+            ApplyGridAndSnap();
+            ApplyOverlayColors();   // grid colour lives in the overlay-colour push
+            Sable.Core.Settings.SettingsService.Save(_settings);
+        }) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        win.ShowDialog(this);
+    }
+
+    private void OnSnapping(object? sender, RoutedEventArgs e)
+    {
+        var win = new SnappingWindow(_settings, () =>
+        {
+            ApplyGridAndSnap();
+            Sable.Core.Settings.SettingsService.Save(_settings);
+        }) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        win.ShowDialog(this);
+    }
     private void OnTogglePixelGrid(object? sender, RoutedEventArgs e) => Canvas.ShowPixelGrid = PixelGridMenuItem.IsChecked;
 
     private void OnZoomBoxKey(object? sender, KeyEventArgs e)
@@ -1871,6 +1920,25 @@ public partial class MainWindow : Window
         // the GPU canvas is a native HWND that paints OVER the Avalonia welcome overlay (airspace);
         // hide it when there's no document so the empty/welcome state is actually visible.
         if (Canvas is not null) Canvas.IsVisible = !empty;
+        // no document → rulers have nothing to map; stop them taking pointer input (no stray guide
+        // drags) and dim them so they read as inactive.
+        foreach (var r in new[] { RulerH, RulerV })
+            if (r is not null) { r.IsHitTestVisible = !empty; r.Opacity = empty ? 0.4 : 1.0; }
+        SetDocMenusEnabled(!empty);   // grey out document-only menu actions (Save/edit/etc.) with no doc
+    }
+
+    /// <summary>Enable/disable the menu actions that only make sense with an open document
+    /// (the whole editing menus + Save/Export + clipboard + zoom). New/Open/Preferences stay live.</summary>
+    private void SetDocMenusEnabled(bool on)
+    {
+        foreach (var mi in new[]
+        {
+            FileSaveItem, FileSaveAsItem, FileExportItem,
+            EditCutItem, EditCopyItem, EditCopyMergedItem, EditPasteItem, EditPasteIntoItem, EditDuplicateItem,
+            ImageMenu, LayerMenu, TypeMenu, SelectMenu, FilterMenu,
+            ViewZoomInItem, ViewZoomOutItem, ViewFitItem, ViewActualItem,
+        })
+            if (mi is not null) mi.IsEnabled = on;
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)

@@ -22,7 +22,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private Silk.NET.WebGPU.Buffer* _penBuf;      // pen-tool node geometry (storage)
     private const int GuidesFloats = 512;         // [countX, countY, _, _, Xs..., Ys...]
     private const int PenFloats = 512;            // [count, activeIdx, _, _, (ax,ay,inx,iny,outx,outy)×n]
-    private const int VpFloats = 80;              // 320 bytes (16-byte aligned)
+    private const int VpFloats = 84;              // 336 bytes (16-byte aligned)
     private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
     private TextureView* _dummyMaskView;
 
@@ -156,8 +156,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     {
         var api = _gpu.Api;
 
-        // VpFloats (80) floats / 320 bytes: viewport, rect, gizmo, brush, maskOn, gradient, cropOn,
-        // shape, clone-source marker, overlay colours, preview mode — see the Viewport struct in fullscreen_blit.wgsl
+        // VpFloats (84) floats / 336 bytes: viewport, rect, gizmo, brush, maskOn, gradient, cropOn,
+        // shape, clone-source marker, overlay colours, preview mode, loupe, grid subdivisions — see the
+        // Viewport struct in fullscreen_blit.wgsl
         var u = stackalloc float[VpFloats];
         bool hasPaste = ov.PasteR > 0 || ov.PasteG > 0 || ov.PasteB > 0;
         u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = hasPaste ? ov.PasteR : 0.16f;
@@ -165,6 +166,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[8] = ov.RectX; u[9] = ov.RectY; u[10] = ov.RectW; u[11] = ov.RectH; u[12] = ov.RectOn ? 1f : 0f;
         u[13] = ov.SelHandles ? 1f : 0f;
         u[14] = ov.GridOn ? 1f : 0f; u[15] = ov.GridSpacing;
+        u[80] = ov.GridSubdivisions > 1f ? ov.GridSubdivisions : 1f;   // grid minor lines per cell (u[81..83] pad)
         if (ov.Corners is { Length: 8 })
             for (int i = 0; i < 8; i++) u[16 + i] = ov.Corners[i];
         u[24] = ov.GizmoOn ? 1f : 0f;

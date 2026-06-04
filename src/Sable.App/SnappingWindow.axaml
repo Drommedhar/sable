@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.SnappingWindow"
+        Width="320" SizeToContent="Height" CanResize="False"
+        Background="{DynamicResource ChromePanel}"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc snapWindow.title}">
+    <StackPanel Margin="16" Spacing="6">
+        <local:SettingRow Label="{loc:Loc snapWindow.enable}">
+            <ToggleSwitch x:Name="EnableSwitch" IsCheckedChanged="OnChanged" />
+        </local:SettingRow>
+        <local:SettingRow Label="{loc:Loc snapWindow.tolerance}">
+            <NumericUpDown x:Name="ToleranceBox" Minimum="1" Maximum="64" Increment="1" Width="120"
+                           FormatString="0" ValueChanged="OnChanged" />
+        </local:SettingRow>
+
+        <TextBlock Text="{loc:Loc snapWindow.pageSnapping}" Classes="settingHeader" />
+        <CheckBox x:Name="GridCheck" Content="{loc:Loc snapWindow.snapToGrid}" IsCheckedChanged="OnChanged" />
+        <CheckBox x:Name="GuidesCheck" Content="{loc:Loc snapWindow.snapToGuides}" IsCheckedChanged="OnChanged" />
+        <CheckBox x:Name="CanvasCheck" Content="{loc:Loc snapWindow.snapToCanvas}" IsCheckedChanged="OnChanged" />
+
+        <TextBlock Text="{loc:Loc snapWindow.objectSnapping}" Classes="settingHeader" />
+        <CheckBox x:Name="ObjectsCheck" Content="{loc:Loc snapWindow.snapToObjects}" IsCheckedChanged="OnChanged" />
+        <CheckBox x:Name="VisibleCheck" Content="{loc:Loc snapWindow.onlyVisible}" IsCheckedChanged="OnChanged" />
+
+        <Button Content="{loc:Loc snapWindow.close}" Classes="opt" Padding="18,0"
+                HorizontalAlignment="Right" Margin="0,8,0,0" Click="OnClose" />
+    </StackPanel>
+</Window>

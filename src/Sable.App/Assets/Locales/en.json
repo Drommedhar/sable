@@ -181,6 +181,8 @@
     "showGrid": "Show Grid",
     "showPixelGrid": "Show Pixel Grid",
     "snapToGuidesGrid": "Snap to Guides/Grid",
+    "gridSettings": "Grid Settings…",
+    "snappingSettings": "Snapping…",
     "clearGuides": "Clear Guides",
     "ai": "_AI",
     "removeBackground": "Remove Background",
@@ -294,6 +296,28 @@
     "generativeTab": "Generative AI",
     "generativeTitle": "Generative AI is not available yet",
     "generativeBody": "Generative models run in the opt-in Diffusers sidecar tier, which ships in a later release. When it lands, image-diffusion models (SD / SDXL / Flux) will be installed and managed here."
+  },
+  "gridWindow": {
+    "title": "Grid and Axis",
+    "showGrid": "Show grid",
+    "spacing": "Spacing",
+    "subdivisions": "Subdivisions",
+    "colour": "Colour",
+    "snapToGrid": "Snap to grid",
+    "close": "Close"
+  },
+  "snapWindow": {
+    "title": "Snapping",
+    "enable": "Enable snapping",
+    "tolerance": "Screen tolerance",
+    "pageSnapping": "Page snapping",
+    "snapToGrid": "Snap to grid",
+    "snapToGuides": "Snap to guides",
+    "snapToCanvas": "Snap to canvas edges and centre",
+    "objectSnapping": "Object snapping",
+    "snapToObjects": "Snap to object bounding boxes",
+    "onlyVisible": "Only snap to visible objects",
+    "close": "Close"
   },
   "newDocumentWindow": {
     "newDocument": "New Document",

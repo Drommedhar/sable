@@ -83,6 +83,19 @@ public sealed class SableSettings
         return 32;
     }
 
+    // --- Grid & snapping (PLAN §2.5) ---
+    public bool ShowGrid { get; set; }                     // document grid visible
+    public double GridSpacing { get; set; } = 50;          // major grid line spacing (doc px)
+    public int GridSubdivisions { get; set; } = 1;         // minor lines per major cell (1 = none)
+
+    public bool SnapEnabled { get; set; } = true;          // master snapping toggle
+    public double SnapTolerance { get; set; } = 6;         // snap pull distance (screen px)
+    public bool SnapToGrid { get; set; } = true;
+    public bool SnapToGuides { get; set; } = true;
+    public bool SnapToCanvas { get; set; } = true;         // page edges + centre
+    public bool SnapToObjects { get; set; } = true;        // other layers' bounding boxes + mid points
+    public bool SnapVisibleOnly { get; set; } = true;      // ignore hidden layers as snap targets
+
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity
 

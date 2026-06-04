@@ -36,6 +36,8 @@ struct Viewport {
     loupeCx: f32, loupeCy: f32, loupeR: f32,               // loupe centre + radius (surface px)
     loupeDocX: f32, loupeDocY: f32, loupeZoom: f32,        // sample centre (doc px) + magnification (surface px per doc px)
     loupeColR: f32, loupeColG: f32, loupeColB: f32,        // the actual would-be-picked colour (rim fill)
+    gridSub: f32,                                          // grid subdivisions (minor lines per major cell; 1 = none)
+    _gpad0: f32, _gpad1: f32, _gpad2: f32,                // pad to 16-byte alignment
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -91,9 +93,18 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let t = vp.invScale * 0.5;   // ~half a surface pixel expressed in doc px
         if (vp.gridOn > 0.5 && vp.gridSp > 0.0) {
+            let gcol = vec3<f32>(vp.gridR, vp.gridG, vp.gridB);
             let mx = docX - round(docX / vp.gridSp) * vp.gridSp;
             let my = docY - round(docY / vp.gridSp) * vp.gridSp;
-            if (abs(mx) <= t || abs(my) <= t) { outc = mix(outc, vec3<f32>(vp.gridR, vp.gridG, vp.gridB), 0.45); }
+            // minor (subdivision) lines first, so the major lines draw over them
+            if (vp.gridSub > 1.5) {
+                let sp2 = vp.gridSp / vp.gridSub;
+                let nx = docX - round(docX / sp2) * sp2;
+                let ny = docY - round(docY / sp2) * sp2;
+                if (abs(nx) <= t && abs(mx) > t) { outc = mix(outc, gcol, 0.18); }
+                if (abs(ny) <= t && abs(my) > t) { outc = mix(outc, gcol, 0.18); }
+            }
+            if (abs(mx) <= t || abs(my) <= t) { outc = mix(outc, gcol, 0.45); }
         }
         // pixel grid only when zoomed in enough that 1 doc px > ~3 surface px
         if (vp.pixGrid > 0.5 && vp.invScale < 0.34) {
