@@ -457,8 +457,14 @@ public class RecommendedUrlReachabilityTests
             }
 
             using (resp)
+            {
+                // 429/503 = transient throttling (HuggingFace rate-limits CI runners), not a dead link:
+                // the endpoint still exists. Only a permanent failure (404/410/…) means a moved/broken URL.
+                if (resp.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.ServiceUnavailable)
+                    continue;
                 Assert.True(resp.IsSuccessStatusCode,
                     $"Recommended model '{m.Id}' file '{part.FileName}' URL returned {(int)resp.StatusCode} {resp.ReasonPhrase}: {url}");
+            }
         }
     }
 }
