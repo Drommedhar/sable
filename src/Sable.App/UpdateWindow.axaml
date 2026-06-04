@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
         x:Class="Sable.App.UpdateWindow"
         Width="460" SizeToContent="Height" MaxHeight="560"
         Background="{DynamicResource ChromePanel}"
@@ -12,10 +13,20 @@
             <TextBlock Text="{loc:Loc updateWindow.updateAvailable2}" FontSize="18" Foreground="{DynamicResource ChromeText}" />
             <TextBlock x:Name="VersionText" FontSize="12" Foreground="{DynamicResource ChromeTextDim}" />
 
-            <ScrollViewer x:Name="NotesScroll" MaxHeight="240" IsVisible="False"
-                          Background="{DynamicResource ChromeField}" Padding="10,8" Margin="0,4">
-                <TextBlock x:Name="NotesText" FontSize="11" Foreground="{DynamicResource ChromeTextDim}" TextWrapping="Wrap" />
-            </ScrollViewer>
+            <!-- the built-in markdown style is theme-aware but sized for documents; scale the whole
+                 rendered block down so the changelog reads at chrome density (control-local style wins
+                 over Window styles, so font-size overrides don't take — a uniform scale is reliable). -->
+            <Border x:Name="NotesBox" IsVisible="False" Margin="0,4"
+                    Background="{DynamicResource ChromeField}">
+                <LayoutTransformControl>
+                    <LayoutTransformControl.LayoutTransform>
+                        <ScaleTransform ScaleX="0.8" ScaleY="0.8" />
+                    </LayoutTransformControl.LayoutTransform>
+                    <md:MarkdownScrollViewer x:Name="NotesScroll" MaxHeight="380" Padding="10,8"
+                                             SelectionEnabled="True" />
+                </LayoutTransformControl>
+            </Border>
+
 
             <StackPanel x:Name="ProgressPanel" IsVisible="False" Spacing="4" Margin="0,4">
                 <ProgressBar x:Name="DownloadProgress" Minimum="0" Maximum="100" Height="6" />

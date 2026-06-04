@@ -20,7 +20,7 @@ public sealed class ModelRegistry
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public string ModelsFolder { get; }
+    public string ModelsFolder { get; private set; }
     public ModelCatalog Catalog { get; private set; } = new();
 
     /// <summary>Per-task default base-model id (user-chosen).</summary>
@@ -134,6 +134,102 @@ public sealed class ModelRegistry
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "model.json"), SerializeManifest(m));
         Catalog.Add(m);
+    }
+
+    /// <summary>
+    /// Move every installed model (each model subfolder + <c>defaults.json</c>) to <paramref name="newFolder"/>,
+    /// rewrite the absolute weight paths stored inside each <c>model.json</c> to the new location, then
+    /// re-point the registry and re-scan. Same-volume moves are an instant rename; cross-volume falls back
+    /// to copy + delete. Source weights are deleted only after a successful move. No-op if the target is the
+    /// current folder. <paramref name="progress"/> reports 0..1 across the top-level entries.
+    /// </summary>
+    public void MoveTo(string newFolder, IProgress<double>? progress = null)
+    {
+        var oldRoot = Path.GetFullPath(ModelsFolder);
+        var newRoot = Path.GetFullPath(newFolder);
+        if (string.Equals(oldRoot, newRoot, StringComparison.OrdinalIgnoreCase)) return;
+
+        Directory.CreateDirectory(newRoot);
+        if (Directory.Exists(oldRoot))
+        {
+            var entries = Directory.EnumerateFileSystemEntries(oldRoot).ToList();
+            for (int i = 0; i < entries.Count; i++)
+            {
+                MoveEntry(entries[i], Path.Combine(newRoot, Path.GetFileName(entries[i])));
+                progress?.Report((i + 1) / (double)entries.Count);
+            }
+            try { if (!Directory.EnumerateFileSystemEntries(oldRoot).Any()) Directory.Delete(oldRoot); } catch { /* keep if not empty/locked */ }
+        }
+
+        ModelsFolder = newRoot;
+        RebaseManifests(oldRoot, newRoot);   // fix the absolute weight paths the moved manifests still point at
+        Load();
+    }
+
+    /// <summary>Move one file/dir; replace a same-named target (same id = same model); cross-volume copy+delete.</summary>
+    private static void MoveEntry(string src, string dst)
+    {
+        if (Directory.Exists(src))
+        {
+            if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
+            try { Directory.Move(src, dst); }
+            catch (IOException) { CopyDir(src, dst); Directory.Delete(src, recursive: true); }
+        }
+        else if (File.Exists(src))
+        {
+            try { File.Move(src, dst, overwrite: true); }
+            catch (IOException) { File.Copy(src, dst, overwrite: true); File.Delete(src); }
+        }
+    }
+
+    private static void CopyDir(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var dir in Directory.EnumerateDirectories(src, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(dst, Path.GetRelativePath(src, dir)));
+        foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+            File.Copy(f, Path.Combine(dst, Path.GetRelativePath(src, f)), overwrite: true);
+    }
+
+    /// <summary>Rewrite every moved <c>model.json</c>'s weight paths from the old root prefix to the new one.</summary>
+    private void RebaseManifests(string oldRoot, string newRoot)
+    {
+        foreach (var file in Directory.EnumerateFiles(newRoot, "model.json", SearchOption.AllDirectories))
+        {
+            var m = ParseManifest(File.ReadAllText(file));
+            if (m is null) continue;
+            File.WriteAllText(file, SerializeManifest(RebasePaths(m, oldRoot, newRoot)));
+        }
+    }
+
+    private static ModelManifest RebasePaths(ModelManifest m, string oldRoot, string newRoot)
+    {
+        string Reb(string p) =>
+            p.StartsWith(oldRoot, StringComparison.OrdinalIgnoreCase) ? newRoot + p[oldRoot.Length..] : p;
+
+        return new ModelManifest
+        {
+            Id = m.Id, Name = m.Name, Kind = m.Kind, Family = m.Family, Tier = m.Tier,
+            Tasks = m.Tasks, VramBytes = m.VramBytes, InputSize = m.InputSize, Adapter = m.Adapter,
+            Components = RebaseComponents(m.Components, Reb),
+            AcceptsTextEncoders = m.AcceptsTextEncoders, AcceptsVae = m.AcceptsVae,
+            AdapterType = m.AdapterType, AppliesTo = m.AppliesTo, DefaultWeight = m.DefaultWeight,
+            TriggerWords = m.TriggerWords, ComponentFamily = m.ComponentFamily,
+            Files = m.Files?.Select(Reb).ToArray(),
+        };
+    }
+
+    private static ModelComponents? RebaseComponents(ModelComponents? c, Func<string, string> reb)
+    {
+        if (c is null) return null;
+        ComponentSource? RS(ComponentSource? s) =>
+            s is null ? null : new ComponentSource { Ref = s.Ref, Path = s.Path is null ? null : reb(s.Path) };
+        return new ModelComponents
+        {
+            Checkpoint = RS(c.Checkpoint), Denoiser = RS(c.Denoiser),
+            TextEncoders = c.TextEncoders is null ? null : c.TextEncoders.Select(RS).OfType<ComponentSource>().ToList(),
+            Vae = RS(c.Vae), Scheduler = c.Scheduler,
+        };
     }
 
     /// <summary>

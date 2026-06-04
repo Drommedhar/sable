@@ -70,6 +70,18 @@ public sealed class SableSettings
     /// driver timeout (TDR) running SAM2, so later runs skip the GPU instead of re-hanging it.</summary>
     public bool SmartSelectForceCpu { get; set; }
 
+    /// <summary>Where downloaded AI model weights are stored. Empty = the default
+    /// (<see cref="DefaultModelsFolder"/>). Changed via the model manager, which moves existing models.</summary>
+    public string ModelsFolder { get; set; } = "";
+
+    /// <summary>The default models location when none is configured: %AppData%/Sable/models.</summary>
+    public static string DefaultModelsFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sable", "models");
+
+    /// <summary>The folder the registry should actually use: the configured override, else the default.</summary>
+    public string EffectiveModelsFolder() =>
+        string.IsNullOrWhiteSpace(ModelsFolder) ? DefaultModelsFolder : ModelsFolder;
+
     /// <summary>
     /// SAM2 AMG grid side for a quality level — the decoder runs grid² times, so this dominates GPU load.
     /// 32×32 = 1024 runs (heavy, strong GPUs only); 12×12 = 144 (light). <see cref="SmartSelectQuality.Auto"/>
@@ -90,6 +102,19 @@ public sealed class SableSettings
         if (gb < 12) return 16;
         return 32;
     }
+
+    // --- Grid & snapping (PLAN §2.5) ---
+    public bool ShowGrid { get; set; }                     // document grid visible
+    public double GridSpacing { get; set; } = 50;          // major grid line spacing (doc px)
+    public int GridSubdivisions { get; set; } = 1;         // minor lines per major cell (1 = none)
+
+    public bool SnapEnabled { get; set; } = true;          // master snapping toggle
+    public double SnapTolerance { get; set; } = 6;         // snap pull distance (screen px)
+    public bool SnapToGrid { get; set; } = true;
+    public bool SnapToGuides { get; set; } = true;
+    public bool SnapToCanvas { get; set; } = true;         // page edges + centre
+    public bool SnapToObjects { get; set; } = true;        // other layers' bounding boxes + mid points
+    public bool SnapVisibleOnly { get; set; } = true;      // ignore hidden layers as snap targets
 
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity

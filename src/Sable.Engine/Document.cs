@@ -16,6 +16,10 @@ public sealed class Document
     /// <summary>Print resolution metadata (dots per inch). Does not affect pixel data.</summary>
     public double Dpi { get; set; } = 96;
 
+    /// <summary>Working precision per channel (Image ▸ Mode). Metadata + IO today; the float editing
+    /// pipeline lands incrementally (bit-depth milestone, PLAN §6).</summary>
+    public BitDepth Depth { get; set; } = BitDepth.Eight;
+
     /// <summary>A stored selection coverage mask (Select ▸ Save/Load Selection, PLAN §3). Doc-sized.</summary>
     public byte[]? SavedSelection { get; set; }
 

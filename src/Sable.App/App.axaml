@@ -290,6 +290,17 @@
         <Style Selector="NumericUpDown /template/ ButtonSpinner">
             <Setter Property="ShowButtonSpinner" Value="False" />
         </Style>
+        <!-- The TextBox nested inside a NumericUpDown would otherwise inherit the global TextBox
+             Height=ControlHeight and, sitting inside the spinner border inside the same-height
+             NumericUpDown, overflow + clip its text. Let the inner field fill the NumericUpDown. -->
+        <Style Selector="NumericUpDown /template/ TextBox">
+            <Setter Property="Height" Value="NaN" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
 
         <!-- compact options-bar toggle (B / I / U / S / alignment) -->
         <Style Selector="ToggleButton.opt">

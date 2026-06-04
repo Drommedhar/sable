@@ -31,8 +31,8 @@ public sealed unsafe class GpuCompositor : IDisposable
     // so only resident (recently-touched, non-empty) tiles consume VRAM. Layers whose live tile count
     // exceeds the atlas fall back to the monolithic GetLayerBuffer path.
     private const int TileSz = 256;
-    private const int TileWords = TileSz * TileSz;            // 65536 u32 per slot
-    private const int TileBytes = TileWords * 4;             // 256 KiB per slot
+    private const int TileWords = TileSz * TileSz;            // 65536 px per slot
+    private const int TileBytes = TileWords * 16;            // 1 MiB per slot (RGBA32F: 16 B/px)
     private Buffer* _atlasBuf;
     private ulong _atlasBytes;
     private int _atlasSlots;
@@ -40,7 +40,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     private Buffer* _tileTableBuf;                            // per-layer table, reuploaded each composite
     private int _tileTableWords;                             // _tileTableBuf capacity (u32)
     private uint[] _tableScratch = System.Array.Empty<uint>();
-    private Buffer* _dummyStore;                              // 4-byte filler for unused storage bindings
+    private Buffer* _dummyStore;                              // 16-byte filler for unused storage bindings (≥ one vec4<f32>)
     private readonly Dictionary<(Layer, int, int), bool> _emptyTiles = new();   // tile transparency cache
     private readonly Dictionary<Layer, (int w, int h)> _layerTileDims = new();   // detect a layer resize → reset tiles
 
@@ -99,7 +99,11 @@ public sealed unsafe class GpuCompositor : IDisposable
     private Texture* _composite;
     private TextureView* _compositeView;
 
-    private int _width, _height, _imgBytes;
+    // Working space is linear float: every GPU pixel buffer is RGBA32F (16 B/px). _imgBytes is that
+    // f32 doc-buffer size; _rgbaBytes is the CPU-side rgba8 size (layer pixels / rasteriser scratch /
+    // export). CPU layer storage stays rgba8 — conversion happens at upload (see UploadRgbaAsFloat).
+    private int _width, _height, _imgBytes, _rgbaBytes;
+    private float[] _convScratch = System.Array.Empty<float>();
     private bool _valid;
 
     public GpuCompositor(WgpuDevice gpu)
@@ -158,7 +162,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         _atlasBytes = (ulong)_atlasSlots * TileBytes;
         _atlasBuf = NewBuffer((int)_atlasBytes, BufferUsage.Storage | BufferUsage.CopyDst);
         _residency = new TileResidency(_atlasSlots);
-        _dummyStore = NewBuffer(4, BufferUsage.Storage | BufferUsage.CopyDst);
+        _dummyStore = NewBuffer(16, BufferUsage.Storage | BufferUsage.CopyDst);
         _tileTableWords = 4096;   // grows on demand
         _tileTableBuf = NewBuffer(_tileTableWords * 4, BufferUsage.Storage | BufferUsage.CopyDst);
         _tableScratch = new uint[_tileTableWords];
@@ -379,7 +383,8 @@ public sealed unsafe class GpuCompositor : IDisposable
         ReleaseSizeResources();
         _width = doc.Width;
         _height = doc.Height;
-        _imgBytes = _width * _height * 4;
+        _rgbaBytes = _width * _height * 4;
+        _imgBytes = _rgbaBytes * 4;   // RGBA32F working space: 16 B/px
 
         _readback = NewBuffer(_imgBytes, BufferUsage.MapRead | BufferUsage.CopyDst);
         _filterTemp = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
@@ -392,11 +397,11 @@ public sealed unsafe class GpuCompositor : IDisposable
         _cacheValid = false;   // size changed → old snapshot invalid
         _zero = new byte[_imgBytes];
 
-        // shared "fully revealing" white mask for layers without a mask
+        // shared "fully revealing" white mask for layers without a mask (f32 1.0 per channel)
         _whiteMask = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst);
-        var white = new byte[_imgBytes];
-        Array.Fill(white, (byte)255);
-        fixed (byte* pw = white) _gpu.Api.QueueWriteBuffer(_gpu.Queue, _whiteMask, 0, pw, (nuint)_imgBytes);
+        var white = new float[_rgbaBytes];   // one float per rgba channel → _rgbaBytes floats = _imgBytes bytes
+        Array.Fill(white, 1f);
+        fixed (float* pw = white) _gpu.Api.QueueWriteBuffer(_gpu.Queue, _whiteMask, 0, pw, (nuint)_imgBytes);
 
         var texDesc = new TextureDescriptor
         {
@@ -642,7 +647,7 @@ public sealed unsafe class GpuCompositor : IDisposable
                     // The actively-painted layer therefore stays on the monolithic path during hover.
                     var pv = Preview!.Value;
                     srcBuf = GetLayerBuffer(px);
-                    int layerBytes = px.Width * px.Height * 4;
+                    int layerBytes = px.Width * px.Height * 16;   // f32 buffer copy
                     EnsurePreviewBuffer(layerBytes);
                     CopyBuffer(srcBuf, _previewBuf, layerBytes);
                     DispatchStamp(_previewBuf, srcBuf, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
@@ -920,7 +925,7 @@ public sealed unsafe class GpuCompositor : IDisposable
                 {
                     var pv = Preview!.Value;
                     var sb = GetLayerBuffer(px);
-                    int bytes = px.Width * px.Height * 4;
+                    int bytes = px.Width * px.Height * 16;   // f32 buffer copy
                     EnsurePreviewBuffer(bytes);
                     CopyBuffer(sb, _previewBuf, bytes);
                     DispatchStamp(_previewBuf, sb, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
@@ -960,9 +965,11 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.BufferMapAsync(_readback, MapMode.Read, 0, (nuint)_imgBytes, cb, null);
         while (!mapped) _gpu.Poll(wait: true);
 
-        var src = (byte*)api.BufferGetMappedRange(_readback, 0, (nuint)_imgBytes);
-        var outBytes = new byte[_imgBytes];
-        new ReadOnlySpan<byte>(src, _imgBytes).CopyTo(outBytes);
+        // the result is RGBA32F; quantize each channel to rgba8 for export
+        var src = (float*)api.BufferGetMappedRange(_readback, 0, (nuint)_imgBytes);
+        var outBytes = new byte[_rgbaBytes];
+        for (int i = 0; i < _rgbaBytes; i++)
+            outBytes[i] = (byte)Math.Clamp(src[i] * 255f + 0.5f, 0f, 255f);
         api.BufferUnmap(_readback);
         return outBytes;
     }
@@ -1029,7 +1036,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         // (own buffer, not the shared _dimsBuf, so an interleaved present/blur can't be corrupted)
         var dimsv = stackalloc uint[4] { (uint)lw, (uint)lh, 0, 0 };
         api.QueueWriteBuffer(_gpu.Queue, _stampDimsBuf, 0, dimsv, 16);
-        ulong bytes = (ulong)lw * (ulong)lh * 4;
+        ulong bytes = (ulong)lw * (ulong)lh * 16;   // f32 buffer
         var prm = stackalloc float[12]
         {
             pv.Cx - ox, pv.Cy - oy, pv.Radius, pv.Hardness,
@@ -1117,7 +1124,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = a, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = b, Size = (ulong)_imgBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
-        bg[5] = new BindGroupEntry { Binding = 5, Buffer = mask is not null ? mask : _dummyStore, Size = mask is not null ? (ulong)_imgBytes : 4 };
+        bg[5] = new BindGroupEntry { Binding = 5, Buffer = mask is not null ? mask : _dummyStore, Size = mask is not null ? (ulong)_imgBytes : 16 };
         var bgDesc = new BindGroupDescriptor { Layout = _mixBgl, EntryCount = 6, Entries = bg };
         DispatchPass(_mixPipeline, api.DeviceCreateBindGroup(_gpu.Device, in bgDesc));
     }
@@ -1209,14 +1216,14 @@ public sealed unsafe class GpuCompositor : IDisposable
         // refresh dims with this layer's src size (output grid stays the document)
         var dimsv = stackalloc uint[4] { (uint)_width, (uint)_height, (uint)srcW, (uint)srcH };
         api.QueueWriteBuffer(_gpu.Queue, _dimsBuf, 0, dimsv, 16);
-        ulong srcBytes = (ulong)srcW * (ulong)srcH * 4;
+        ulong srcBytes = (ulong)srcW * (ulong)srcH * 16;   // f32 buffer
         bool atlas = tileTable is not null;
-        // src (binding 3): real buffer in contiguous mode, a 4-byte dummy in atlas mode
+        // src (binding 3): real buffer in contiguous mode, a 16-byte dummy in atlas mode (≥ one vec4<f32>)
         Buffer* srcBind = atlas ? _dummyStore : src;
-        ulong srcSize = atlas ? 4 : srcBytes;
-        // mask (binding 5): real layer-aligned mask, or a 4-byte dummy when the layer has none
+        ulong srcSize = atlas ? 16 : srcBytes;
+        // mask (binding 5): real layer-aligned mask, or a 16-byte dummy when the layer has none
         Buffer* maskBind = mask is not null ? mask : _dummyStore;
-        ulong maskSize = mask is not null ? srcBytes : 4;
+        ulong maskSize = mask is not null ? srcBytes : 16;
         var bg = stackalloc BindGroupEntry[8];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 64 };
@@ -1225,7 +1232,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };
         bg[5] = new BindGroupEntry { Binding = 5, Buffer = maskBind, Size = maskSize };
         bg[6] = new BindGroupEntry { Binding = 6, Buffer = atlas ? tileTable : _dummyStore, Size = atlas ? (ulong)_tileTableWords * 4 : 4 };
-        bg[7] = new BindGroupEntry { Binding = 7, Buffer = atlas ? _atlasBuf : _dummyStore, Size = atlas ? _atlasBytes : 4 };
+        bg[7] = new BindGroupEntry { Binding = 7, Buffer = atlas ? _atlasBuf : _dummyStore, Size = atlas ? _atlasBytes : 16 };
         var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 8, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
@@ -1307,7 +1314,7 @@ public sealed unsafe class GpuCompositor : IDisposable
                         for (int ry = 0; ry < th; ry++)
                         {
                             int off = ((ty * RasterTiles.TileSize + ry) * px.Width + tx * RasterTiles.TileSize) * 4;
-                            _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, (ulong)off, p + off, (nuint)(tw * 4));
+                            UploadRgbaAsFloat(buf, p, off, (ulong)off, tw * 4);   // rgba8 row → f32
                         }
                     }
                 }
@@ -1315,15 +1322,15 @@ public sealed unsafe class GpuCompositor : IDisposable
             else
             {
                 // bulk/external change with no tile info → upload whole
-                fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)layerBytes);
+                fixed (byte* p = px.Pixels) UploadRgbaAsFloat(buf, p, 0, 0, layerBytes);
             }
         }
         else
         {
-            buf = NewBuffer(layerBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+            buf = NewBuffer(layerBytes * 4, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);   // f32
             _layerBuffers[px] = (nint)buf;
-            _layerBufferBytes[px] = layerBytes;
-            fixed (byte* p = px.Pixels) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)layerBytes);
+            _layerBufferBytes[px] = layerBytes;   // tracked in rgba8 units (resize detection)
+            fixed (byte* p = px.Pixels) UploadRgbaAsFloat(buf, p, 0, 0, layerBytes);
         }
 
         // Coherence: this monolithic (preview) path is about to clear px.Dirty/DirtyTiles. Mirror the
@@ -1453,14 +1460,14 @@ public sealed unsafe class GpuCompositor : IDisposable
     {
         int tw = RasterTiles.TileWidth(px.Width, tx);
         int th = RasterTiles.TileHeight(px.Height, ty);
-        ulong slotBase = (ulong)slot * TileBytes;
+        int rgbaSlotBase = slot * (TileBytes / 4);   // slot base in rgba8-layout bytes (TileBytes is f32)
         fixed (byte* p = px.Pixels)
         {
             for (int ry = 0; ry < th; ry++)
             {
                 int srcOff = ((ty * TileSz + ry) * px.Width + tx * TileSz) * 4;
-                ulong dstOff = slotBase + (ulong)(ry * TileSz) * 4;
-                _gpu.Api.QueueWriteBuffer(_gpu.Queue, _atlasBuf, dstOff, p + srcOff, (nuint)(tw * 4));
+                ulong dstRgbaOff = (ulong)(rgbaSlotBase + ry * TileSz * 4);
+                UploadRgbaAsFloat(_atlasBuf, p, srcOff, dstRgbaOff, tw * 4);   // rgba8 tile row → f32 atlas
             }
         }
     }
@@ -1477,9 +1484,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (cached) buf = (Buffer*)existing;
         else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[sh] = (nint)buf; }
 
-        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        if (_shapeScratch is null || _shapeScratch.Length != _rgbaBytes) _shapeScratch = new byte[_rgbaBytes];
         sh.Rasterize(_shapeScratch, _width, _height);
-        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        fixed (byte* p = _shapeScratch) UploadRgbaAsFloat(buf, p, 0, 0, _rgbaBytes);
         sh.Dirty = false;
         return buf;
     }
@@ -1494,9 +1501,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (cached) buf = (Buffer*)existing;
         else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[pth] = (nint)buf; }
 
-        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        if (_shapeScratch is null || _shapeScratch.Length != _rgbaBytes) _shapeScratch = new byte[_rgbaBytes];
         pth.Rasterize(_shapeScratch, _width, _height);
-        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        fixed (byte* p = _shapeScratch) UploadRgbaAsFloat(buf, p, 0, 0, _rgbaBytes);
         pth.Dirty = false;
         return buf;
     }
@@ -1511,9 +1518,9 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (cached) buf = (Buffer*)existing;
         else { buf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc); _layerBuffers[txt] = (nint)buf; }
 
-        if (_shapeScratch is null || _shapeScratch.Length != _imgBytes) _shapeScratch = new byte[_imgBytes];
+        if (_shapeScratch is null || _shapeScratch.Length != _rgbaBytes) _shapeScratch = new byte[_rgbaBytes];
         txt.Rasterize(_shapeScratch, _width, _height);
-        fixed (byte* p = _shapeScratch) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)_imgBytes);
+        fixed (byte* p = _shapeScratch) UploadRgbaAsFloat(buf, p, 0, 0, _rgbaBytes);
         txt.Dirty = false;
         return buf;
     }
@@ -1538,11 +1545,11 @@ public sealed unsafe class GpuCompositor : IDisposable
         if (cached) buf = (Buffer*)existing;
         else
         {
-            buf = NewBuffer(maskBytes, BufferUsage.Storage | BufferUsage.CopyDst);
+            buf = NewBuffer(maskBytes * 4, BufferUsage.Storage | BufferUsage.CopyDst);   // f32
             _maskBuffers[layer] = (nint)buf;
-            _maskBufferBytes[layer] = maskBytes;
+            _maskBufferBytes[layer] = maskBytes;   // rgba8 units (resize detection)
         }
-        fixed (byte* p = layer.Mask!) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, 0, p, (nuint)maskBytes);
+        fixed (byte* p = layer.Mask!) UploadRgbaAsFloat(buf, p, 0, 0, maskBytes);
         layer.MaskDirty = false;
         return buf;
     }
@@ -1551,6 +1558,17 @@ public sealed unsafe class GpuCompositor : IDisposable
     {
         var desc = new BufferDescriptor { Size = (ulong)size, Usage = usage };
         return _gpu.Api.DeviceCreateBuffer(_gpu.Device, in desc);
+    }
+
+    /// <summary>Convert <paramref name="n"/> rgba8 bytes (straight alpha) at <c>src+srcOff</c> to f32 [0,1]
+    /// and upload into the f32 buffer. <paramref name="dstRgbaByteOff"/> is the rgba8-layout byte offset;
+    /// the f32 buffer is 4× larger, so it lands at <c>dstRgbaByteOff*4</c>. Reuses a scratch float[].</summary>
+    private void UploadRgbaAsFloat(Buffer* buf, byte* src, int srcOff, ulong dstRgbaByteOff, int n)
+    {
+        if (_convScratch.Length < n) _convScratch = new float[n];
+        var s = _convScratch;
+        for (int i = 0; i < n; i++) s[i] = src[srcOff + i] * (1f / 255f);
+        fixed (float* fp = s) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, dstRgbaByteOff * 4, fp, (nuint)(n * 4));
     }
 
     private static BindGroupLayoutEntry Entry(uint binding, BufferBindingType type) => new()

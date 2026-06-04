@@ -18,16 +18,17 @@ struct Params {
     _p4: f32,
 };
 
+// Working space is linear float: every pixel buffer is array<vec4<f32>> (RGBA, straight alpha).
 @group(0) @binding(0) var<uniform> dims: Dims;
 @group(0) @binding(1) var<uniform> params: Params;
-@group(0) @binding(2) var<storage, read>        dst:  array<u32>;
-@group(0) @binding(3) var<storage, read>        src:  array<u32>;
-@group(0) @binding(4) var<storage, read_write>   outp: array<u32>;
-@group(0) @binding(5) var<storage, read>        mask: array<u32>;   // R channel = coverage
+@group(0) @binding(2) var<storage, read>        dst:  array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read>        src:  array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write>   outp: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read>        mask: array<vec4<f32>>;   // R channel = coverage
 // tiled storage (PLAN §3): a layer's 256×256 tiles live in a shared atlas; tileTable maps the
 // layer's tile grid → atlas slot (0xffffffff = empty/transparent tile, no slot). srcMode=1 only.
 @group(0) @binding(6) var<storage, read>        tileTable: array<u32>;   // [gridW, gridH, slot per tile row-major]
-@group(0) @binding(7) var<storage, read>        atlas:     array<u32>;   // resident tiles, 65536 u32 (256×256) each
+@group(0) @binding(7) var<storage, read>        atlas:     array<vec4<f32>>;   // resident tiles, 65536 px (256×256) each
 
 fn unpack(c: u32) -> vec4<f32> {
     return vec4<f32>(
@@ -149,7 +150,7 @@ fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
 fn srcTexel(ix: i32, iy: i32) -> vec4<f32> {
     if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return vec4<f32>(0.0); }
     if (params.srcMode == 0u) {
-        return unpack(src[u32(iy) * dims.srcW + u32(ix)]);
+        return src[u32(iy) * dims.srcW + u32(ix)];
     }
     // tiled atlas: locate the tile, look up its slot, index within the 256×256 slot
     let gw = tileTable[0];
@@ -158,11 +159,11 @@ fn srcTexel(ix: i32, iy: i32) -> vec4<f32> {
     let slot = tileTable[2u + ty * gw + tx];
     if (slot == 0xffffffffu) { return vec4<f32>(0.0); }   // empty tile → transparent
     let inTile = (u32(iy) & 255u) * 256u + (u32(ix) & 255u);
-    return unpack(atlas[slot * 65536u + inTile]);
+    return atlas[slot * 65536u + inTile];
 }
 fn maskTexel(ix: i32, iy: i32) -> f32 {
     if (ix < 0 || iy < 0 || ix >= i32(dims.srcW) || iy >= i32(dims.srcH)) { return 0.0; }
-    return unpack(mask[u32(iy) * dims.srcW + u32(ix)]).x;
+    return mask[u32(iy) * dims.srcW + u32(ix)].x;
 }
 
 @compute @workgroup_size(16, 16)
@@ -170,7 +171,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.width || gid.y >= dims.height) { return; }
     let idx = gid.y * dims.width + gid.x;
 
-    let d = unpack(dst[idx]);
+    let d = dst[idx];
 
     // inverse (homography) map this doc pixel into the layer, then bilinear sample.
     // affine layers pass h6=h7=0,h8=1 → w=1 (no perspective divide).
@@ -203,5 +204,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (outA > 0.0) {
         outRGB = (cs * sa + d.xyz * da * (1.0 - sa)) / outA;
     }
-    outp[idx] = pack(vec4<f32>(outRGB, outA));
+    outp[idx] = vec4<f32>(outRGB, outA);
 }

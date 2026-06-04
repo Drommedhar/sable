@@ -16,20 +16,14 @@ struct Fx {
 
 @group(0) @binding(0) var<uniform> dims: Dims;
 @group(0) @binding(1) var<uniform> fx: Fx;
-@group(0) @binding(2) var<storage, read>       src:  array<u32>;
-@group(0) @binding(3) var<storage, read_write>   outp: array<u32>;
+@group(0) @binding(2) var<storage, read>       src:  array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read_write>   outp: array<vec4<f32>>;
 
 fn alphaAt(ix: i32, iy: i32) -> f32 {
     if (ix < 0 || iy < 0 || ix >= i32(dims.width) || iy >= i32(dims.height)) { return 0.0; }
-    return f32((src[u32(iy) * dims.width + u32(ix)] >> 24u) & 0xffu) / 255.0;
+    return src[u32(iy) * dims.width + u32(ix)].w;
 }
-fn pack(c: vec4<f32>) -> u32 {
-    let r = u32(clamp(c.x, 0.0, 1.0) * 255.0 + 0.5);
-    let g = u32(clamp(c.y, 0.0, 1.0) * 255.0 + 0.5);
-    let b = u32(clamp(c.z, 0.0, 1.0) * 255.0 + 0.5);
-    let a = u32(clamp(c.w, 0.0, 1.0) * 255.0 + 0.5);
-    return r | (g << 8u) | (b << 16u) | (a << 24u);
-}
+fn pack(c: vec4<f32>) -> vec4<f32> { return c; }
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {

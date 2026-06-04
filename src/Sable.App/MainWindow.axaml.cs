@@ -163,6 +163,7 @@ public partial class MainWindow : Window
         if (_settings.WinMaximized) WindowState = WindowState.Maximized;
         ApplyTheme(_settings.Theme);
         ApplyOverlayColors();
+        ApplyGridAndSnap();
         ApplyAiVisibility();
         RebuildRecentMenu();
     }
@@ -316,6 +317,10 @@ public partial class MainWindow : Window
     // visibility + VRAM + the Settings/Models dialogs use the backend-free ModelReg/GpuProbe instead.
     private Sable.Ai.AiService Ai => _aiService ??= CreateAi();
 
+    // One shared GPU probe: the first query shells out to nvidia-smi (slow); caching it here means
+    // the model manager / Smart Select reuse the warm result instead of each spawning nvidia-smi anew.
+    private readonly Sable.Ai.Gpu.GpuProbe _gpuProbe = new();
+
     private Sable.Ai.Models.ModelRegistry? _modelReg;
     /// <summary>The model registry, independent of the (ORT-loading) AI backend — safe to touch any time.</summary>
     private Sable.Ai.Models.ModelRegistry ModelReg
@@ -324,9 +329,7 @@ public partial class MainWindow : Window
         {
             if (_modelReg is null)
             {
-                var folder = System.IO.Path.Combine(
-                    System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Sable", "models");
-                _modelReg = new Sable.Ai.Models.ModelRegistry(folder);
+                _modelReg = new Sable.Ai.Models.ModelRegistry(_settings.EffectiveModelsFolder());
                 // fast native-only load so the UI thread never blocks on a big/remote ComfyUI tree;
                 // the external sources are scanned on a background thread, then AI visibility re-applies.
                 try { _modelReg.SetSources(_settings.ModelSources, scan: false); } catch { /* no models yet */ }
@@ -467,7 +470,7 @@ public partial class MainWindow : Window
             // SAM2 density is configurable (Settings ▸ Machine Learning); Auto scales by detected VRAM so a
             // weak/low-VRAM laptop GPU doesn't hit a driver timeout (TDR) running 1024 decoder passes.
             int grid = Sable.Core.Settings.SableSettings.SmartSelectGrid(
-                _settings.SmartSelectQuality, new Sable.Ai.Gpu.GpuProbe().TotalVramBytes());
+                _settings.SmartSelectQuality, _gpuProbe.TotalVramBytes());
             bool forceCpu = _settings.SmartSelectForceCpu;   // this GPU previously couldn't run SAM2 → CPU only
 
             // a layer with a non-translation transform (scale/rotate/shear/perspective) can't be mapped back
@@ -748,8 +751,14 @@ public partial class MainWindow : Window
 
     private async void OnAiModels(object? sender, RoutedEventArgs e)
     {
-        var win = new ModelsWindow(ModelReg, new Sable.Ai.Gpu.GpuProbe().FreeVramBytes()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var win = new ModelsWindow(ModelReg, _gpuProbe) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
         win.DefaultsChanged += ApplyAiVisibility;   // default/install changes alter which model serves each op
+        win.ModelsFolderChanged += newPath =>      // registry already moved; persist the choice + rebuild the AI backend
+        {
+            _settings.ModelsFolder = newPath;
+            Sable.Core.Settings.SettingsService.Save(_settings);
+            _aiService = null;   // next AI op rebuilds the backend against the moved registry
+        };
         await win.ShowDialog(this);
         ApplyAiVisibility();   // installs/removals in the manager change which features are available
     }
@@ -886,13 +895,61 @@ public partial class MainWindow : Window
         RulerH.IsVisible = on; RulerV.IsVisible = on;
     }
 
-    private void OnToggleSnap(object? sender, RoutedEventArgs e) => Canvas.SnapEnabled = SnapMenuItem.IsChecked;
+    private void OnToggleSnap(object? sender, RoutedEventArgs e)
+    {
+        Canvas.SnapEnabled = SnapMenuItem.IsChecked;
+        _settings.SnapEnabled = SnapMenuItem.IsChecked;
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
     private void OnClearGuides(object? sender, RoutedEventArgs e)
     {
         if (_activeTab?.Doc is { } d) { d.GuidesX.Clear(); d.GuidesY.Clear(); }
     }
 
-    private void OnToggleGrid(object? sender, RoutedEventArgs e) => Canvas.ShowGrid = GridMenuItem.IsChecked;
+    private void OnToggleGrid(object? sender, RoutedEventArgs e)
+    {
+        Canvas.ShowGrid = GridMenuItem.IsChecked;
+        _settings.ShowGrid = GridMenuItem.IsChecked;
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    /// <summary>Push the grid + snapping settings to the canvas and sync the View-menu quick toggles.</summary>
+    private void ApplyGridAndSnap()
+    {
+        Canvas.ShowGrid = _settings.ShowGrid;
+        Canvas.GridSpacing = (float)_settings.GridSpacing;
+        Canvas.GridSubdivisions = _settings.GridSubdivisions;
+        Canvas.SnapEnabled = _settings.SnapEnabled;
+        Canvas.SnapTolerance = _settings.SnapTolerance;
+        Canvas.SnapToGrid = _settings.SnapToGrid;
+        Canvas.SnapToGuides = _settings.SnapToGuides;
+        Canvas.SnapToCanvas = _settings.SnapToCanvas;
+        Canvas.SnapToObjects = _settings.SnapToObjects;
+        Canvas.SnapVisibleOnly = _settings.SnapVisibleOnly;
+        if (GridMenuItem is not null) GridMenuItem.IsChecked = _settings.ShowGrid;
+        if (SnapMenuItem is not null) SnapMenuItem.IsChecked = _settings.SnapEnabled;
+    }
+
+    private void OnGridSettings(object? sender, RoutedEventArgs e)
+    {
+        var win = new GridSettingsWindow(_settings, () =>
+        {
+            ApplyGridAndSnap();
+            ApplyOverlayColors();   // grid colour lives in the overlay-colour push
+            Sable.Core.Settings.SettingsService.Save(_settings);
+        }) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        win.ShowDialog(this);
+    }
+
+    private void OnSnapping(object? sender, RoutedEventArgs e)
+    {
+        var win = new SnappingWindow(_settings, () =>
+        {
+            ApplyGridAndSnap();
+            Sable.Core.Settings.SettingsService.Save(_settings);
+        }) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        win.ShowDialog(this);
+    }
     private void OnTogglePixelGrid(object? sender, RoutedEventArgs e) => Canvas.ShowPixelGrid = PixelGridMenuItem.IsChecked;
 
     private void OnZoomBoxKey(object? sender, KeyEventArgs e)
@@ -941,6 +998,31 @@ public partial class MainWindow : Window
         if (DocInfoLabel is null) return;
         if (_activeTab?.Doc is { } d) DocInfoLabel.Text = $"{d.Width} x {d.Height} px ({d.Dpi:0} ppi)";
         else DocInfoLabel.Text = "—";
+        // colour mode + working depth of the active document (RGB only for now; 8/16/32-bit via Image ▸ Mode)
+        if (ColorSpaceLabel is not null)
+            ColorSpaceLabel.Text = _activeTab?.Doc is { } cd ? $"RGB · {(int)cd.Depth}-bit" : "—";
+        SyncDepthMenu();
+    }
+
+    /// <summary>Tick the Image ▸ Mode radio matching the active document's bit depth.</summary>
+    private void SyncDepthMenu()
+    {
+        var depth = _activeTab?.Doc.Depth;
+        if (Depth8Item is not null) Depth8Item.IsChecked = depth == Sable.Core.BitDepth.Eight;
+        if (Depth16Item is not null) Depth16Item.IsChecked = depth == Sable.Core.BitDepth.Sixteen;
+        if (Depth32Item is not null) Depth32Item.IsChecked = depth == Sable.Core.BitDepth.ThirtyTwo;
+    }
+
+    private void OnSetDepth8(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.Eight);
+    private void OnSetDepth16(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.Sixteen);
+    private void OnSetDepth32(object? sender, RoutedEventArgs e) => SetDepth(Sable.Core.BitDepth.ThirtyTwo);
+
+    private void SetDepth(Sable.Core.BitDepth depth)
+    {
+        if (_activeTab is not { } tab || tab.Doc.Depth == depth) return;
+        tab.Doc.Depth = depth;
+        tab.IsDirty = true;       // a document-metadata change to save
+        UpdateDocInfo();
     }
 
     private void OnCheckUpdatesMenu(object? sender, RoutedEventArgs e) => _ = CheckForUpdatesAsync(manual: true);
@@ -2063,6 +2145,25 @@ public partial class MainWindow : Window
         // the GPU canvas is a native HWND that paints OVER the Avalonia welcome overlay (airspace);
         // hide it when there's no document so the empty/welcome state is actually visible.
         if (Canvas is not null) Canvas.IsVisible = !empty;
+        // no document → rulers have nothing to map; stop them taking pointer input (no stray guide
+        // drags) and dim them so they read as inactive.
+        foreach (var r in new[] { RulerH, RulerV })
+            if (r is not null) { r.IsHitTestVisible = !empty; r.Opacity = empty ? 0.4 : 1.0; }
+        SetDocMenusEnabled(!empty);   // grey out document-only menu actions (Save/edit/etc.) with no doc
+    }
+
+    /// <summary>Enable/disable the menu actions that only make sense with an open document
+    /// (the whole editing menus + Save/Export + clipboard + zoom). New/Open/Preferences stay live.</summary>
+    private void SetDocMenusEnabled(bool on)
+    {
+        foreach (var mi in new[]
+        {
+            FileSaveItem, FileSaveAsItem, FileExportItem,
+            EditCutItem, EditCopyItem, EditCopyMergedItem, EditPasteItem, EditPasteIntoItem, EditDuplicateItem,
+            ImageMenu, LayerMenu, TypeMenu, SelectMenu, FilterMenu,
+            ViewZoomInItem, ViewZoomOutItem, ViewFitItem, ViewActualItem,
+        })
+            if (mi is not null) mi.IsEnabled = on;
     }
 
     private void UpdateActiveLayer(DocumentViewModel vm)
@@ -2391,7 +2492,7 @@ public partial class MainWindow : Window
         var dlg = new NewDocumentWindow(_settings.DefaultDpi);
         if (await dlg.ShowDialog<bool>(this))
         {
-            var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi };
+            var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi, Depth = dlg.DocDepth };
             var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
             if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
             bg.Dirty = true;

@@ -55,29 +55,35 @@
                 <MenuItem Header="{loc:Loc menu.file.openImage}" Click="OnOpenImage" />
                 <MenuItem Header="{loc:Loc menu.file.openRecent}" x:Name="RecentMenu" />
                 <Separator />
-                <MenuItem Header="{loc:Loc menu.file.save}" Click="OnSaveSable" InputGesture="Ctrl+S" />
-                <MenuItem Header="{loc:Loc menu.file.saveAs}" Click="OnSaveAsSable" />
+                <MenuItem x:Name="FileSaveItem" Header="{loc:Loc menu.file.save}" Click="OnSaveSable" InputGesture="Ctrl+S" />
+                <MenuItem x:Name="FileSaveAsItem" Header="{loc:Loc menu.file.saveAs}" Click="OnSaveAsSable" />
                 <Separator />
-                <MenuItem Header="{loc:Loc menu.file.export}" Click="OnExport" />
+                <MenuItem x:Name="FileExportItem" Header="{loc:Loc menu.file.export}" Click="OnExport" />
             </MenuItem>
             <MenuItem Header="{loc:Loc menu.edit}">
                 <MenuItem Header="{loc:Loc menu.edit.undo}" Command="{Binding UndoEditCommand}" InputGesture="Ctrl+Z" />
                 <MenuItem Header="{loc:Loc menu.edit.redo}" Command="{Binding RedoEditCommand}" InputGesture="Ctrl+Y" />
                 <Separator />
-                <MenuItem Header="{loc:Loc menu.edit.cut}" Click="OnCut" InputGesture="Ctrl+X" />
-                <MenuItem Header="{loc:Loc menu.edit.copy}" Click="OnCopy" InputGesture="Ctrl+C" />
-                <MenuItem Header="{loc:Loc menu.edit.copyMerged}" Click="OnCopyMerged" InputGesture="Ctrl+Shift+C" />
-                <MenuItem Header="{loc:Loc menu.edit.paste}" Click="OnPaste" InputGesture="Ctrl+V" />
-                <MenuItem Header="{loc:Loc menu.edit.pasteInto}" Click="OnPasteInto" InputGesture="Ctrl+Shift+V" />
-                <MenuItem Header="{loc:Loc menu.edit.duplicateLayer}" Click="OnDuplicate" InputGesture="Ctrl+J" />
+                <MenuItem x:Name="EditCutItem" Header="{loc:Loc menu.edit.cut}" Click="OnCut" InputGesture="Ctrl+X" />
+                <MenuItem x:Name="EditCopyItem" Header="{loc:Loc menu.edit.copy}" Click="OnCopy" InputGesture="Ctrl+C" />
+                <MenuItem x:Name="EditCopyMergedItem" Header="{loc:Loc menu.edit.copyMerged}" Click="OnCopyMerged" InputGesture="Ctrl+Shift+C" />
+                <MenuItem x:Name="EditPasteItem" Header="{loc:Loc menu.edit.paste}" Click="OnPaste" InputGesture="Ctrl+V" />
+                <MenuItem x:Name="EditPasteIntoItem" Header="{loc:Loc menu.edit.pasteInto}" Click="OnPasteInto" InputGesture="Ctrl+Shift+V" />
+                <MenuItem x:Name="EditDuplicateItem" Header="{loc:Loc menu.edit.duplicateLayer}" Click="OnDuplicate" InputGesture="Ctrl+J" />
                 <Separator />
                 <MenuItem Header="{loc:Loc menu.edit.preferences}" Click="OnPreferences" />
             </MenuItem>
-            <MenuItem Header="{loc:Loc menu.image}">
+            <MenuItem x:Name="ImageMenu" Header="{loc:Loc menu.image}">
+                <MenuItem Header="{loc:Loc menu.image.mode}">
+                    <MenuItem x:Name="Depth8Item" Header="{loc:Loc menu.image.depth8}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth8" />
+                    <MenuItem x:Name="Depth16Item" Header="{loc:Loc menu.image.depth16}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth16" />
+                    <MenuItem x:Name="Depth32Item" Header="{loc:Loc menu.image.depth32}" ToggleType="Radio" GroupName="depth" Click="OnSetDepth32" />
+                </MenuItem>
+                <Separator />
                 <MenuItem Header="{loc:Loc menu.image.resizeDocument}" Click="OnResizeDocument" />
                 <MenuItem Header="{loc:Loc menu.image.resizeCanvas}" Click="OnResizeCanvas" />
             </MenuItem>
-            <MenuItem Header="{loc:Loc mainWindow.layer}">
+            <MenuItem x:Name="LayerMenu" Header="{loc:Loc mainWindow.layer}">
                 <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" InputGesture="Ctrl+J" />
                 <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
                 <Separator />
@@ -109,13 +115,13 @@
                     <MenuItem Header="{loc:Loc mainWindow.distributeVertically}" Click="OnDistributeV" />
                 </MenuItem>
             </MenuItem>
-            <MenuItem Header="{loc:Loc mainWindow.type}">
+            <MenuItem x:Name="TypeMenu" Header="{loc:Loc mainWindow.type}">
                 <MenuItem Header="{loc:Loc mainWindow.convertToCurves}" Click="OnTextToCurves" />
                 <Separator />
                 <MenuItem Header="{loc:Loc mainWindow.fitTextToPath}" Click="OnTextToPath" />
                 <MenuItem Header="{loc:Loc mainWindow.detachTextFromPath}" Click="OnTextDetachPath" />
             </MenuItem>
-            <MenuItem Header="{loc:Loc mainWindow.select}">
+            <MenuItem x:Name="SelectMenu" Header="{loc:Loc mainWindow.select}">
                 <MenuItem Header="{loc:Loc mainWindow.selectAll}" Click="OnSelectAll" InputGesture="Ctrl+A" />
                 <MenuItem Header="{loc:Loc mainWindow.deselect}" Click="OnDeselect" InputGesture="Ctrl+D" />
                 <MenuItem Header="{loc:Loc mainWindow.invert}" Click="OnInvertSelection" InputGesture="Ctrl+Shift+I" />
@@ -129,7 +135,7 @@
                 <MenuItem Header="{loc:Loc mainWindow.saveSelection}" Click="OnSaveSelection" />
                 <MenuItem Header="{loc:Loc mainWindow.loadSelection}" Click="OnLoadSelection" />
             </MenuItem>
-            <MenuItem Header="{loc:Loc mainWindow.filter}">
+            <MenuItem x:Name="FilterMenu" Header="{loc:Loc mainWindow.filter}">
                 <MenuItem Header="{loc:Loc mainWindow.gaussianBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.GaussianBlur}" />
                 <MenuItem Header="{loc:Loc mainWindow.boxBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.BoxBlur}" />
                 <MenuItem Header="{loc:Loc mainWindow.motionBlur}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.MotionBlur}" />
@@ -144,16 +150,18 @@
                 <MenuItem Header="{loc:Loc mainWindow.denoise}" Command="{Binding NewFilterCommand}" CommandParameter="{x:Static eng:FilterKind.Denoise}" />
             </MenuItem>
             <MenuItem Header="{loc:Loc mainWindow.view}">
-                <MenuItem Header="{loc:Loc mainWindow.zoomIn}" Click="OnZoomInMenu" InputGesture="Ctrl+OemPlus" />
-                <MenuItem Header="{loc:Loc mainWindow.zoomOut}" Click="OnZoomOutMenu" InputGesture="Ctrl+OemMinus" />
-                <MenuItem Header="{loc:Loc mainWindow.fitToWindow}" Click="OnZoomFit" InputGesture="Ctrl+D0" />
-                <MenuItem Header="{loc:Loc mainWindow.actualPixels100}" Click="OnZoomActual" InputGesture="Ctrl+D1" />
+                <MenuItem x:Name="ViewZoomInItem" Header="{loc:Loc mainWindow.zoomIn}" Click="OnZoomInMenu" InputGesture="Ctrl+OemPlus" />
+                <MenuItem x:Name="ViewZoomOutItem" Header="{loc:Loc mainWindow.zoomOut}" Click="OnZoomOutMenu" InputGesture="Ctrl+OemMinus" />
+                <MenuItem x:Name="ViewFitItem" Header="{loc:Loc mainWindow.fitToWindow}" Click="OnZoomFit" InputGesture="Ctrl+D0" />
+                <MenuItem x:Name="ViewActualItem" Header="{loc:Loc mainWindow.actualPixels100}" Click="OnZoomActual" InputGesture="Ctrl+D1" />
                 <Separator />
                 <MenuItem x:Name="RulersMenuItem" Header="{loc:Loc mainWindow.showRulers}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleRulers" />
                 <MenuItem x:Name="GridMenuItem" Header="{loc:Loc mainWindow.showGrid}" ToggleType="CheckBox" Click="OnToggleGrid" />
                 <MenuItem x:Name="PixelGridMenuItem" Header="{loc:Loc mainWindow.showPixelGrid}" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePixelGrid" />
                 <Separator />
+                <MenuItem Header="{loc:Loc mainWindow.gridSettings}" Click="OnGridSettings" />
                 <MenuItem x:Name="SnapMenuItem" Header="{loc:Loc mainWindow.snapToGuidesGrid}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleSnap" />
+                <MenuItem Header="{loc:Loc mainWindow.snappingSettings}" Click="OnSnapping" />
                 <MenuItem Header="{loc:Loc mainWindow.clearGuides}" Click="OnClearGuides" />
             </MenuItem>
             <MenuItem Header="{loc:Loc mainWindow.ai}" x:Name="AiMenu" IsVisible="False">
@@ -427,7 +435,8 @@
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                             <TextBlock x:Name="SelSizeLabel" Text="" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" Width="90" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
-                            <TextBlock Text="{loc:Loc mainWindow.rgba16fLinear}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ColorSpaceLabel" Text="—" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" VerticalAlignment="Center"
+                                       ToolTip.Tip="{loc:Loc mainWindow.documentColourModeDepth}" />
                             <Rectangle Width="1" Height="14" Fill="{DynamicResource ChromeBorder}" />
                         </StackPanel>
                         <!-- active-tool modifier hints (Affinity-style) -->
@@ -726,9 +735,9 @@
                                                       IsChecked="{Binding IsVisible, Mode=TwoWay}"
                                                       ToolTip.Tip="{loc:Loc mainWindow.toggleVisibility}">
                                             <Panel>
-                                                <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding IsVisible}"
+                                                <Path Classes="icon" Width="14" Height="14" IsVisible="{Binding EffectiveVisible}"
                                                       Data="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z" />
-                                                <Path Classes="icon" Width="14" Height="14" Opacity="0.4" IsVisible="{Binding !IsVisible}"
+                                                <Path Classes="icon" Width="14" Height="14" Opacity="0.4" IsVisible="{Binding !EffectiveVisible}"
                                                       Data="M2 2l20 20 M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7 M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
                                             </Panel>
                                         </ToggleButton>

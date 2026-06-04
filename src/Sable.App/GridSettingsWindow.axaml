@@ -1,0 +1,37 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.GridSettingsWindow"
+        Width="340" SizeToContent="Height" CanResize="False"
+        Background="{DynamicResource ChromePanel}"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc gridWindow.title}">
+    <StackPanel Margin="16" Spacing="6">
+        <TextBlock Text="{loc:Loc gridWindow.title}" Classes="settingHeader" />
+
+        <local:SettingRow Label="{loc:Loc gridWindow.showGrid}">
+            <CheckBox x:Name="ShowGridCheck" IsCheckedChanged="OnChanged" />
+        </local:SettingRow>
+        <local:SettingRow Label="{loc:Loc gridWindow.spacing}">
+            <NumericUpDown x:Name="SpacingBox" Minimum="1" Maximum="4096" Increment="1" Width="120"
+                           FormatString="0" ValueChanged="OnChanged" />
+        </local:SettingRow>
+        <local:SettingRow Label="{loc:Loc gridWindow.subdivisions}">
+            <NumericUpDown x:Name="SubdivBox" Minimum="1" Maximum="50" Increment="1" Width="120"
+                           FormatString="0" ValueChanged="OnChanged" />
+        </local:SettingRow>
+        <local:SettingRow Label="{loc:Loc gridWindow.colour}">
+            <local:HexColorField x:Name="ColorField" Width="150" />
+        </local:SettingRow>
+
+        <Rectangle Height="1" Fill="{DynamicResource ChromeBorder}" Margin="0,4" />
+
+        <local:SettingRow Label="{loc:Loc gridWindow.snapToGrid}">
+            <CheckBox x:Name="SnapGridCheck" IsCheckedChanged="OnChanged" />
+        </local:SettingRow>
+
+        <Button Content="{loc:Loc gridWindow.close}" Classes="opt" Padding="18,0"
+                HorizontalAlignment="Right" Margin="0,8,0,0" Click="OnClose" />
+    </StackPanel>
+</Window>

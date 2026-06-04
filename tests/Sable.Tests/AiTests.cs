@@ -229,6 +229,46 @@ public class ModelRegistryTests
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
+
+    [Fact]
+    public void MoveTo_MovesWeightsAndRebasesManifestPaths()
+    {
+        var oldDir = Path.Combine(Path.GetTempPath(), $"sable_models_{Guid.NewGuid():N}");
+        var newDir = Path.Combine(Path.GetTempPath(), $"sable_models_{Guid.NewGuid():N}");
+        try
+        {
+            var reg = new ModelRegistry(oldDir);
+            var modelDir = reg.ModelDir("rmbg");
+            Directory.CreateDirectory(modelDir);
+            var weights = Path.Combine(modelDir, "rmbg.onnx");
+            File.WriteAllBytes(weights, new byte[] { 1, 2, 3 });
+            reg.Save(new ModelManifest
+            {
+                Id = "rmbg", Name = "RMBG", Family = "BiRefNet", Tier = AiTier.Light,
+                Tasks = new[] { AiTaskKind.Matte }, Adapter = "matte", Files = new[] { weights },
+            });
+
+            reg.MoveTo(newDir);
+
+            Assert.Equal(Path.GetFullPath(newDir), Path.GetFullPath(reg.ModelsFolder));
+            var movedWeights = Path.Combine(newDir, "rmbg", "rmbg.onnx");
+            Assert.True(File.Exists(movedWeights));   // weights physically moved
+            Assert.False(File.Exists(weights));       // old copy gone
+
+            // reload from disk: manifest's absolute Files path was rebased to the new folder + still resolves
+            var reg2 = new ModelRegistry(newDir);
+            reg2.Load();
+            var m = reg2.Catalog.ById("rmbg");
+            Assert.NotNull(m);
+            Assert.Equal(Path.GetFullPath(movedWeights), Path.GetFullPath(m!.Files![0]));
+            Assert.True(File.Exists(m.Files![0]));
+        }
+        finally
+        {
+            if (Directory.Exists(oldDir)) Directory.Delete(oldDir, true);
+            if (Directory.Exists(newDir)) Directory.Delete(newDir, true);
+        }
+    }
 }
 
 public class ImageOpsTests
@@ -417,8 +457,14 @@ public class RecommendedUrlReachabilityTests
             }
 
             using (resp)
+            {
+                // 429/503 = transient throttling (HuggingFace rate-limits CI runners), not a dead link:
+                // the endpoint still exists. Only a permanent failure (404/410/…) means a moved/broken URL.
+                if (resp.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.ServiceUnavailable)
+                    continue;
                 Assert.True(resp.IsSuccessStatusCode,
                     $"Recommended model '{m.Id}' file '{part.FileName}' URL returned {(int)resp.StatusCode} {resp.ReasonPhrase}: {url}");
+            }
         }
     }
 }
