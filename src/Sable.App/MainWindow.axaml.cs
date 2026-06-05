@@ -1354,7 +1354,10 @@ public partial class MainWindow : Window
         // OnLayerPointerPressed captures the pointer to LayerList for the delayed-deselect/drag gesture.
         // Avalonia mouse capture is explicit — if we don't release it, the next click anywhere routes to
         // the (now stale) LayerList and is silently swallowed app-wide. Mirror OnCanvasPointerReleased.
-        e.Pointer.Capture(null);
+        // BUT only release a capture WE took: this is a TUNNEL handler, so it runs before an interactive
+        // child (visibility eye, lock, chevron) processes its own release. That child captured the pointer
+        // to ITSELF to detect its click — clearing it here would swallow the toggle. Leave it alone.
+        if (ReferenceEquals(e.Pointer.Captured, LayerList)) e.Pointer.Capture(null);
         EndDrag();
     }
 
