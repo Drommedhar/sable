@@ -277,10 +277,15 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _input = backend.CreateInput();
         _input.Attach(_hwnd, this);
 
-        // Render priority (not the default Background) so the present tick isn't starved
-        // behind input/layout — that was pinning the canvas at ~30fps.
+        // Input priority (NOT Render): on the priority ladder Render(4) outranks Input(-1), so a
+        // per-tick RenderFrame at Render priority PREEMPTS Avalonia's input dispatch and intermittently
+        // drops clicks app-wide (a button flashes :pressed but Click never fires). At Input priority the
+        // render loop shares the UI thread FAIRLY with input instead of starving it. Background(-2) was
+        // too low (below input AND layout → ~30fps); Input(-1) is the balance — present is cheap and
+        // non-blocking (Mailbox), so it doesn't need to outrank input. Do NOT raise back to Render
+        // without re-testing for swallowed clicks.
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(8),
-            DispatcherPriority.Render, (_, _) => RenderFrame());
+            DispatcherPriority.Input, (_, _) => RenderFrame());
         _timer.Start();
 
         return handle;
@@ -335,14 +340,33 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 if (caps.Formats[i] == TextureFormat.Bgra8Unorm) { _format = TextureFormat.Bgra8Unorm; break; }
         }
 
-        // --- pick a NON-BLOCKING present mode if available ---
-        // Fifo (vsync) blocks SurfaceGetCurrentTexture on the vblank, and the render timer runs at
-        // DispatcherPriority.Render (above Input) — so that block starves Avalonia's input dispatch
-        // and clicks get swallowed app-wide. Mailbox (triple-buffered, no tearing, no CPU vsync wait)
-        // keeps the UI thread free. Fall back to Fifo where Mailbox isn't supported (always is).
+        // --- pick a NON-BLOCKING present mode ---
+        // Fifo (vsync) blocks SurfacePresent/GetCurrentTexture on the vblank, and the render timer runs
+        // at DispatcherPriority.Render (ABOVE Input) — so a per-tick block starves Avalonia's input
+        // dispatch app-wide (a button shows :pressed but Click never fires; intermittent). Non-blocking
+        // modes keep the UI thread free: Mailbox (triple-buffered, no tearing) is best; Immediate (no
+        // vsync, may tear) also never waits. Only fall back to the blocking Fifo/FifoRelaxed when
+        // neither is exposed — and log a warning, because that re-introduces the starvation bug.
+        bool hasMailbox = false, hasImmediate = false, hasFifoRelaxed = false;
         if (caps.PresentModeCount > 0 && caps.PresentModes is not null)
             for (uint i = 0; i < caps.PresentModeCount; i++)
-                if (caps.PresentModes[i] == PresentMode.Mailbox) { _presentMode = PresentMode.Mailbox; break; }
+                switch (caps.PresentModes[i])
+                {
+                    case PresentMode.Mailbox: hasMailbox = true; break;
+                    case PresentMode.Immediate: hasImmediate = true; break;
+                    case PresentMode.FifoRelaxed: hasFifoRelaxed = true; break;
+                }
+        _presentMode = hasMailbox     ? PresentMode.Mailbox
+                     : hasImmediate   ? PresentMode.Immediate
+                     : hasFifoRelaxed ? PresentMode.FifoRelaxed
+                     :                  PresentMode.Fifo;
+        var modeLog = $"[canvas] present mode = {_presentMode} "
+                    + $"(avail: mailbox={hasMailbox} immediate={hasImmediate} fifoRelaxed={hasFifoRelaxed})";
+        System.Diagnostics.Debug.WriteLine(modeLog);
+        System.Console.WriteLine(modeLog);   // visible under `dotnet run` so the live mode is diagnosable
+        if (_presentMode is PresentMode.Fifo or PresentMode.FifoRelaxed)
+            System.Console.WriteLine("[canvas] WARNING: only a blocking (vsync) present mode is available — "
+                + "the Render-priority render timer can starve Avalonia input app-wide (clicks may be lost).");
 
         _compositor = new GpuCompositor(_gpu);
         _blitter = new SurfaceBlitter(_gpu, _format);

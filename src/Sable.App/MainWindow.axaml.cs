@@ -1249,7 +1249,7 @@ public partial class MainWindow : Window
     private void OnLayerPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_dragSource is null) return;
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { EndDrag(); return; }
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { e.Pointer.Capture(null); EndDrag(); return; }
 
         var p = e.GetPosition(this);
         if (!_dragging)
@@ -1309,6 +1309,10 @@ public partial class MainWindow : Window
             LayerList.SelectedItems!.Clear();
             LayerList.SelectedItems.Add(row);
         }
+        // OnLayerPointerPressed captures the pointer to LayerList for the delayed-deselect/drag gesture.
+        // Avalonia mouse capture is explicit — if we don't release it, the next click anywhere routes to
+        // the (now stale) LayerList and is silently swallowed app-wide. Mirror OnCanvasPointerReleased.
+        e.Pointer.Capture(null);
         EndDrag();
     }
 
