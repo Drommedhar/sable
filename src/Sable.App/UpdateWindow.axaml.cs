@@ -12,6 +12,8 @@ using Avalonia.Threading;
 using Sable.Core;
 using Sable.Core.Services;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -33,7 +35,7 @@ public partial class UpdateWindow : Window
         InitializeComponent();
         _update = update;
         _service = service;
-        VersionText.Text = $"Sable {update.TagName} is available — you have {VersionInfo.Version}.";
+        VersionText.Text = Loc.T("updateWindow.availableFormat", update.TagName, VersionInfo.Version);
         if (!string.IsNullOrWhiteSpace(update.Body))
         {
             BuildNotes(update.Body);
@@ -147,13 +149,13 @@ public partial class UpdateWindow : Window
         var progress = new Progress<double>(p => Dispatcher.UIThread.Post(() =>
         {
             DownloadProgress.Value = p * 100;
-            ProgressText.Text = $"Downloading… {(int)(p * 100)}%";
+            ProgressText.Text = Loc.T("updateWindow.downloadingFormat", (int)(p * 100));
         }));
 
         try
         {
             var installer = await _service.DownloadUpdateAsync(_update, progress, _cts.Token);
-            ProgressText.Text = "Launching installer…";
+            ProgressText.Text = Loc.T("updateWindow.launchingInstaller");
             _service.LaunchInstaller(installer);
 
             // close + shut the app down so the installer can replace files, then it relaunches Sable
@@ -167,7 +169,7 @@ public partial class UpdateWindow : Window
         }
         catch (Exception ex)
         {
-            ErrorText.Text = $"Update failed: {ex.Message}";
+            ErrorText.Text = Loc.T("updateWindow.updateFailed", ex.Message);
             ErrorText.IsVisible = true;
             ResetAfterFailure();
         }

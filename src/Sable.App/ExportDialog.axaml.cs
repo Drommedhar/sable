@@ -4,6 +4,8 @@ using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Sable.Imaging;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -60,14 +62,14 @@ public partial class ExportDialog : Window
         int ow = System.Math.Max(1, _srcW * scale / 100);
         int oh = System.Math.Max(1, _srcH * scale / 100);
 
-        QualityLabel.Text = $"Quality {q}%";
-        ScaleLabel.Text = $"Scale {scale}%";
-        DimsLabel.Text = $"{ow} × {oh} px";
+        QualityLabel.Text = Loc.T("exportDialog.qualityFormat", q);
+        ScaleLabel.Text = Loc.T("exportDialog.scaleFormat", scale);
+        DimsLabel.Text = Loc.T("exportDialog.dimsFormat", ow, oh);
 
         try
         {
             int bytes = ImageCodec.EncodeScaled(fmt, _srcW, _srcH, _rgba, ow, oh, q).Length;
-            SizeLabel.Text = $"Estimated size: {Human(bytes)}";
+            SizeLabel.Text = Loc.T("exportDialog.estimatedSize", Human(bytes));
         }
         catch { SizeLabel.Text = ""; }
     }

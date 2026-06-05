@@ -34,8 +34,20 @@ LOCALES_DIR = APP / "Assets" / "Locales"
 SCAN_ROOTS = [REPO_ROOT / "src"]
 SCAN_EXTS = {".cs", ".axaml"}
 
-# Keys built dynamically at runtime / read directly (not via Loc.T) — never flag/prune.
-DYNAMIC_PREFIXES: set[str] = {"language."}   # language.name read by GetLanguageDisplayName
+# Keys built dynamically at runtime / read via a variable key (not a string literal inside
+# Loc.T("...")) — the static scanner can't see these, so never flag/prune them.
+#   language.        — language.name read by GetLanguageDisplayName
+#   tools.           — LocToolName(ToolKind) maps each kind to a "tools.*" key via a switch
+#   toolStatus.      — ToolHintFor(ToolKind) maps each kind to a "toolStatus.*" key via a switch
+#   modelsWindow.task — TaskLabels maps AiTaskKind to a "modelsWindow.task*" key, resolved on access
+#   newDocumentWindow.cat — the preset Catalog stores category loc-keys, resolved at render time
+DYNAMIC_PREFIXES: set[str] = {
+    "language.",
+    "tools.",
+    "toolStatus.",
+    "modelsWindow.task",
+    "newDocumentWindow.cat",
+}
 
 KEY_REF_PATTERNS = [
     re.compile(r'Loc\.T\("([^"]+)"'),

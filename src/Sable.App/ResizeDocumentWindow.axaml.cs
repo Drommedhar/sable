@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -68,7 +70,7 @@ public partial class ResizeDocumentWindow : Window
         if (DescText is null) return;
         int w = (int)(WBox.Value ?? 0), h = (int)(HBox.Value ?? 0);
         double dpi = (double)(DpiBox.Value ?? 96);
-        DescText.Text = $"{w} px × {h} px @ {dpi:0} DPI";
+        DescText.Text = Loc.T("resizeDocumentWindow.descFormat", w, h, $"{dpi:0}");
     }
 
     private void OnResize(object? sender, RoutedEventArgs e)

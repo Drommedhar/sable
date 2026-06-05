@@ -13,6 +13,8 @@ using Sable.Ai.Models;
 using Sable.Core.Ai;
 using Sable.Core.Settings;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -44,7 +46,7 @@ public partial class ModelsWindow : Window
         InitializeComponent();
         _registry = registry;
         _downloader = new ModelDownloader(registry);
-        FolderLabel.Text = $"Model folder: {registry.ModelsFolder}";
+        FolderLabel.Text = Loc.T("modelsWindow.modelFolder", registry.ModelsFolder);
         Closed += (_, _) => _closed = true;
         BuildOnnxCards();   // instant; VRAM badges show requirement-only until the probe returns
         // free-VRAM probe shells out to nvidia-smi (slow, ~seconds cold) — never block the dialog on it.
@@ -62,17 +64,21 @@ public partial class ModelsWindow : Window
         BuildOnnxCards();   // back on the UI thread (Avalonia sync context) → re-render with the fit verdict
     }
 
-    // Friendly task names for the default-model chip on each installed card.
-    private static readonly (AiTaskKind Task, string Label)[] TaskLabels =
+    // Friendly task names for the default-model chip on each installed card (localized on access).
+    private static readonly (AiTaskKind Task, string Key)[] TaskLabels =
     {
-        (AiTaskKind.Matte, "Background removal"),
-        (AiTaskKind.Segment, "Smart selection"),
-        (AiTaskKind.Upscale, "Upscale"),
-        (AiTaskKind.Inpaint, "Object removal"),
-        (AiTaskKind.Denoise, "Denoise"),
+        (AiTaskKind.Matte, "modelsWindow.taskMatte"),
+        (AiTaskKind.Segment, "modelsWindow.taskSegment"),
+        (AiTaskKind.Upscale, "modelsWindow.taskUpscale"),
+        (AiTaskKind.Inpaint, "modelsWindow.taskInpaint"),
+        (AiTaskKind.Denoise, "modelsWindow.taskDenoise"),
     };
 
-    private static string TaskLabel(AiTaskKind t) => TaskLabels.FirstOrDefault(x => x.Task == t).Label ?? t.ToString();
+    private static string TaskLabel(AiTaskKind t)
+    {
+        var key = TaskLabels.FirstOrDefault(x => x.Task == t).Key;
+        return key is null ? t.ToString() : Loc.T(key);
+    }
 
     // accent blue (matches App.axaml checked/selection accent)
     private static readonly Color Accent = Color.Parse("#FF3A6EA5");
@@ -149,7 +155,7 @@ public partial class ModelsWindow : Window
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new(0, 4, 0, 0) };
         var actionBtn = new Button
         {
-            Content = installed ? "Remove" : "Download",
+            Content = installed ? Loc.T("modelsWindow.remove") : Loc.T("modelsWindow.download"),
             Classes = { "opt" },
             Padding = new Avalonia.Thickness(14, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -179,7 +185,7 @@ public partial class ModelsWindow : Window
     {
         int rivals = _registry.Catalog.ForTask(task).Count();
         bool isDefault = _registry.DefaultFor(task)?.Id == id;
-        string label = $"Default · {TaskLabel(task)}";
+        string label = Loc.T("modelsWindow.defaultLabel", TaskLabel(task));
 
         if (isDefault)
         {
@@ -199,7 +205,7 @@ public partial class ModelsWindow : Window
         // not the default but alternatives exist → let the user switch
         var btn = new Button
         {
-            Content = $"Set default · {TaskLabel(task)}",
+            Content = Loc.T("modelsWindow.setDefault", TaskLabel(task)),
             Classes = { "opt" },
             FontSize = 11,
             Padding = new Avalonia.Thickness(10, 0),
@@ -273,7 +279,7 @@ public partial class ModelsWindow : Window
     {
         if (_busy) return;
         _registry.Remove(id);
-        ShowStatus($"Removed {name}.");
+        ShowStatus(Loc.T("modelsWindow.removed", name));
         DefaultsChanged?.Invoke();
         BuildOnnxCards();
     }
@@ -282,7 +288,7 @@ public partial class ModelsWindow : Window
     {
         if (_busy) return;
         var notInstalled = RecommendedModels.DefaultSet.Where(m => !_registry.IsInstalled(m.Id)).ToList();
-        if (notInstalled.Count == 0) { ShowStatus("All recommended models already installed."); return; }
+        if (notInstalled.Count == 0) { ShowStatus(Loc.T("modelsWindow.allInstalled")); return; }
         await RunCycle(notInstalled);   // licence cycle installs the accepted ones
     }
 
@@ -291,16 +297,16 @@ public partial class ModelsWindow : Window
         var url = UrlBox.Text?.Trim();
         if (_busy || string.IsNullOrWhiteSpace(url)) return;
         _busy = true;
-        ShowStatus($"Downloading {url}…");
-        var progress = new Progress<double>(p => Dispatcher.UIThread.Post(() => ShowStatus($"Downloading {url}… {p * 100:0}%")));
+        ShowStatus(Loc.T("modelsWindow.downloading", url));
+        var progress = new Progress<double>(p => Dispatcher.UIThread.Post(() => ShowStatus(Loc.T("modelsWindow.downloadingPct", url, $"{p * 100:0}"))));
         try
         {
             var m = await _downloader.DownloadAsync(url, progress, CancellationToken.None);
-            ShowStatus($"Installed {m.Name}.");
+            ShowStatus(Loc.T("modelsWindow.installedModel", m.Name));
             DefaultsChanged?.Invoke();
             BuildOnnxCards();
         }
-        catch (Exception ex) { ShowStatus($"Download failed: {ex.Message}"); }
+        catch (Exception ex) { ShowStatus(Loc.T("modelsWindow.downloadFailed", ex.Message)); }
         finally { _busy = false; }
     }
 
@@ -311,7 +317,7 @@ public partial class ModelsWindow : Window
         if (_busy) return;
         var picks = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
         {
-            Title = "Choose model folder",
+            Title = Loc.T("modelsWindow.chooseFolder"),
             AllowMultiple = false,
         });
         var target = picks.FirstOrDefault()?.TryGetLocalPath();
@@ -319,22 +325,22 @@ public partial class ModelsWindow : Window
         if (string.Equals(System.IO.Path.GetFullPath(target), System.IO.Path.GetFullPath(_registry.ModelsFolder),
             StringComparison.OrdinalIgnoreCase)) return;   // same folder → nothing to do
 
-        bool ok = await ConfirmWindow.Ask(this, "Move models",
-            $"Move installed models from\n{_registry.ModelsFolder}\nto\n{target}?");
+        bool ok = await ConfirmWindow.Ask(this, Loc.T("modelsWindow.moveModelsTitle"),
+            Loc.T("modelsWindow.moveModelsBody", _registry.ModelsFolder, target));
         if (!ok) return;
 
         _busy = true;
-        var busy = BusyWindow.Begin(this, "Moving models…");
+        var busy = BusyWindow.Begin(this, Loc.T("modelsWindow.movingModels"));
         try
         {
             var progress = busy.Progress;
             await System.Threading.Tasks.Task.Run(() => _registry.MoveTo(target, progress));
-            FolderLabel.Text = $"Model folder: {_registry.ModelsFolder}";
+            FolderLabel.Text = Loc.T("modelsWindow.modelFolder", _registry.ModelsFolder);
             ModelsFolderChanged?.Invoke(_registry.ModelsFolder);
             BuildOnnxCards();
-            ShowStatus($"Models moved to {_registry.ModelsFolder}.");
+            ShowStatus(Loc.T("modelsWindow.modelsMoved", _registry.ModelsFolder));
         }
-        catch (Exception ex) { ShowStatus($"Move failed: {ex.Message}"); }
+        catch (Exception ex) { ShowStatus(Loc.T("modelsWindow.moveFailed", ex.Message)); }
         finally { busy.Done(); _busy = false; }
     }
 
@@ -370,8 +376,8 @@ public partial class ModelsWindow : Window
         if (GenPresetRoot is null || _genSettings is null) return;
         GenPresetRoot.Children.Clear();
 
-        GenPresetRoot.Children.Add(Text("Generative model presets", "ChromeText", 15));
-        GenPresetRoot.Children.Add(Text("Configure base + text encoder(s) + VAE + workflow. Only configured presets appear in Generative Fill — so you control which models are usable.", "ChromeTextDim", 11, wrap: true));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.genPresets"), "ChromeText", 15));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.genPresetsHint"), "ChromeTextDim", 11, wrap: true));
 
         foreach (var p in _genSettings.GenerativePresets.ToList())
         {
@@ -379,9 +385,9 @@ public partial class ModelsWindow : Window
             info.Children.Add(Text(p.Name, "ChromeText", 13));
             var detail = string.IsNullOrEmpty(p.WorkflowFile)
                 ? ShortId(p.BaseModelId)
-                : $"workflow: {System.IO.Path.GetFileName(p.WorkflowFile)} · {ShortId(p.BaseModelId)}";
+                : Loc.T("modelsWindow.workflowDetail", System.IO.Path.GetFileName(p.WorkflowFile), ShortId(p.BaseModelId));
             info.Children.Add(Text(detail, "ChromeTextDim", 11, wrap: true));
-            var rm = new Button { Content = "Remove", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0), VerticalAlignment = VerticalAlignment.Center };
+            var rm = new Button { Content = Loc.T("modelsWindow.remove"), Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0), VerticalAlignment = VerticalAlignment.Center };
             rm.Click += (_, _) => { _genSettings.GenerativePresets.Remove(p); PresetsChanged?.Invoke(); BuildGenPresets(); };
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
             row.Children.Add(info); Grid.SetColumn(rm, 1); row.Children.Add(rm);
@@ -396,70 +402,70 @@ public partial class ModelsWindow : Window
     private void BuildPresetEditor()
     {
         var bases = _registry.Catalog.All.Where(IsGenBase).OrderBy(m => m.Name).ToList();
-        GenPresetRoot.Children.Add(Text("Add preset", "ChromeText", 13, weight: FontWeight.SemiBold));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.addPreset"), "ChromeText", 13, weight: FontWeight.SemiBold));
         if (bases.Count == 0)
         {
-            GenPresetRoot.Children.Add(Text("No generative base models found. Add a ComfyUI source (Settings ▸ Machine Learning) with checkpoints or diffusion_models.", "ChromeTextFaint", 11, wrap: true));
+            GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.noBaseModels"), "ChromeTextFaint", 11, wrap: true));
             return;
         }
 
-        var nameBox = new TextBox { PlaceholderText = "Preset name (e.g. Qwen Edit)", FontSize = 12 };
+        var nameBox = new TextBox { PlaceholderText = Loc.T("modelsWindow.presetNamePlaceholder"), FontSize = 12 };
         GenPresetRoot.Children.Add(nameBox);
 
         var baseCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
-        foreach (var m in bases) baseCombo.Items.Add(new ComboBoxItem { Content = $"{m.Name}  ({m.SourceId ?? "native"})", Tag = m.Id });
+        foreach (var m in bases) baseCombo.Items.Add(new ComboBoxItem { Content = Loc.T("modelsWindow.itemSource", m.Name, m.SourceId ?? Loc.T("modelsWindow.native")), Tag = m.Id });
         baseCombo.SelectedIndex = 0;
-        GenPresetRoot.Children.Add(Text("Base model", "ChromeTextDim", 11));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.baseModel"), "ChromeTextDim", 11));
         GenPresetRoot.Children.Add(baseCombo);
 
         // encoders + VAE (only meaningful for a standalone transformer; shown always, optional for checkpoints)
-        GenPresetRoot.Children.Add(Text("Text encoder(s)", "ChromeTextDim", 11));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.textEncoders"), "ChromeTextDim", 11));
         var encPanel = new StackPanel { Spacing = 1 };
         var encChecks = new List<(string Id, CheckBox Cb)>();
         foreach (var c in _registry.Catalog.All.Where(IsEncoder).OrderBy(c => c.Name))
         {
-            var cb = new CheckBox { Content = $"{c.Name}  ({c.ComponentFamily})", FontSize = 11 };
+            var cb = new CheckBox { Content = Loc.T("modelsWindow.itemSource", c.Name, c.ComponentFamily), FontSize = 11 };
             encPanel.Children.Add(cb); encChecks.Add((c.Id, cb));
         }
-        if (encChecks.Count == 0) encPanel.Children.Add(Text("(none found)", "ChromeTextFaint", 11));
+        if (encChecks.Count == 0) encPanel.Children.Add(Text(Loc.T("modelsWindow.noneFound"), "ChromeTextFaint", 11));
         GenPresetRoot.Children.Add(encPanel);
 
-        GenPresetRoot.Children.Add(Text("VAE", "ChromeTextDim", 11));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.vae"), "ChromeTextDim", 11));
         var vaeCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 11 };
-        vaeCombo.Items.Add(new ComboBoxItem { Content = "(none)", Tag = (string?)null });
+        vaeCombo.Items.Add(new ComboBoxItem { Content = Loc.T("modelsWindow.none"), Tag = (string?)null });
         foreach (var v in _registry.Catalog.All.Where(IsVae).OrderBy(v => v.Name)) vaeCombo.Items.Add(new ComboBoxItem { Content = v.Name, Tag = v.Id });
         vaeCombo.SelectedIndex = 0;
         GenPresetRoot.Children.Add(vaeCombo);
 
         // optional: run the user's own exported workflow (overrides base/encoder/VAE above)
-        GenPresetRoot.Children.Add(Text("Workflow file (exported ComfyUI 'API Format' .json) — REQUIRED, runs your exact graph", "ChromeTextDim", 11, wrap: true));
+        GenPresetRoot.Children.Add(Text(Loc.T("modelsWindow.workflowFileHint"), "ChromeTextDim", 11, wrap: true));
         string? wfPath = null;
-        var wfLabel = Text("(none)", "ChromeTextFaint", 11, wrap: true);
-        var wfBtn = new Button { Content = "Choose workflow…", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
+        var wfLabel = Text(Loc.T("modelsWindow.none"), "ChromeTextFaint", 11, wrap: true);
+        var wfBtn = new Button { Content = Loc.T("modelsWindow.chooseWorkflow"), Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
         wfBtn.Click += async (_, _) =>
         {
             var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-            { Title = "Pick an exported API-format workflow", AllowMultiple = false, FileTypeFilter = new[] { new FilePickerFileType("JSON") { Patterns = new[] { "*.json" } } } });
+            { Title = Loc.T("modelsWindow.pickWorkflowTitle"), AllowMultiple = false, FileTypeFilter = new[] { new FilePickerFileType(Loc.T("modelsWindow.jsonFilter")) { Patterns = new[] { "*.json" } } } });
             var p = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
             if (!string.IsNullOrWhiteSpace(p)) { wfPath = p; wfLabel.Text = System.IO.Path.GetFileName(p); }
         };
-        var openComfy = new Button { Content = "Open ComfyUI (to export)", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
+        var openComfy = new Button { Content = Loc.T("modelsWindow.openComfyExport"), Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
         openComfy.Click += (_, _) => OpenComfyRequested?.Invoke();
         var wfRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Avalonia.Thickness(0, 2, 0, 0) };
         wfRow.Children.Add(wfBtn); wfRow.Children.Add(openComfy);
         GenPresetRoot.Children.Add(wfLabel);
         GenPresetRoot.Children.Add(wfRow);
 
-        var t2iCheck = new CheckBox { Content = "Text-to-image (no input image — output is a new document)", FontSize = 11, Margin = new Avalonia.Thickness(0, 6, 0, 0) };
+        var t2iCheck = new CheckBox { Content = Loc.T("modelsWindow.textToImageOption"), FontSize = 11, Margin = new Avalonia.Thickness(0, 6, 0, 0) };
         GenPresetRoot.Children.Add(t2iCheck);
 
-        var save = new Button { Content = "Save preset", Classes = { "opt" }, Padding = new Avalonia.Thickness(16, 2), Margin = new Avalonia.Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var save = new Button { Content = Loc.T("modelsWindow.savePreset"), Classes = { "opt" }, Padding = new Avalonia.Thickness(16, 2), Margin = new Avalonia.Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         save.Click += (_, _) =>
         {
             var baseId = (baseCombo.SelectedItem as ComboBoxItem)?.Tag as string;
             if (_genSettings is null) return;
-            if (string.IsNullOrEmpty(wfPath)) { wfLabel.Text = "Required — choose a workflow file (export it via Open ComfyUI)."; return; }
-            var name = string.IsNullOrWhiteSpace(nameBox.Text) ? (baseCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Preset" : nameBox.Text!.Trim();
+            if (string.IsNullOrEmpty(wfPath)) { wfLabel.Text = Loc.T("modelsWindow.workflowRequired"); return; }
+            var name = string.IsNullOrWhiteSpace(nameBox.Text) ? (baseCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? Loc.T("modelsWindow.presetFallbackName") : nameBox.Text!.Trim();
             _genSettings.GenerativePresets.Add(new GenerativePreset
             {
                 Name = name,

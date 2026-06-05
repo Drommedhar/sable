@@ -6,6 +6,8 @@ using Avalonia.Interactivity;
 using Sable.Core.Undo;
 using Sable.UI.ViewModels;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -40,7 +42,7 @@ public partial class HistoryWindow : Window
         _syncing = true;
         if (_vm is { } vm)
         {
-            var items = new List<string> { "Open" };
+            var items = new List<string> { Loc.T("historyWindow.open") };
             items.AddRange(vm.Undo.History.Select(c => c.Name));
             HistoryList.ItemsSource = items;
             HistoryList.SelectedIndex = vm.Undo.Cursor;
@@ -58,7 +60,7 @@ public partial class HistoryWindow : Window
 
     private void OnAddSnapshot(object? sender, RoutedEventArgs e)
     {
-        _vm?.CaptureSnapshot($"Snapshot {_snapCounter++}");
+        _vm?.CaptureSnapshot(Loc.T("historyWindow.snapshotName", _snapCounter++));
         Refresh();
     }
 

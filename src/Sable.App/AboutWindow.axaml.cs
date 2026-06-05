@@ -4,6 +4,8 @@ using Avalonia.Interactivity;
 using Sable.Core;
 using Sable.Core.Services;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>Help ▸ About: version / licence / runtime info + a manual update check (PLAN §2.4).</summary>
@@ -16,31 +18,31 @@ public partial class AboutWindow : Window
     public AboutWindow(string gpuName)
     {
         InitializeComponent();
-        VersionLabel.Text = $"Version {VersionInfo.Version}";
-        RuntimeLabel.Text = $"net10.0  ·  Avalonia + wgpu  ·  {System.Runtime.InteropServices.RuntimeInformation.OSDescription}";
-        GpuLabel.Text = $"Renderer: {gpuName}";
+        VersionLabel.Text = Loc.T("aboutWindow.versionFormat", VersionInfo.Version);
+        RuntimeLabel.Text = Loc.T("aboutWindow.runtimeFormat", System.Runtime.InteropServices.RuntimeInformation.OSDescription);
+        GpuLabel.Text = Loc.T("aboutWindow.rendererFormat", gpuName);
     }
 
     private async void OnCheckUpdates(object? sender, RoutedEventArgs e)
     {
         UpdateBtn.IsEnabled = false;
-        UpdateStatus.Text = "Checking…";
+        UpdateStatus.Text = Loc.T("aboutWindow.checking");
         try
         {
             var info = await _updates.CheckForUpdateAsync();
             if (info is null)
             {
-                UpdateStatus.Text = "You're on the latest version.";
+                UpdateStatus.Text = Loc.T("aboutWindow.latest");
             }
             else
             {
-                UpdateStatus.Text = $"Update available: {info.TagName}.";
+                UpdateStatus.Text = Loc.T("aboutWindow.updateAvailableFormat", info.TagName);
                 await new UpdateWindow(info, _updates).ShowDialog(this);
             }
         }
         catch
         {
-            UpdateStatus.Text = "Couldn't check for updates (offline or repo unavailable).";
+            UpdateStatus.Text = Loc.T("aboutWindow.checkFailed");
         }
         finally
         {

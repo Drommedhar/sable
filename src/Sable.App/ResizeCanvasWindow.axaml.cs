@@ -3,6 +3,8 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -61,7 +63,7 @@ public partial class ResizeCanvasWindow : Window
     {
         if (DescText is null) return;
         int w = (int)(WBox.Value ?? 0), h = (int)(HBox.Value ?? 0);
-        DescText.Text = $"{_oldW} × {_oldH}  →  {w} × {h} px  (no resample)";
+        DescText.Text = Loc.T("resizeCanvasWindow.descFormat", _oldW, _oldH, w, h);
     }
 
     private void OnResize(object? sender, RoutedEventArgs e)

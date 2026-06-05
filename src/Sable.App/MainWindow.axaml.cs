@@ -5,6 +5,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using Sable.App.Localization;
 using Sable.Engine;
 using Sable.Engine.Clipboard;
 using Sable.Engine.IO;
@@ -38,7 +39,7 @@ public partial class MainWindow : Window
     private bool _dropInto;        // dropping ONTO the target row (nest / into-group / auto-group)
     private LayerViewModel? _pendingCollapse;   // row to collapse the selection to on release-without-drag
 
-    private static FilePickerFileType SableType => new("Sable document") { Patterns = new[] { "*.sable" } };
+    private static FilePickerFileType SableType => new(Loc.T("mainWindow.sableDocumentType")) { Patterns = new[] { "*.sable" } };
 
     private readonly string[] _launchArgs;
 
@@ -243,7 +244,7 @@ public partial class MainWindow : Window
         RecentMenu.Items.Clear();
         if (_settings.RecentFiles.Count == 0)
         {
-            RecentMenu.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false });
+            RecentMenu.Items.Add(new MenuItem { Header = Loc.T("mainWindow.recentNone"), IsEnabled = false });
             return;
         }
         foreach (var path in _settings.RecentFiles)
@@ -285,7 +286,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(a) && !a.StartsWith('-')) OpenPath(a);
     }
 
-    private const string GpuName = "Default GPU (wgpu)";
+    private static string GpuName => Loc.T("mainWindow.gpuName");
 
     private async void OnPreferences(object? sender, RoutedEventArgs e)
     {
@@ -358,7 +359,7 @@ public partial class MainWindow : Window
         var r = Ai.CheckReadiness(task);
         if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
         // model + GPU ready but no backend wired yet in 8.0
-        await ConfirmWindow.Ask(this, title, $"{title}: model ready — inference lands in the next slice.");
+        await ConfirmWindow.Ask(this, title, Loc.T("ai.modelReady", title));
     }
 
     /// <summary>Show the AI menu only when enabled, and each feature only when its model is installed
@@ -385,15 +386,15 @@ public partial class MainWindow : Window
 
     private async void OnAiRemoveBackground(object? sender, RoutedEventArgs e)
     {
-        const string title = "Remove Background";
+        string title = Loc.T("mainWindow.removeBackground");
         if (Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
-        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
 
         var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Matte);
         if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
 
         using var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, "Removing background…", cts);
+        var busy = BusyWindow.Begin(this, Loc.T("ai.removingBackground"), cts);
         System.Exception? error = null;
         try
         {
@@ -404,19 +405,19 @@ public partial class MainWindow : Window
         catch (System.OperationCanceledException) { /* user cancelled */ }
         catch (System.Exception ex) { error = ex; }
         finally { busy.Done(); }
-        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+        if (error is not null) await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message));
     }
     private async void OnAiSelectSubject(object? sender, RoutedEventArgs e)
     {
-        const string title = "Select Subject";
+        string title = Loc.T("mainWindow.selectSubject");
         if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
-        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
 
         var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment);
         if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
 
         using var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, "Selecting subject…", cts);
+        var busy = BusyWindow.Begin(this, Loc.T("ai.selectingSubject"), cts);
         System.Exception? error = null;
         try
         {
@@ -426,7 +427,7 @@ public partial class MainWindow : Window
         catch (System.OperationCanceledException) { /* user cancelled */ }
         catch (System.Exception ex) { error = ex; }
         finally { busy.Done(); }
-        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+        if (error is not null) await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message));
     }
     // AI menu entry just activates the tool; OnToolChanged runs the precompute.
     private void OnAiSmartSelect(object? sender, RoutedEventArgs e) => Canvas.ActiveTool = Sable.Tools.ToolKind.SmartSelect;
@@ -446,10 +447,10 @@ public partial class MainWindow : Window
     /// <summary>Precompute the active layer's objects (SAM2 AMG, 32×32) for hover-to-select.</summary>
     private async System.Threading.Tasks.Task StartSmartSelect()
     {
-        const string title = "Smart Select";
+        string title = Loc.T("ai.smartSelectTitle");
         if (_smartBusy) return;   // one SAM2 run at a time — a second concurrent DML Run can hard-crash (AV)
         if (Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
-        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
         // a blank/transparent layer (e.g. a just-added layer) has nothing to segment — and feeding an empty
         // image to the SAM2 DML decoder hard-crashes the process (ScatterND "parameter incorrect"). Bail.
         if (IsLayerEmpty(px)) { Canvas.SetSmartObjects(null); _smartLayer = px; return; }
@@ -461,11 +462,11 @@ public partial class MainWindow : Window
             // show the dialog FIRST: the first AI op builds the ONNX backend (loads the ORT native, seconds),
             // which would otherwise freeze the UI thread before any feedback and look like a crash. Build it
             // + check readiness off the UI thread while the busy dialog is already up.
-            var busy = BusyWindow.Begin(this, "Preparing AI…", cts);
+            var busy = BusyWindow.Begin(this, Loc.T("ai.preparingAi"), cts);
             Sable.Ai.AiReadiness r;
             try { r = await System.Threading.Tasks.Task.Run(() => Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Segment), cts.Token); }
             catch (System.OperationCanceledException) { busy.Done(); return; }
-            catch (System.Exception ex) { busy.Done(); await ConfirmWindow.Ask(this, title, $"Failed: {ex.Message}"); return; }
+            catch (System.Exception ex) { busy.Done(); await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", ex.Message)); return; }
             if (!r.CanRun) { busy.Done(); await ConfirmWindow.Ask(this, title, r.Message); return; }
 
             // SAM2 density is configurable (Settings ▸ Machine Learning); Auto scales by detected VRAM so a
@@ -491,7 +492,7 @@ public partial class MainWindow : Window
                 docSpace = true;
             }
 
-            busy.SetMessage(forceCpu ? "Analysing objects (CPU)…" : "Analysing objects…");
+            busy.SetMessage(forceCpu ? Loc.T("ai.analysingObjectsCpu") : Loc.T("ai.analysingObjects"));
             System.Collections.Generic.IReadOnlyList<Sable.Core.Ai.ObjectMask>? objs = null;
             System.Exception? error = null;
             bool fellBack = false;
@@ -503,36 +504,35 @@ public partial class MainWindow : Window
             catch (System.OperationCanceledException) { busy.Done(); return; }
             catch (System.Exception ex) { error = ex; }
             finally { busy.Done(); }
-            if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+            if (error is not null) { await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message)); return; }
 
             if (fellBack)   // GPU couldn't run SAM2 (TDR) → remember to use CPU next time, tell the user once
             {
                 _settings.SmartSelectForceCpu = true;
                 Sable.Core.Settings.SettingsService.Save(_settings);
-                await ConfirmWindow.Ask(this, title,
-                    "Your GPU couldn't run Smart Select, so it ran on the CPU (slower). Future runs will use the CPU automatically.");
+                await ConfirmWindow.Ask(this, title, Loc.T("ai.cpuFallback"));
             }
 
             if (docSpace) Canvas.SetSmartObjects(objs);   // transform baked into doc space → identity overlay
             else Canvas.SetSmartObjects(objs, px.OffsetX, px.OffsetY, px.Width, px.Height);   // raw buffer → offset rect
             _smartLayer = px;
             if (objs is not null) _smartCache[px] = (objs, ContentKey(px), docSpace);   // cache for instant reload while unchanged
-            if (objs is { Count: 0 }) await ConfirmWindow.Ask(this, title, "No objects found in this layer.");
+            if (objs is { Count: 0 }) await ConfirmWindow.Ask(this, title, Loc.T("ai.noObjectsFound"));
         }
         finally { _smartBusy = false; }
     }
 
     private async void OnAiUpscale(object? sender, RoutedEventArgs e)
     {
-        const string title = "Upscale";
+        string title = Loc.T("ai.upscaleTitle");
         if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
-        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
 
         var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Upscale);
         if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
 
         using var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, "Upscaling…", cts);
+        var busy = BusyWindow.Begin(this, Loc.T("ai.upscaling"), cts);
         System.Exception? error = null;
         try
         {
@@ -542,30 +542,30 @@ public partial class MainWindow : Window
         catch (System.OperationCanceledException) { /* user cancelled */ }
         catch (System.Exception ex) { error = ex; }
         finally { busy.Done(); }
-        if (error is not null) await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}");
+        if (error is not null) await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message));
     }
     private async void OnAiRemoveObject(object? sender, RoutedEventArgs e)
     {
-        const string title = "Remove Object";
+        string title = Loc.T("mainWindow.removeObject");
         if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
-        { await ConfirmWindow.Ask(this, title, "Select a pixel layer first."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
         if (doc.SelectionMask is not { } selMask)
-        { await ConfirmWindow.Ask(this, title, "Select the object to remove first (e.g. Smart Select), then run this."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectObjectFirst")); return; }
         if (px.Width != doc.Width || px.Height != doc.Height)
-        { await ConfirmWindow.Ask(this, title, "Object removal currently works on a full-canvas layer."); return; }
+        { await ConfirmWindow.Ask(this, title, Loc.T("ai.fullCanvasOnly")); return; }
 
         var r = Ai.CheckReadiness(Sable.Core.Ai.AiTaskKind.Inpaint);
         if (!r.CanRun) { await ConfirmWindow.Ask(this, title, r.Message); return; }
 
         var mask = new Sable.Core.Ai.AiMask(selMask, doc.Width, doc.Height);
         using var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, "Removing object…", cts);
+        var busy = BusyWindow.Begin(this, Loc.T("ai.removingObject"), cts);
         byte[]? result = null; System.Exception? error = null;
         try { result = await Ai.RemoveObjectAsync(px, mask, cts.Token); }
         catch (System.OperationCanceledException) { busy.Done(); return; }
         catch (System.Exception ex) { error = ex; }
         finally { busy.Done(); }
-        if (error is not null) { await ConfirmWindow.Ask(this, title, $"Failed: {error.Message}"); return; }
+        if (error is not null) { await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message)); return; }
 
         var before = Sable.Tools.RasterState.Capture(px);
         px.SetBuffer(px.Width, px.Height, result!);
@@ -632,8 +632,8 @@ public partial class MainWindow : Window
             var tail = _comfy.LastOutputTail;
             var lastLines = string.IsNullOrWhiteSpace(tail) ? "" :
                 "\n" + string.Join("\n", tail.Split('\n').TakeLast(8));
-            return (false, Sable.App.Localization.Loc.T("generative.sidecarFailedStart")
-                + lastLines + "\nLog: " + Sable.Ai.Comfy.ComfyBackend.LogPath);
+            return (false, Loc.T("generative.sidecarFailedStart")
+                + lastLines + Loc.T("generative.logSuffix", Sable.Ai.Comfy.ComfyBackend.LogPath));
         }
         Ai.Generative = _comfy;
         return (true, Sable.App.Localization.Loc.T("generative.usingEnv", "ComfyUI"));
@@ -743,10 +743,10 @@ public partial class MainWindow : Window
             var img = await Ai.GenerateImageAsync(spec, cts.Token);
 
             var doc = new Sable.Engine.Document(img.Width, img.Height);
-            var layer = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, "Generated");
+            var layer = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, Loc.T("mainWindow.layerGenerated"));
             layer.SetBuffer(img.Width, img.Height, img.Rgba);
             doc.Layers.Add(layer);
-            OpenInNewTab(doc, null, "Generated");
+            OpenInNewTab(doc, null, Loc.T("mainWindow.layerGenerated"));
         }
         catch (System.OperationCanceledException) { /* cancelled */ }
         catch (System.Exception ex) { error = ex; }
@@ -801,7 +801,7 @@ public partial class MainWindow : Window
         busy.Done();
         if (!r.Ok || _comfy?.BaseUri is not { } uri) { await ConfirmWindow.Ask(this, "ComfyUI", r.Message); return; }
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.ToString()) { UseShellExecute = true }); }
-        catch (System.Exception ex) { await ConfirmWindow.Ask(this, "ComfyUI", $"Open {uri} in your browser. ({ex.Message})"); }
+        catch (System.Exception ex) { await ConfirmWindow.Ask(this, "ComfyUI", Loc.T("mainWindow.openInBrowser", uri, ex.Message)); }
     }
 
     /// <summary>Save the registry's external (non-native) sources to settings (§2.1).</summary>
@@ -907,8 +907,8 @@ public partial class MainWindow : Window
     {
         var pending = RecoveryService.GetPending();
         if (pending.Count == 0) return;
-        bool restore = await ConfirmWindow.Ask(this, "Recover documents",
-            $"Sable didn't close cleanly last time. Restore {pending.Count} unsaved document(s)?");
+        bool restore = await ConfirmWindow.Ask(this, Loc.T("mainWindow.recoverTitle"),
+            Loc.T("mainWindow.recoverBody", pending.Count));
         if (restore)
             foreach (var p in pending)
             {
@@ -1005,12 +1005,12 @@ public partial class MainWindow : Window
     private void UpdateZoomLabel()
     {
         if (ZoomBox is null) return;
-        ZoomBox.Text = $"{Canvas.EffectiveScale * 100:0}%";
+        ZoomBox.Text = Loc.T("mainWindow.zoomPercent", $"{Canvas.EffectiveScale * 100:0}");
     }
 
     private void UpdateCursorLabel(double docX, double docY)
     {
-        if (CursorLabel is not null) CursorLabel.Text = $"{(int)System.Math.Floor(docX)}, {(int)System.Math.Floor(docY)} px";
+        if (CursorLabel is not null) CursorLabel.Text = Loc.T("mainWindow.cursorPx", (int)System.Math.Floor(docX), (int)System.Math.Floor(docY));
 
         // Info: colour under the cursor (active layer pixel) + selection size
         if (InfoLabel is not null)
@@ -1031,17 +1031,17 @@ public partial class MainWindow : Window
             else { InfoLabel.Text = ""; InfoSwatch.Background = Avalonia.Media.Brushes.Transparent; }
         }
         if (SelSizeLabel is not null)
-            SelSizeLabel.Text = Canvas.Document?.Selection is { } s ? $"Sel {s.W} x {s.H}" : "";
+            SelSizeLabel.Text = Canvas.Document?.Selection is { } s ? Loc.T("mainWindow.selSize", s.W, s.H) : "";
     }
 
     private void UpdateDocInfo()
     {
         if (DocInfoLabel is null) return;
-        if (_activeTab?.Doc is { } d) DocInfoLabel.Text = $"{d.Width} x {d.Height} px ({d.Dpi:0} ppi)";
-        else DocInfoLabel.Text = "—";
+        if (_activeTab?.Doc is { } d) DocInfoLabel.Text = Loc.T("mainWindow.docInfo", d.Width, d.Height, $"{d.Dpi:0}");
+        else DocInfoLabel.Text = Loc.T("mainWindow.colorSpaceNone");
         // colour mode + working depth of the active document (RGB only for now; 8/16/32-bit via Image ▸ Mode)
         if (ColorSpaceLabel is not null)
-            ColorSpaceLabel.Text = _activeTab?.Doc is { } cd ? $"RGB · {(int)cd.Depth}-bit" : "—";
+            ColorSpaceLabel.Text = _activeTab?.Doc is { } cd ? Loc.T("mainWindow.colorSpace", (int)cd.Depth) : Loc.T("mainWindow.colorSpaceNone");
         SyncDepthMenu();
     }
 
@@ -1078,14 +1078,14 @@ public partial class MainWindow : Window
             var info = await service.CheckForUpdateAsync();
             if (info is null)
             {
-                if (manual) await ConfirmWindow.Ask(this, "Up to date", $"Sable {Sable.Core.VersionInfo.Version} is the latest version.");
+                if (manual) await ConfirmWindow.Ask(this, Loc.T("mainWindow.upToDate"), Loc.T("mainWindow.upToDateBody", Sable.Core.VersionInfo.Version));
                 return;
             }
             await new UpdateWindow(info, service).ShowDialog(this);
         }
         catch
         {
-            if (manual) await ConfirmWindow.Ask(this, "Update check failed", "Couldn't reach the update server.");
+            if (manual) await ConfirmWindow.Ask(this, Loc.T("mainWindow.updateCheckFailed"), Loc.T("mainWindow.updateCheckFailedBody"));
         }
     }
 
@@ -1386,14 +1386,14 @@ public partial class MainWindow : Window
     private void OnBrushSizeChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.Brush.Radius = (float)(e.NewValue / 2.0);   // slider = diameter
-        if (BrushSizeLabel is not null) BrushSizeLabel.Text = $"{e.NewValue:0} px";
+        if (BrushSizeLabel is not null) BrushSizeLabel.Text = Loc.T("mainWindow.pxValue", $"{e.NewValue:0}");
     }
 
     private void OnStrengthChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.Brush.Strength = (float)(e.NewValue / 100.0);
         Canvas.LiquifyStrength = (float)(e.NewValue / 100.0);
-        if (StrengthLabel is not null) StrengthLabel.Text = $"{e.NewValue:0}%";
+        if (StrengthLabel is not null) StrengthLabel.Text = Loc.T("mainWindow.percentValue", $"{e.NewValue:0}");
     }
 
     private void OnLiquifyModeChanged(object? sender, SelectionChangedEventArgs e)
@@ -1405,13 +1405,13 @@ public partial class MainWindow : Window
     private void OnBrushHardnessChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.Brush.Hardness = (float)(e.NewValue / 100.0);
-        if (BrushHardnessLabel is not null) BrushHardnessLabel.Text = $"{e.NewValue:0}%";
+        if (BrushHardnessLabel is not null) BrushHardnessLabel.Text = Loc.T("mainWindow.percentValue", $"{e.NewValue:0}");
     }
 
     private void OnBrushFlowChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.Brush.Flow = (float)(e.NewValue / 100.0);
-        if (BrushFlowLabel is not null) BrushFlowLabel.Text = $"{e.NewValue:0}%";
+        if (BrushFlowLabel is not null) BrushFlowLabel.Text = Loc.T("mainWindow.percentValue", $"{e.NewValue:0}");
     }
 
     /// <summary>Reflect brush size/hardness back into the options-bar sliders (after HUD adjust).</summary>
@@ -1435,7 +1435,7 @@ public partial class MainWindow : Window
     private void OnFeatherChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         Canvas.SetSelectionFeather((float)e.NewValue);   // also re-feathers the current selection live
-        if (FeatherLabel is not null) FeatherLabel.Text = $"{e.NewValue:0} px";
+        if (FeatherLabel is not null) FeatherLabel.Text = Loc.T("mainWindow.pxValue", $"{e.NewValue:0}");
     }
 
     // --- shape tool options (draw-time defaults baked into each new ShapeLayer) ---
@@ -1451,7 +1451,7 @@ public partial class MainWindow : Window
         s.StrokeOn = ShapeStrokeChk.IsChecked == true;
         s.StrokeWidth = (float)ShapeStrokeWidth.Value;
         s.DashOn = ShapeDashChk.IsChecked == true;
-        if (ShapeStrokeWidthLabel is not null) ShapeStrokeWidthLabel.Text = $"{ShapeStrokeWidth.Value:0} px";
+        if (ShapeStrokeWidthLabel is not null) ShapeStrokeWidthLabel.Text = Loc.T("mainWindow.pxValue", $"{ShapeStrokeWidth.Value:0}");
         if (int.TryParse(ShapeSidesBox.Text, out var sides)) s.Sides = Math.Clamp(sides, 3, 60);
         if (float.TryParse(ShapeInnerBox.Text, out var inner)) s.InnerRatio = Math.Clamp(inner / 100f, 0.05f, 0.95f);
         if (float.TryParse(ShapeCornerBox.Text, out var corner)) s.CornerRadius = Math.Max(0, corner);
@@ -1785,45 +1785,45 @@ public partial class MainWindow : Window
 
         var defs = new (string letter, ToolDef[] tools)[]
         {
-            ("V", new[] { new ToolDef(move, "Move", Sable.Tools.ToolKind.Move) }),   // unified Move + Transform
-            ("M", new[] { new ToolDef(rect, "Rectangle Marquee", Sable.Tools.ToolKind.Marquee),
-                          new ToolDef(ellip, "Elliptical Marquee", Sable.Tools.ToolKind.EllipseMarquee) }),
-            ("L", new[] { new ToolDef(lasso, "Lasso", Sable.Tools.ToolKind.Lasso),
-                          new ToolDef(lasso, "Polygonal Lasso", Sable.Tools.ToolKind.PolyLasso) }),
-            ("W", new[] { new ToolDef(wand, "Magic Wand", Sable.Tools.ToolKind.MagicWand),
-                          new ToolDef(colRng, "Colour Range", Sable.Tools.ToolKind.ColorRange),
-                          new ToolDef(smartS, "Smart Select (AI)", Sable.Tools.ToolKind.SmartSelect) }),
-            ("B", new[] { new ToolDef(brush, "Brush", Sable.Tools.ToolKind.Brush),
-                          new ToolDef(pencil, "Pencil", Sable.Tools.ToolKind.Pencil),
-                          new ToolDef(eraser, "Eraser", Sable.Tools.ToolKind.Eraser) }),
-            ("G", new[] { new ToolDef(fill, "Fill", Sable.Tools.ToolKind.Fill),
-                          new ToolDef(grad, "Gradient", Sable.Tools.ToolKind.Gradient) }),
-            ("C", new[] { new ToolDef(crop, "Crop", Sable.Tools.ToolKind.Crop) }),
-            ("U", new[] { new ToolDef(shRect, "Rectangle", Sable.Tools.ToolKind.ShapeRect),
-                          new ToolDef(shRound, "Rounded Rectangle", Sable.Tools.ToolKind.ShapeRoundedRect),
-                          new ToolDef(shEll, "Ellipse", Sable.Tools.ToolKind.ShapeEllipse),
-                          new ToolDef(shPoly, "Polygon", Sable.Tools.ToolKind.ShapePolygon),
-                          new ToolDef(shStar, "Star", Sable.Tools.ToolKind.ShapeStar),
-                          new ToolDef(shLine, "Line", Sable.Tools.ToolKind.ShapeLine),
-                          new ToolDef(shArrow, "Arrow", Sable.Tools.ToolKind.ShapeArrow) }),
-            ("S", new[] { new ToolDef(clone, "Clone Stamp", Sable.Tools.ToolKind.CloneStamp),
-                          new ToolDef(heal, "Healing Brush", Sable.Tools.ToolKind.Heal),
-                          new ToolDef(spot, "Spot Heal", Sable.Tools.ToolKind.SpotHeal),
-                          new ToolDef(patch, "Patch", Sable.Tools.ToolKind.Patch) }),
-            ("O", new[] { new ToolDef(dodge, "Dodge", Sable.Tools.ToolKind.Dodge),
-                          new ToolDef(burn, "Burn", Sable.Tools.ToolKind.Burn),
-                          new ToolDef(sponge, "Sponge", Sable.Tools.ToolKind.Sponge),
-                          new ToolDef(blurB, "Blur", Sable.Tools.ToolKind.BlurBrush),
-                          new ToolDef(sharpB, "Sharpen", Sable.Tools.ToolKind.SharpenBrush),
-                          new ToolDef(smudge, "Smudge", Sable.Tools.ToolKind.Smudge) }),
-            ("Y", new[] { new ToolDef(liquify, "Liquify", Sable.Tools.ToolKind.Liquify),
-                          new ToolDef(mesh, "Mesh Warp", Sable.Tools.ToolKind.MeshWarp) }),
-            ("T", new[] { new ToolDef(type, "Text", Sable.Tools.ToolKind.Type) }),
-            ("P", new[] { new ToolDef(pen, "Pen", Sable.Tools.ToolKind.Pen),
-                          new ToolDef(node, "Node", Sable.Tools.ToolKind.Node) }),
-            ("I", new[] { new ToolDef(pipette, "Eyedropper", Sable.Tools.ToolKind.Eyedropper) }),
-            ("H", new[] { new ToolDef(hand, "Hand", Sable.Tools.ToolKind.Hand) }),
-            ("Z", new[] { new ToolDef(zoom, "Zoom", Sable.Tools.ToolKind.Zoom) }),
+            ("V", new[] { new ToolDef(move, LocToolName(Sable.Tools.ToolKind.Move), Sable.Tools.ToolKind.Move) }),   // unified Move + Transform
+            ("M", new[] { new ToolDef(rect, LocToolName(Sable.Tools.ToolKind.Marquee), Sable.Tools.ToolKind.Marquee),
+                          new ToolDef(ellip, LocToolName(Sable.Tools.ToolKind.EllipseMarquee), Sable.Tools.ToolKind.EllipseMarquee) }),
+            ("L", new[] { new ToolDef(lasso, LocToolName(Sable.Tools.ToolKind.Lasso), Sable.Tools.ToolKind.Lasso),
+                          new ToolDef(lasso, LocToolName(Sable.Tools.ToolKind.PolyLasso), Sable.Tools.ToolKind.PolyLasso) }),
+            ("W", new[] { new ToolDef(wand, LocToolName(Sable.Tools.ToolKind.MagicWand), Sable.Tools.ToolKind.MagicWand),
+                          new ToolDef(colRng, LocToolName(Sable.Tools.ToolKind.ColorRange), Sable.Tools.ToolKind.ColorRange),
+                          new ToolDef(smartS, LocToolName(Sable.Tools.ToolKind.SmartSelect), Sable.Tools.ToolKind.SmartSelect) }),
+            ("B", new[] { new ToolDef(brush, LocToolName(Sable.Tools.ToolKind.Brush), Sable.Tools.ToolKind.Brush),
+                          new ToolDef(pencil, LocToolName(Sable.Tools.ToolKind.Pencil), Sable.Tools.ToolKind.Pencil),
+                          new ToolDef(eraser, LocToolName(Sable.Tools.ToolKind.Eraser), Sable.Tools.ToolKind.Eraser) }),
+            ("G", new[] { new ToolDef(fill, LocToolName(Sable.Tools.ToolKind.Fill), Sable.Tools.ToolKind.Fill),
+                          new ToolDef(grad, LocToolName(Sable.Tools.ToolKind.Gradient), Sable.Tools.ToolKind.Gradient) }),
+            ("C", new[] { new ToolDef(crop, LocToolName(Sable.Tools.ToolKind.Crop), Sable.Tools.ToolKind.Crop) }),
+            ("U", new[] { new ToolDef(shRect, LocToolName(Sable.Tools.ToolKind.ShapeRect), Sable.Tools.ToolKind.ShapeRect),
+                          new ToolDef(shRound, LocToolName(Sable.Tools.ToolKind.ShapeRoundedRect), Sable.Tools.ToolKind.ShapeRoundedRect),
+                          new ToolDef(shEll, LocToolName(Sable.Tools.ToolKind.ShapeEllipse), Sable.Tools.ToolKind.ShapeEllipse),
+                          new ToolDef(shPoly, LocToolName(Sable.Tools.ToolKind.ShapePolygon), Sable.Tools.ToolKind.ShapePolygon),
+                          new ToolDef(shStar, LocToolName(Sable.Tools.ToolKind.ShapeStar), Sable.Tools.ToolKind.ShapeStar),
+                          new ToolDef(shLine, LocToolName(Sable.Tools.ToolKind.ShapeLine), Sable.Tools.ToolKind.ShapeLine),
+                          new ToolDef(shArrow, LocToolName(Sable.Tools.ToolKind.ShapeArrow), Sable.Tools.ToolKind.ShapeArrow) }),
+            ("S", new[] { new ToolDef(clone, LocToolName(Sable.Tools.ToolKind.CloneStamp), Sable.Tools.ToolKind.CloneStamp),
+                          new ToolDef(heal, LocToolName(Sable.Tools.ToolKind.Heal), Sable.Tools.ToolKind.Heal),
+                          new ToolDef(spot, LocToolName(Sable.Tools.ToolKind.SpotHeal), Sable.Tools.ToolKind.SpotHeal),
+                          new ToolDef(patch, LocToolName(Sable.Tools.ToolKind.Patch), Sable.Tools.ToolKind.Patch) }),
+            ("O", new[] { new ToolDef(dodge, LocToolName(Sable.Tools.ToolKind.Dodge), Sable.Tools.ToolKind.Dodge),
+                          new ToolDef(burn, LocToolName(Sable.Tools.ToolKind.Burn), Sable.Tools.ToolKind.Burn),
+                          new ToolDef(sponge, LocToolName(Sable.Tools.ToolKind.Sponge), Sable.Tools.ToolKind.Sponge),
+                          new ToolDef(blurB, LocToolName(Sable.Tools.ToolKind.BlurBrush), Sable.Tools.ToolKind.BlurBrush),
+                          new ToolDef(sharpB, LocToolName(Sable.Tools.ToolKind.SharpenBrush), Sable.Tools.ToolKind.SharpenBrush),
+                          new ToolDef(smudge, LocToolName(Sable.Tools.ToolKind.Smudge), Sable.Tools.ToolKind.Smudge) }),
+            ("Y", new[] { new ToolDef(liquify, LocToolName(Sable.Tools.ToolKind.Liquify), Sable.Tools.ToolKind.Liquify),
+                          new ToolDef(mesh, LocToolName(Sable.Tools.ToolKind.MeshWarp), Sable.Tools.ToolKind.MeshWarp) }),
+            ("T", new[] { new ToolDef(type, LocToolName(Sable.Tools.ToolKind.Type), Sable.Tools.ToolKind.Type) }),
+            ("P", new[] { new ToolDef(pen, LocToolName(Sable.Tools.ToolKind.Pen), Sable.Tools.ToolKind.Pen),
+                          new ToolDef(node, LocToolName(Sable.Tools.ToolKind.Node), Sable.Tools.ToolKind.Node) }),
+            ("I", new[] { new ToolDef(pipette, LocToolName(Sable.Tools.ToolKind.Eyedropper), Sable.Tools.ToolKind.Eyedropper) }),
+            ("H", new[] { new ToolDef(hand, LocToolName(Sable.Tools.ToolKind.Hand), Sable.Tools.ToolKind.Hand) }),
+            ("Z", new[] { new ToolDef(zoom, LocToolName(Sable.Tools.ToolKind.Zoom), Sable.Tools.ToolKind.Zoom) }),
         };
 
         foreach (var (letter, tools) in defs)
@@ -1832,10 +1832,10 @@ public partial class MainWindow : Window
             var btn = new ToolButton { Classes = { "tool" }, Icon = tools[0].Icon, Tag = g, HasMore = tools.Length > 1 };
             btn.Click += (_, _) => Canvas.ActiveTool = g.Tools[g.Current].Kind;
 
-            var tip = $"{tools[0].Name} ({letter})";
+            var tip = Loc.T("tools.tipSingle", tools[0].Name, letter);
             if (tools.Length > 1)
             {
-                tip = string.Join(" / ", tools.Select(t => t.Name)) + $"  ({letter} cycles)";
+                tip = Loc.T("tools.tipCycle", string.Join(" / ", tools.Select(t => t.Name)), letter);
                 var sp = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
                 foreach (var t in tools)
                 {
@@ -1998,43 +1998,87 @@ public partial class MainWindow : Window
     }
 
     // Affinity-style status-bar hints: what drag/click/modifiers do for the active tool.
-    private static string ToolHintFor(ToolKind k) => k switch
+    private static string ToolHintFor(ToolKind k) => Loc.T(k switch
     {
-        ToolKind.Move => "Drag to move (Shift = axis). Handles scale (Shift = free, Ctrl = from centre). Top handle rotates (Shift = snap 15°). Alt-drag a corner = perspective.",
-        ToolKind.Transform => "Drag to move (Shift = axis). Handles scale (Shift = free, Ctrl = from centre). Top handle rotates (Shift = snap 15°). Alt-drag a corner = perspective.",
-        ToolKind.Marquee or ToolKind.EllipseMarquee => "Drag to select. Shift adds, Alt subtracts, Shift+Alt intersects. Drag the interior to move the selection.",
-        ToolKind.Lasso => "Drag to draw a freehand selection. Shift adds, Alt subtracts, Shift+Alt intersects.",
-        ToolKind.PolyLasso => "Click to place points; click the first point or press Enter to close, Esc to cancel. Shift adds, Alt subtracts.",
-        ToolKind.MagicWand => "Click a colour to select contiguous pixels. Shift adds, Alt subtracts, Shift+Alt intersects.",
-        ToolKind.ColorRange => "Click a colour to select all similar pixels. Shift adds, Alt subtracts.",
-        ToolKind.Brush or ToolKind.Pencil => "Drag to paint. Alt samples a colour. Ctrl+Alt-drag adjusts size/hardness. [ / ] resize.",
-        ToolKind.Eraser => "Drag to erase. Ctrl+Alt-drag adjusts size/hardness.",
-        ToolKind.Fill => "Click to flood-fill with the foreground colour. Alt samples a colour.",
-        ToolKind.Gradient => "Drag to draw a gradient (start → end). Shift constrains the angle.",
-        ToolKind.Crop => "Drag a rectangle, then Enter to commit or Esc to cancel.",
+        ToolKind.Move or ToolKind.Transform => "toolStatus.move",
+        ToolKind.Marquee or ToolKind.EllipseMarquee => "toolStatus.marquee",
+        ToolKind.Lasso => "toolStatus.lasso",
+        ToolKind.PolyLasso => "toolStatus.polyLasso",
+        ToolKind.MagicWand => "toolStatus.magicWand",
+        ToolKind.ColorRange => "toolStatus.colorRange",
+        ToolKind.Brush or ToolKind.Pencil => "toolStatus.brush",
+        ToolKind.Eraser => "toolStatus.eraser",
+        ToolKind.Fill => "toolStatus.fill",
+        ToolKind.Gradient => "toolStatus.gradient",
+        ToolKind.Crop => "toolStatus.crop",
         ToolKind.ShapeRect or ToolKind.ShapeRoundedRect or ToolKind.ShapeEllipse
-            or ToolKind.ShapePolygon or ToolKind.ShapeStar => "Drag to draw the shape. Set fill/stroke/sides in the options bar; edit it later in the Shape panel.",
-        ToolKind.ShapeLine or ToolKind.ShapeArrow => "Drag to draw. Shift constrains the angle.",
-        ToolKind.CloneStamp => "Alt-click to set the source, then drag to paint cloned pixels.",
-        ToolKind.Heal => "Alt-click to set the source, then drag to heal (source texture, matched to the destination tone).",
-        ToolKind.SpotHeal => "Drag over a blemish to heal it from a nearby region (no source click needed).",
-        ToolKind.Patch => "Make a selection, then drag it over a clean area to patch (tone-matched).",
-        ToolKind.Liquify => "Drag to push pixels. Choose Push/Bloat/Pucker/Twirl + strength in the options bar.",
-        ToolKind.MeshWarp => "Drag the grid points to deform the layer. Enter applies, Esc cancels.",
-        ToolKind.Dodge => "Drag to lighten. Adjust strength in the options bar.",
-        ToolKind.Burn => "Drag to darken. Adjust strength in the options bar.",
-        ToolKind.Sponge => "Drag to desaturate. Adjust strength in the options bar.",
-        ToolKind.BlurBrush => "Drag to blur. Adjust strength in the options bar.",
-        ToolKind.SharpenBrush => "Drag to sharpen. Adjust strength in the options bar.",
-        ToolKind.Smudge => "Drag to smudge colour along the stroke.",
-        ToolKind.Type => "Click to place a text layer, then type. Double-click existing text to edit.",
-        ToolKind.Pen => "Click to add corner nodes; drag to pull smooth handles. Click the first node or press Enter to finish, Esc to cancel.",
-        ToolKind.Node => "Drag a node or handle to reshape the selected path. Click the path to add a node. Alt-click a node to delete it.",
-        ToolKind.Eyedropper => "Click to sample a colour. Use the options bar to set the sample size.",
-        ToolKind.Hand => "Drag to pan. (Space-drag pans with any tool; wheel zooms.)",
-        ToolKind.Zoom => "Click to zoom in, Alt-click to zoom out. Wheel zooms to the cursor.",
-        _ => "",
-    };
+            or ToolKind.ShapePolygon or ToolKind.ShapeStar => "toolStatus.shape",
+        ToolKind.ShapeLine or ToolKind.ShapeArrow => "toolStatus.shapeLine",
+        ToolKind.CloneStamp => "toolStatus.cloneStamp",
+        ToolKind.Heal => "toolStatus.heal",
+        ToolKind.SpotHeal => "toolStatus.spotHeal",
+        ToolKind.Patch => "toolStatus.patch",
+        ToolKind.Liquify => "toolStatus.liquify",
+        ToolKind.MeshWarp => "toolStatus.meshWarp",
+        ToolKind.Dodge => "toolStatus.dodge",
+        ToolKind.Burn => "toolStatus.burn",
+        ToolKind.Sponge => "toolStatus.sponge",
+        ToolKind.BlurBrush => "toolStatus.blurBrush",
+        ToolKind.SharpenBrush => "toolStatus.sharpenBrush",
+        ToolKind.Smudge => "toolStatus.smudge",
+        ToolKind.Type => "toolStatus.type",
+        ToolKind.Pen => "toolStatus.pen",
+        ToolKind.Node => "toolStatus.node",
+        ToolKind.Eyedropper => "toolStatus.eyedropper",
+        ToolKind.Hand => "toolStatus.hand",
+        ToolKind.Zoom => "toolStatus.zoom",
+        _ => "toolStatus.move",
+    });
+
+    // Localized display name for a tool (toolbox tooltips + command palette).
+    internal static string LocToolName(Sable.Tools.ToolKind k) => Loc.T(k switch
+    {
+        ToolKind.Move or ToolKind.Transform => "tools.move",
+        ToolKind.Marquee => "tools.rectangleMarquee",
+        ToolKind.EllipseMarquee => "tools.ellipticalMarquee",
+        ToolKind.Lasso => "tools.lasso",
+        ToolKind.PolyLasso => "tools.polygonalLasso",
+        ToolKind.MagicWand => "tools.magicWand",
+        ToolKind.ColorRange => "tools.colourRange",
+        ToolKind.SmartSelect => "tools.smartSelect",
+        ToolKind.Brush => "tools.brush",
+        ToolKind.Pencil => "tools.pencil",
+        ToolKind.Eraser => "tools.eraser",
+        ToolKind.Fill => "tools.fill",
+        ToolKind.Gradient => "tools.gradient",
+        ToolKind.Crop => "tools.crop",
+        ToolKind.ShapeRect => "tools.rectangle",
+        ToolKind.ShapeRoundedRect => "tools.roundedRectangle",
+        ToolKind.ShapeEllipse => "tools.ellipse",
+        ToolKind.ShapePolygon => "tools.polygon",
+        ToolKind.ShapeStar => "tools.star",
+        ToolKind.ShapeLine => "tools.line",
+        ToolKind.ShapeArrow => "tools.arrow",
+        ToolKind.CloneStamp => "tools.cloneStamp",
+        ToolKind.Heal => "tools.healingBrush",
+        ToolKind.SpotHeal => "tools.spotHeal",
+        ToolKind.Patch => "tools.patch",
+        ToolKind.Dodge => "tools.dodge",
+        ToolKind.Burn => "tools.burn",
+        ToolKind.Sponge => "tools.sponge",
+        ToolKind.BlurBrush => "tools.blur",
+        ToolKind.SharpenBrush => "tools.sharpen",
+        ToolKind.Smudge => "tools.smudge",
+        ToolKind.Liquify => "tools.liquify",
+        ToolKind.MeshWarp => "tools.meshWarp",
+        ToolKind.Type => "tools.text",
+        ToolKind.Pen => "tools.pen",
+        ToolKind.Node => "tools.node",
+        ToolKind.Eyedropper => "tools.eyedropper",
+        ToolKind.Hand => "tools.hand",
+        ToolKind.Zoom => "tools.zoom",
+        _ => "tools.move",
+    });
 
     // show only the options-bar controls relevant to the active tool
     private void UpdateOptionsBar(Sable.Tools.ToolKind k)
@@ -2280,58 +2324,58 @@ public partial class MainWindow : Window
     {
         var actions = new List<(string, Action)>
         {
-            ("New Document", () => OnNewMenu(null, _e)),
-            ("Open…", () => OnOpenSable(null, _e)),
-            ("Open Image…", () => OnOpenImage(null, _e)),
-            ("Save", () => OnSaveSable(null, _e)),
-            ("Save As…", () => OnSaveAsSable(null, _e)),
-            ("Export…", () => OnExport(null, _e)),
-            ("Undo", () => Doc?.Undo.Undo()),
-            ("Redo", () => Doc?.Undo.Redo()),
-            ("Copy", () => OnCopy(null, _e)),
-            ("Copy Merged", () => OnCopyMerged(null, _e)),
-            ("Cut", () => OnCut(null, _e)),
-            ("Paste", () => OnPaste(null, _e)),
-            ("Select All", () => OnSelectAll(null, _e)),
-            ("Deselect", () => OnDeselect(null, _e)),
-            ("Invert Selection", () => OnInvertSelection(null, _e)),
-            ("New Layer", () => Doc?.NewLayerCommand.Execute(null)),
-            ("Duplicate Layer", () => OnDuplicate(null, _e)),
-            ("Merge Down", () => OnMergeDown(null, _e)),
-            ("Merge Visible", () => OnMergeVisible(null, _e)),
-            ("Flatten Image", () => OnFlatten(null, _e)),
-            ("Rasterise Layer", () => OnRasterise(null, _e)),
-            ("Flip Horizontal", () => OnFlipH(null, _e)),
-            ("Flip Vertical", () => OnFlipV(null, _e)),
-            ("Rotate 90° CW", () => OnRotate90CW(null, _e)),
-            ("Rotate 90° CCW", () => OnRotate90CCW(null, _e)),
-            ("Rotate 180°", () => OnRotate180(null, _e)),
-            ("Reset Transform", () => OnResetTransform(null, _e)),
-            ("Align Left", () => OnAlignLeft(null, _e)),
-            ("Align Centre", () => OnAlignCenterH(null, _e)),
-            ("Align Right", () => OnAlignRight(null, _e)),
-            ("Align Top", () => OnAlignTop(null, _e)),
-            ("Align Middle", () => OnAlignMiddle(null, _e)),
-            ("Align Bottom", () => OnAlignBottom(null, _e)),
-            ("Distribute Horizontally", () => OnDistributeH(null, _e)),
-            ("Distribute Vertically", () => OnDistributeV(null, _e)),
-            ("Text to Curves", () => OnTextToCurves(null, _e)),
-            ("Fit to Window", () => OnZoomFit(null, _e)),
-            ("Zoom 100%", () => OnZoomActual(null, _e)),
-            ("Toggle Grid", () => OnToggleGrid(null, _e)),
-            ("Toggle Rulers", () => OnToggleRulers(null, _e)),
-            ("Window: Adjustments", () => OnToggleAdjustments(null, _e)),
-            ("Window: Layer Effects", () => OnToggleEffects(null, _e)),
-            ("Window: History", () => OnToggleHistory(null, _e)),
+            (Loc.T("newDocumentWindow.newDocument"), () => OnNewMenu(null, _e)),
+            (Loc.T("menu.file.open"), () => OnOpenSable(null, _e)),
+            (Loc.T("menu.file.openImage"), () => OnOpenImage(null, _e)),
+            (Loc.T("menu.file.save"), () => OnSaveSable(null, _e)),
+            (Loc.T("menu.file.saveAs"), () => OnSaveAsSable(null, _e)),
+            (Loc.T("menu.file.export"), () => OnExport(null, _e)),
+            (Loc.T("menu.edit.undo"), () => Doc?.Undo.Undo()),
+            (Loc.T("menu.edit.redo"), () => Doc?.Undo.Redo()),
+            (Loc.T("menu.edit.copy"), () => OnCopy(null, _e)),
+            (Loc.T("menu.edit.copyMerged"), () => OnCopyMerged(null, _e)),
+            (Loc.T("menu.edit.cut"), () => OnCut(null, _e)),
+            (Loc.T("menu.edit.paste"), () => OnPaste(null, _e)),
+            (Loc.T("mainWindow.selectAll"), () => OnSelectAll(null, _e)),
+            (Loc.T("mainWindow.deselect"), () => OnDeselect(null, _e)),
+            (Loc.T("mainWindow.invertSelection"), () => OnInvertSelection(null, _e)),
+            (Loc.T("mainWindow.newLayer"), () => Doc?.NewLayerCommand.Execute(null)),
+            (Loc.T("menu.edit.duplicateLayer"), () => OnDuplicate(null, _e)),
+            (Loc.T("mainWindow.mergeDown"), () => OnMergeDown(null, _e)),
+            (Loc.T("mainWindow.mergeVisible"), () => OnMergeVisible(null, _e)),
+            (Loc.T("mainWindow.flattenImage"), () => OnFlatten(null, _e)),
+            (Loc.T("mainWindow.rasteriseLayer"), () => OnRasterise(null, _e)),
+            (Loc.T("mainWindow.flipHorizontal"), () => OnFlipH(null, _e)),
+            (Loc.T("mainWindow.flipVertical"), () => OnFlipV(null, _e)),
+            (Loc.T("mainWindow.rotate90CW"), () => OnRotate90CW(null, _e)),
+            (Loc.T("mainWindow.rotate90CCW"), () => OnRotate90CCW(null, _e)),
+            (Loc.T("mainWindow.rotate180"), () => OnRotate180(null, _e)),
+            (Loc.T("mainWindow.resetTransform"), () => OnResetTransform(null, _e)),
+            (Loc.T("mainWindow.alignLeft"), () => OnAlignLeft(null, _e)),
+            (Loc.T("mainWindow.alignCenter"), () => OnAlignCenterH(null, _e)),
+            (Loc.T("mainWindow.alignRight"), () => OnAlignRight(null, _e)),
+            (Loc.T("mainWindow.alignTop"), () => OnAlignTop(null, _e)),
+            (Loc.T("mainWindow.alignMiddle"), () => OnAlignMiddle(null, _e)),
+            (Loc.T("mainWindow.alignBottom"), () => OnAlignBottom(null, _e)),
+            (Loc.T("mainWindow.distributeHorizontally"), () => OnDistributeH(null, _e)),
+            (Loc.T("mainWindow.distributeVertically"), () => OnDistributeV(null, _e)),
+            (Loc.T("mainWindow.textToCurves"), () => OnTextToCurves(null, _e)),
+            (Loc.T("mainWindow.fitToWindow"), () => OnZoomFit(null, _e)),
+            (Loc.T("mainWindow.zoom100"), () => OnZoomActual(null, _e)),
+            (Loc.T("mainWindow.toggleGrid"), () => OnToggleGrid(null, _e)),
+            (Loc.T("mainWindow.toggleRulers"), () => OnToggleRulers(null, _e)),
+            (Loc.T("mainWindow.windowAdjustments"), () => OnToggleAdjustments(null, _e)),
+            (Loc.T("mainWindow.windowLayerEffects"), () => OnToggleEffects(null, _e)),
+            (Loc.T("mainWindow.windowHistory"), () => OnToggleHistory(null, _e)),
         };
-        foreach (var t in _toolKinds) { var k = t; actions.Add(($"Tool: {ToolDisplayName(k)}", () => Canvas.ActiveTool = k)); }
+        foreach (var t in _toolKinds) { var k = t; actions.Add((Loc.T("tools.cyclePrefix", ToolDisplayName(k)), () => Canvas.ActiveTool = k)); }
         var pal = new CommandPalette(actions);
         pal.Show(this);
     }
 
     private static readonly RoutedEventArgs _e = new();
     private static readonly Sable.Tools.ToolKind[] _toolKinds = (Sable.Tools.ToolKind[])Enum.GetValues(typeof(Sable.Tools.ToolKind));
-    private static string ToolDisplayName(Sable.Tools.ToolKind k) => k.ToString();
+    private static string ToolDisplayName(Sable.Tools.ToolKind k) => LocToolName(k);
 
     // ===== rebindable hotkeys (PLAN §17.1) =====
     // id → handler. Built once (lambdas read the live Doc/_activeTab, so a single map is enough).
@@ -2481,7 +2525,7 @@ public partial class MainWindow : Window
     {
         if (tab.IsDirty)
         {
-            var ok = await ConfirmWindow.Ask(this, $"Close \"{tab.Title}\"?", "You have unsaved changes that will be lost.");
+            var ok = await ConfirmWindow.Ask(this, Loc.T("mainWindow.closeTabTitle", tab.Title), Loc.T("mainWindow.closeTabBody"));
             if (!ok) return;
         }
         int i = _tabs.IndexOf(tab);
@@ -2538,11 +2582,11 @@ public partial class MainWindow : Window
         if (await dlg.ShowDialog<bool>(this))
         {
             var doc = new Document(dlg.DocWidth, dlg.DocHeight) { Dpi = dlg.Dpi, Depth = dlg.DocDepth };
-            var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? "Layer 1" : "Background");
+            var bg = new PixelLayer(dlg.DocWidth, dlg.DocHeight, dlg.Transparent ? Loc.T("mainWindow.layerLayer1") : Loc.T("mainWindow.layerBackground"));
             if (!dlg.Transparent) bg.Pixels.AsSpan().Fill(0xFF);   // opaque white
             bg.Dirty = true;
             doc.Layers.Add(bg);
-            OpenInNewTab(doc, null, $"Untitled {_untitledCounter++}");
+            OpenInNewTab(doc, null, Loc.T("mainWindow.layerUntitled", _untitledCounter++));
         }
     }
 
@@ -2552,11 +2596,11 @@ public partial class MainWindow : Window
     {
         if (await ReadOsImage() is not { } img) return;
         var doc = new Document(img.width, img.height);
-        var layer = new PixelLayer(img.width, img.height, "Clipboard");
+        var layer = new PixelLayer(img.width, img.height, Loc.T("mainWindow.layerClipboard"));
         img.rgba.CopyTo(layer.Pixels.AsSpan());
         layer.Dirty = true;
         doc.Layers.Add(layer);
-        OpenInNewTab(doc, null, $"Clipboard {_untitledCounter++}");
+        OpenInNewTab(doc, null, Loc.T("mainWindow.layerClipboardN", _untitledCounter++));
     }
 
     // ===== layer collapse ops (PLAN §16.3 / Phase 1 #6): GPU-render to a flat pixel layer =====
@@ -2580,7 +2624,7 @@ public partial class MainWindow : Window
         var below = parent[i - 1];
         var set = new System.Collections.Generic.List<Layer> { below, sel };
         if (Collapse(set, below.Name) is not { } merged) return;
-        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i - 1, merged, "Merge Down"));
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i - 1, merged, Loc.T("mainWindow.mergeDown")));
         vm.SelectModel(merged);
     }
 
@@ -2589,9 +2633,9 @@ public partial class MainWindow : Window
         if (Doc is not { } vm || Canvas.Document is not { } doc) return;
         var vis = doc.Layers.Where(l => l.Visible).ToList();
         if (vis.Count < 2) return;
-        if (Collapse(vis, "Merged") is not { } merged) return;
+        if (Collapse(vis, Loc.T("mainWindow.layerMerged")) is not { } merged) return;
         int idx = doc.Layers.IndexOf(vis[0]);
-        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, vis, idx, merged, "Merge Visible"));
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, vis, idx, merged, Loc.T("mainWindow.mergeVisible")));
         vm.SelectModel(merged);
     }
 
@@ -2599,7 +2643,7 @@ public partial class MainWindow : Window
     {
         if (Doc is not { } vm || Canvas.Document is not { } doc) return;
         var vis = doc.Layers.Where(l => l.Visible).ToList();
-        if (vis.Count == 0 || Collapse(vis, "Stamp") is not { } stamp) return;
+        if (vis.Count == 0 || Collapse(vis, Loc.T("mainWindow.layerStamp")) is not { } stamp) return;
         vm.Undo.Execute(new Sable.Engine.Commands.AddLayerCommand(doc, doc.Layers, stamp, doc.Layers.Count));
         vm.SelectModel(stamp);
     }
@@ -2608,8 +2652,8 @@ public partial class MainWindow : Window
     {
         if (Doc is not { } vm || Canvas.Document is not { } doc || doc.Layers.Count == 0) return;
         var all = doc.Layers.ToList();
-        if (Collapse(all, "Flattened") is not { } flat) return;
-        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, all, 0, flat, "Flatten Image"));
+        if (Collapse(all, Loc.T("mainWindow.layerFlattened")) is not { } flat) return;
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, doc.Layers, all, 0, flat, Loc.T("mainWindow.flattenImage")));
         vm.SelectModel(flat);
     }
 
@@ -2624,7 +2668,7 @@ public partial class MainWindow : Window
         int i = parent.IndexOf(txt);
         if (i < 0) return;
         vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent,
-            new System.Collections.Generic.List<Layer> { txt }, i, path, "Text to Curves"));
+            new System.Collections.Generic.List<Layer> { txt }, i, path, Loc.T("mainWindow.textToCurves")));
         vm.SelectModel(path);
     }
 
@@ -2759,7 +2803,7 @@ public partial class MainWindow : Window
         int i = parent.IndexOf(sel);
         var set = new System.Collections.Generic.List<Layer> { sel };
         if (Collapse(set, sel.Name) is not { } px) return;
-        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i, px, "Rasterise"));
+        vm.Undo.Execute(new Sable.Engine.Commands.ReplaceLayersCommand(doc, parent, set, i, px, Loc.T("mainWindow.rasterise")));
         vm.SelectModel(px);
     }
 
@@ -2775,7 +2819,7 @@ public partial class MainWindow : Window
         if (maskFull is null)
         {
             // region-sized layer, centred (or at the selection), keeps everything incl. off-canvas
-            var layer = new PixelLayer(w, h, "Pasted");
+            var layer = new PixelLayer(w, h, Loc.T("mainWindow.layerPasted"));
             px.CopyTo(layer.Pixels.AsSpan());
             layer.OffsetX = doc.Selection is { } s ? s.X : (doc.Width - w) / 2;
             layer.OffsetY = doc.Selection is { } s2 ? s2.Y : (doc.Height - h) / 2;
@@ -2784,7 +2828,7 @@ public partial class MainWindow : Window
         }
 
         // paste-into: doc-sized so the selection mask lines up
-        var full = new PixelLayer(doc.Width, doc.Height, "Pasted");
+        var full = new PixelLayer(doc.Width, doc.Height, Loc.T("mainWindow.layerPasted"));
         int ox = doc.Selection is { } sel ? sel.X : (doc.Width - w) / 2;
         int oy = doc.Selection is { } sel2 ? sel2.Y : (doc.Height - h) / 2;
         var dst = full.Pixels;
@@ -2896,11 +2940,11 @@ public partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open image",
+            Title = Loc.T("mainWindow.openImageTitle"),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("Images")
+                new FilePickerFileType(Loc.T("mainWindow.imagesFilter"))
                 {
                     Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp" }
                 }
@@ -2917,7 +2961,7 @@ public partial class MainWindow : Window
         }
         catch (System.Exception ex)
         {
-            await ConfirmWindow.Ask(this, "Open image", $"Couldn't open this image:\n{ex.Message}");
+            await ConfirmWindow.Ask(this, Loc.T("mainWindow.openImageTitle"), Loc.T("mainWindow.openImageError", ex.Message));
         }
     }
 
@@ -2925,7 +2969,7 @@ public partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open Sable document",
+            Title = Loc.T("mainWindow.openSableTitle"),
             AllowMultiple = false,
             FileTypeFilter = new[] { SableType }
         });
@@ -2940,7 +2984,7 @@ public partial class MainWindow : Window
         }
         catch (System.Exception ex)
         {
-            await ConfirmWindow.Ask(this, "Open Sable document", $"Couldn't open this .sable file:\n{ex.Message}");
+            await ConfirmWindow.Ask(this, Loc.T("mainWindow.openSableTitle"), Loc.T("mainWindow.openSableError", ex.Message));
         }
     }
 
@@ -2955,7 +2999,7 @@ public partial class MainWindow : Window
             }
             catch (System.Exception ex)
             {
-                await ConfirmWindow.Ask(this, "Save", $"Couldn't save the document:\n{ex.Message}");
+                await ConfirmWindow.Ask(this, Loc.T("mainWindow.saveErrorTitle"), Loc.T("mainWindow.saveError", ex.Message));
             }
             return;
         }
@@ -2969,8 +3013,8 @@ public partial class MainWindow : Window
         if (Canvas.Document is not { } doc) return;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Save Sable document",
-            SuggestedFileName = "untitled.sable",
+            Title = Loc.T("mainWindow.saveSableTitle"),
+            SuggestedFileName = Loc.T("mainWindow.untitledFile") + ".sable",
             DefaultExtension = "sable",
             FileTypeChoices = new[] { SableType }
         });
@@ -2983,7 +3027,7 @@ public partial class MainWindow : Window
         }
         catch (System.Exception ex)
         {
-            await ConfirmWindow.Ask(this, "Save", $"Couldn't save the document:\n{ex.Message}");
+            await ConfirmWindow.Ask(this, Loc.T("mainWindow.saveErrorTitle"), Loc.T("mainWindow.saveError", ex.Message));
             return;
         }
         _currentPath = path;
@@ -3005,10 +3049,10 @@ public partial class MainWindow : Window
         if (!await dlg.ShowDialog<bool>(this)) return;
 
         string ext = ImageCodec.Extension(dlg.Format);
-        string baseName = System.IO.Path.GetFileNameWithoutExtension(_activeTab?.Title ?? "untitled");
+        string baseName = System.IO.Path.GetFileNameWithoutExtension(_activeTab?.Title ?? Loc.T("mainWindow.untitledFile"));
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Export image",
+            Title = Loc.T("mainWindow.exportTitle"),
             SuggestedFileName = $"{baseName}.{ext}",
             DefaultExtension = ext,
             FileTypeChoices = new[] { new FilePickerFileType(dlg.Format.ToString()) { Patterns = new[] { "*." + ext } } }
@@ -3022,7 +3066,7 @@ public partial class MainWindow : Window
         }
         catch (System.Exception ex)
         {
-            await ConfirmWindow.Ask(this, "Export", $"Couldn't export the image:\n{ex.Message}");
+            await ConfirmWindow.Ask(this, Loc.T("mainWindow.exportErrorTitle"), Loc.T("mainWindow.exportError", ex.Message));
         }
     }
 }

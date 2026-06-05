@@ -8,6 +8,8 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>A document preset (size + unit + DPI) shown as a thumbnail in the New dialog.</summary>
@@ -22,7 +24,7 @@ public sealed class DocPreset
     public DocPreset(string name, double w, double h, string unit, double dpi)
     { Name = name; W = w; H = h; Unit = unit; Dpi = dpi; }
 
-    public string Dims => $"{Trim(W)} x {Trim(H)} {Unit}";
+    public string Dims => Loc.T("newDocumentWindow.dimsFormat", Trim(W), Trim(H), Unit);
     private static string Trim(double v) => v.ToString(v % 1 == 0 ? "0" : "0.##", CultureInfo.InvariantCulture);
 
     // thumbnail rectangle: longest side = 52px, preserves aspect
@@ -49,7 +51,7 @@ public partial class NewDocumentWindow : Window
 
     private static readonly (string Cat, DocPreset[] Presets)[] Catalog =
     {
-        ("Print", new[]
+        ("newDocumentWindow.catPrint", new[]
         {
             new DocPreset("A3", 297, 420, "mm", 300),
             new DocPreset("A4", 210, 297, "mm", 300),
@@ -58,7 +60,7 @@ public partial class NewDocumentWindow : Window
             new DocPreset("Legal", 8.5, 14, "in", 300),
             new DocPreset("Tabloid", 11, 17, "in", 300),
         }),
-        ("Screen", new[]
+        ("newDocumentWindow.catScreen", new[]
         {
             new DocPreset("HD 1080p", 1920, 1080, "px", 72),
             new DocPreset("QHD 1440p", 2560, 1440, "px", 72),
@@ -66,14 +68,14 @@ public partial class NewDocumentWindow : Window
             new DocPreset("HD 720p", 1280, 720, "px", 72),
             new DocPreset("Square", 1000, 1000, "px", 72),
         }),
-        ("Social", new[]
+        ("newDocumentWindow.catSocial", new[]
         {
             new DocPreset("Instagram Post", 1080, 1080, "px", 72),
             new DocPreset("Instagram Story", 1080, 1920, "px", 72),
             new DocPreset("Facebook Cover", 1200, 630, "px", 72),
             new DocPreset("Twitter Header", 1500, 500, "px", 72),
         }),
-        ("Photo", new[]
+        ("newDocumentWindow.catPhoto", new[]
         {
             new DocPreset("4 x 6", 6, 4, "in", 300),
             new DocPreset("5 x 7", 7, 5, "in", 300),
@@ -101,7 +103,7 @@ public partial class NewDocumentWindow : Window
         {
             Sections.Children.Add(new TextBlock
             {
-                Text = cat,
+                Text = Loc.T(cat),
                 FontSize = 12,
                 Margin = new Avalonia.Thickness(2, 6, 0, 2),
                 Foreground = this.FindResource("ChromeTextDim") as IBrush,
@@ -220,7 +222,7 @@ public partial class NewDocumentWindow : Window
         double dpi = ParseDpi();
         int w = ToPx(ParseD(WBox.Text), _unit, dpi);
         int h = ToPx(ParseD(HBox.Text), _unit, dpi);
-        PxLabel.Text = $"{w} x {h} px  @  {(int)dpi} DPI";
+        PxLabel.Text = Loc.T("newDocumentWindow.pxDpiFormat", w, h, (int)dpi);
         UpdateOrientationHL();
     }
 

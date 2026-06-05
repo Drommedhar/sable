@@ -17,6 +17,8 @@ using Sable.Ai.Models;
 using Sable.Core.Ai;
 using Sable.Core.Settings;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -83,7 +85,7 @@ public partial class SettingsWindow : Window
         BuildKeyRows();
         // About
         var ver = typeof(SettingsWindow).Assembly.GetName().Version;
-        VersionLabel.Text = $"Version {ver?.ToString(3) ?? "0.1.0"}  ·  net10.0  ·  Avalonia + wgpu";
+        VersionLabel.Text = Loc.T("settingsWindow.versionFormat", ver?.ToString(3) ?? "0.1.0");
 
         _aiInitializing = false;   // from here, toggling AI on triggers the licence cycle
     }
@@ -408,13 +410,12 @@ public partial class SettingsWindow : Window
         var art = Sable.Core.Ai.GpuRuntimeCatalog.ResolveFor(probe.ComputeArch);
         if (art is null || !art.HasUrl) return;   // unsupported arch / not yet published → skip
 
-        bool ok = await ConfirmWindow.Ask(this, "GPU runtime",
-            $"AI needs a GPU runtime for your {probe.AdapterName} (sm_{probe.ComputeArch}). " +
-            $"Download ~{art.SizeBytes / 1_000_000} MB? Licence: {art.License}.");
+        bool ok = await ConfirmWindow.Ask(this, Loc.T("settingsWindow.gpuRuntimeTitle"),
+            Loc.T("settingsWindow.gpuRuntimeBody", probe.AdapterName, probe.ComputeArch, art.SizeBytes / 1_000_000, art.License));
         if (!ok) { AiEnabledSwitch.IsChecked = false; return; }   // declined → can't run GPU-only AI
 
         var cts = new System.Threading.CancellationTokenSource();
-        var busy = BusyWindow.Begin(this, "Downloading GPU runtime…", cts);
+        var busy = BusyWindow.Begin(this, Loc.T("settingsWindow.gpuRuntimeDownloading"), cts);
         try
         {
             await new Sable.Ai.Runtime.OrtRuntimeProvisioner().ProvisionAsync(art, busy.Progress, cts.Token);
@@ -422,7 +423,7 @@ public partial class SettingsWindow : Window
         catch (System.Exception ex)
         {
             busy.Done();
-            await ConfirmWindow.Ask(this, "GPU runtime", $"Couldn't install the GPU runtime: {ex.Message}");
+            await ConfirmWindow.Ask(this, Loc.T("settingsWindow.gpuRuntimeTitle"), Loc.T("settingsWindow.gpuRuntimeFailed", ex.Message));
             return;
         }
         busy.Done();
@@ -453,7 +454,7 @@ public partial class SettingsWindow : Window
 
             var left = new StackPanel { Spacing = 1 };
             left.Children.Add(AiText(m.Name, "ChromeText", 13));
-            left.Children.Add(AiText($"Licence: {m.License}", "ChromeTextDim", 11, wrap: true));
+            left.Children.Add(AiText(Loc.T("settingsWindow.licenceLabel", m.License), "ChromeTextDim", 11, wrap: true));
 
             var top = new DockPanel();
             top.Children.Add(install);
@@ -470,7 +471,7 @@ public partial class SettingsWindow : Window
         foreach (var (id, btn) in _aiInstallBtns)
         {
             bool installed = _registry?.IsInstalled(id) == true;
-            btn.Content = installed ? "Installed" : "Install";
+            btn.Content = installed ? Loc.T("settingsWindow.installed") : Loc.T("settingsWindow.install");
             btn.IsEnabled = !installed && _downloader is not null;
         }
     }
@@ -533,13 +534,13 @@ public partial class SettingsWindow : Window
             var box = new TextBox
             {
                 Width = 150, IsReadOnly = true, Focusable = true,
-                Text = _workKeys[c.Id], Tag = c.Id, PlaceholderText = "unbound",
+                Text = _workKeys[c.Id], Tag = c.Id, PlaceholderText = Loc.T("settingsWindow.unbound"),
                 VerticalContentAlignment = VerticalAlignment.Center,
             };
             box.AddHandler(KeyDownEvent, OnGestureKeyDown, RoutingStrategies.Tunnel);
             _keyBoxes[c.Id] = box;
 
-            var reset = new Button { Content = "Reset", Classes = { "opt" }, Tag = c.Id, Padding = new Avalonia.Thickness(10, 0) };
+            var reset = new Button { Content = Loc.T("settingsWindow.reset"), Classes = { "opt" }, Tag = c.Id, Padding = new Avalonia.Thickness(10, 0) };
             reset.Click += OnResetGesture;
 
             var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -564,7 +565,7 @@ public partial class SettingsWindow : Window
         // command hotkeys need a modifier (or be a function key) so they don't shadow tool letters
         if (mods == KeyModifiers.None && !fkey)
         {
-            ShowWarn("Add Ctrl/Alt/Shift (tool letters stay fixed).");
+            ShowWarn(Loc.T("settingsWindow.modifierRequired"));
             return;
         }
         AssignGesture(id, Canonical(mods, e.Key));
@@ -585,7 +586,7 @@ public partial class SettingsWindow : Window
         {
             SetGesture(owner.Key, "");
             var label = KeyCommands.Catalog.First(c => c.Id == owner.Key).Label;
-            ShowWarn($"{gesture} unbound from “{label}”.");
+            ShowWarn(Loc.T("settingsWindow.unboundFrom", gesture, label));
         }
         else KeyWarn.IsVisible = false;
         SetGesture(id, gesture);

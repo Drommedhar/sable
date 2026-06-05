@@ -9,6 +9,8 @@ using Avalonia.Threading;
 using Sable.Ai.Download;
 using Sable.Core.Ai;
 
+using Sable.App.Localization;
+
 namespace Sable.App;
 
 /// <summary>
@@ -40,9 +42,9 @@ public partial class LicenseCycleWindow : Window
     {
         if (_i >= _models.Count) { await StartInstall(); return; }
         var m = _models[_i];
-        HeaderText.Text = $"Licence {_i + 1} of {_models.Count}  —  {m.Name}";
+        HeaderText.Text = Loc.T("licenseCycleWindow.licenceHeader", _i + 1, _models.Count, m.Name);
         AcceptBtn.IsEnabled = false;
-        LicText.Text = "Loading licence…";
+        LicText.Text = Loc.T("licenseCycleWindow.loadingLicence");
         LicScroll.Offset = default;
 
         LicText.Text = await FetchLicence(m);
@@ -84,23 +86,23 @@ public partial class LicenseCycleWindow : Window
 
         HintText.Text = "";
         LicText.Text = "";
-        HeaderText.Text = "Installing models…";
+        HeaderText.Text = Loc.T("licenseCycleWindow.installingModels");
         InstallBar.IsVisible = true;
 
         for (int k = 0; k < _accepted.Count; k++)
         {
             var m = _accepted[k];
             int idx = k;
-            StatusText.Text = $"Downloading {m.Name}  ({k + 1}/{_accepted.Count})…";
+            StatusText.Text = Loc.T("licenseCycleWindow.downloadingModel", m.Name, k + 1, _accepted.Count);
             var prog = new Progress<double>(p => Dispatcher.UIThread.Post(() => InstallBar.Value = (idx + p) / _accepted.Count));
             try { await _downloader.DownloadAsync(m, prog, CancellationToken.None); }
             catch (Exception ex)
             {
-                StatusText.Text = $"Failed: {m.Name} — {ex.Message}";
+                StatusText.Text = Loc.T("licenseCycleWindow.installFailed", m.Name, ex.Message);
                 await Task.Delay(1500);
             }
         }
-        StatusText.Text = "Done.";
+        StatusText.Text = Loc.T("licenseCycleWindow.done");
         await Task.Delay(400);
         Close(_accepted);
     }
@@ -109,6 +111,6 @@ public partial class LicenseCycleWindow : Window
     {
         if (string.IsNullOrEmpty(m.LicenseUrl)) return m.License;
         try { return await _http.GetStringAsync(m.LicenseUrl); }
-        catch (Exception ex) { return $"Could not fetch the licence ({ex.Message}).\n\nLicence: {m.License}\nSource: {m.LicenseUrl}\n\n(You must still accept to install.)"; }
+        catch (Exception ex) { return Loc.T("licenseCycleWindow.fetchError", ex.Message, m.License, m.LicenseUrl); }
     }
 }
