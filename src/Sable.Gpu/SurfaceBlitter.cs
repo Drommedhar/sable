@@ -166,7 +166,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[8] = ov.RectX; u[9] = ov.RectY; u[10] = ov.RectW; u[11] = ov.RectH; u[12] = ov.RectOn ? 1f : 0f;
         u[13] = ov.SelHandles ? 1f : 0f;
         u[14] = ov.GridOn ? 1f : 0f; u[15] = ov.GridSpacing;
-        u[80] = ov.GridSubdivisions > 1f ? ov.GridSubdivisions : 1f;   // grid minor lines per cell (u[81..83] pad)
+        u[80] = ov.GridSubdivisions > 1f ? ov.GridSubdivisions : 1f;   // grid minor lines per cell
+        u[81] = ov.ChannelView;                                        // channels panel: 0 normal, 1=R..4=A grayscale
+        u[82] = ov.ChannelView > 0.5f ? 7f : ov.ChannelMask;           // RGB visibility bits (composite only) — u[83] pad
         if (ov.Corners is { Length: 8 })
             for (int i = 0; i < 8; i++) u[16 + i] = ov.Corners[i];
         u[24] = ov.GizmoOn ? 1f : 0f;

@@ -129,6 +129,16 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
     /// <summary>Show a 1px pixel grid when zoomed in far enough.</summary>
     public bool ShowPixelGrid { get; set; } = true;
 
+    // Channels panel (view + isolate): _channelView 0 = normal composite, 1=R 2=G 3=B 4=A grayscale;
+    // _channelMask = RGB visibility bits (bit0=R,1=G,2=B), applied only when viewing the composite.
+    private float _channelView;
+    private int _channelMask = 7;
+    /// <summary>Set the channel display: view (0 composite, 1=R 2=G 3=B 4=A grayscale) + RGB visibility bitmask.</summary>
+    public void SetChannelDisplay(int view, int rgbMask)
+    {
+        _channelView = view; _channelMask = rgbMask & 7;
+    }
+
     // viewport: _zoom = 1 means fit-to-window; pan in surface pixels
     private double _zoom = 1.0;
     private double _panX, _panY;
@@ -636,6 +646,7 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         }
         ov.PasteR = _pasteR; ov.PasteG = _pasteG; ov.PasteB = _pasteB;
         ov.GridOn = ShowGrid; ov.GridSpacing = GridSpacing; ov.GridSubdivisions = GridSubdivisions; ov.PixelGrid = ShowPixelGrid;
+        ov.ChannelView = _channelView; ov.ChannelMask = _channelMask;   // Channels panel (view + isolate)
         if (_overlayColorsSet)
         {
             ov.HasOverlayColors = true;

@@ -388,7 +388,7 @@ public partial class ModelsWindow : Window
                 : Loc.T("modelsWindow.workflowDetail", System.IO.Path.GetFileName(p.WorkflowFile), ShortId(p.BaseModelId));
             info.Children.Add(Text(detail, "ChromeTextDim", 11, wrap: true));
             var rm = new Button { Content = Loc.T("modelsWindow.remove"), Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0), VerticalAlignment = VerticalAlignment.Center };
-            rm.Click += (_, _) => { _genSettings.GenerativePresets.Remove(p); PresetsChanged?.Invoke(); BuildGenPresets(); };
+            rm.Click += (_, _) => { Sable.Core.Ai.WorkflowStore.DeleteOwned(p.WorkflowFile); _genSettings.GenerativePresets.Remove(p); PresetsChanged?.Invoke(); BuildGenPresets(); };
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
             row.Children.Add(info); Grid.SetColumn(rm, 1); row.Children.Add(rm);
             var b = new Border { CornerRadius = new Avalonia.CornerRadius(4), Padding = new Avalonia.Thickness(10, 6) };
@@ -466,13 +466,17 @@ public partial class ModelsWindow : Window
             if (_genSettings is null) return;
             if (string.IsNullOrEmpty(wfPath)) { wfLabel.Text = Loc.T("modelsWindow.workflowRequired"); return; }
             var name = string.IsNullOrWhiteSpace(nameBox.Text) ? (baseCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? Loc.T("modelsWindow.presetFallbackName") : nameBox.Text!.Trim();
+            // Copy the chosen workflow into Sable's own storage so the preset stays usable even if the
+            // user later deletes or moves their original export. The preset references our private copy.
+            string? ownedWf = Sable.Core.Ai.WorkflowStore.CopyIn(wfPath!);
+            if (ownedWf is null) { wfLabel.Text = Loc.T("modelsWindow.workflowRequired"); return; }
             _genSettings.GenerativePresets.Add(new GenerativePreset
             {
                 Name = name,
                 BaseModelId = baseId ?? "",
                 EncoderIds = encChecks.Where(e => e.Cb.IsChecked == true).Select(e => e.Id).ToList(),
                 VaeId = (vaeCombo.SelectedItem as ComboBoxItem)?.Tag as string,
-                WorkflowFile = wfPath,
+                WorkflowFile = ownedWf,
                 IsTextToImage = t2iCheck.IsChecked == true,
             });
             PresetsChanged?.Invoke();

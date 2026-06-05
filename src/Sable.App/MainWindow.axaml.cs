@@ -165,6 +165,8 @@ public partial class MainWindow : Window
             Position = new PixelPoint((int)wx, (int)wy);
         }
         if (_settings.WinMaximized) WindowState = WindowState.Maximized;
+        // migrate legacy presets that still reference an external workflow file → copy into Sable's storage
+        if (Sable.Core.Ai.WorkflowStore.Migrate(_settings)) Sable.Core.Settings.SettingsService.Save(_settings);
         ApplyTheme(_settings.Theme);
         ApplyOverlayColors();
         ApplyGridAndSnap();
@@ -385,6 +387,16 @@ public partial class MainWindow : Window
         AiGenFillItem.IsVisible = genOn && _settings.GenerativePresets.Any(p => !p.IsTextToImage);
         AiGenImageItem.IsVisible = genOn && _settings.GenerativePresets.Any(p => p.IsTextToImage);
         AiGenSep.IsVisible = AiGenFillItem.IsVisible || AiGenImageItem.IsVisible;
+
+        // All AI ops act on the active document — disable them when nothing is open (only Models makes
+        // sense with no doc). Generate Image (text-to-image) creates its own canvas, so it stays enabled.
+        bool hasDoc = _activeTab is not null;
+        AiRemoveBgItem.IsEnabled = hasDoc;
+        AiSelectItem.IsEnabled = hasDoc;
+        AiSmartSelectItem.IsEnabled = hasDoc;
+        AiUpscaleItem.IsEnabled = hasDoc;
+        AiRemoveObjItem.IsEnabled = hasDoc;
+        AiGenFillItem.IsEnabled = hasDoc;
     }
 
     private async void OnAiRemoveBackground(object? sender, RoutedEventArgs e)
@@ -1234,6 +1246,12 @@ public partial class MainWindow : Window
         _dragModels = null;
         _pendingCollapse = null;
         if (_dragSource is null || Doc is not { } d) return;
+        // right-click selects the row (Photoshop/Affinity) so the context menu acts on it
+        if (e.GetCurrentPoint(LayerList).Properties.IsRightButtonPressed)
+        {
+            if (!d.SelectionModels.Contains(_dragSource.Model)) LayerList.SelectedItem = _dragSource;
+            return;
+        }
         if (!e.GetCurrentPoint(LayerList).Properties.IsLeftButtonPressed) return;
 
         // capture the drag set BEFORE the ListBox mutates the selection on this press: if the
@@ -1739,6 +1757,143 @@ public partial class MainWindow : Window
         else if (tab == "color") SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
     }
 
+    // --- Channels panel (view + isolate) --------------------------------------------------
+    // _channelView: 0 composite (normal), 1=R 2=G 3=B 4=A shown grayscale. _chanVis = RGB channel
+    // visibility in the composite. Clicking a row views that channel; the eyes mask the composite;
+    // right-click loads the channel as a pixel selection.
+    private int _channelView;
+    private readonly bool[] _chanVis = { true, true, true };   // R, G, B
+    private bool _channelsBuilt;
+    private readonly Border[] _chanRows = new Border[5];
+    private readonly Avalonia.Controls.Primitives.ToggleButton?[] _chanEyes = new Avalonia.Controls.Primitives.ToggleButton?[5];
+
+    private void OnSelectLayerTab(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+        => SetLayerTab((sender as Control)?.Tag as string ?? "layers");
+
+    private void SetLayerTab(string tab)
+    {
+        if (LayersBody is null) return;   // not initialized yet
+        bool channels = tab == "channels";
+        LayersBody.IsVisible = !channels;
+        ChannelsBody.IsVisible = channels;
+        static Avalonia.Media.IBrush B(bool on) => new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(on ? "#FFAAAAAA" : "#FF666666"));
+        TabLayers.Foreground = B(!channels);
+        TabChannels.Foreground = B(channels);
+        if (channels) { EnsureChannelsBuilt(); ApplyChannels(); }
+        else { _channelView = 0; Canvas.SetChannelDisplay(0, 7); }   // restore the normal composite
+    }
+
+    private void EnsureChannelsBuilt()
+    {
+        if (_channelsBuilt || ChannelRows is null) return;
+        _channelsBuilt = true;
+        ChannelRows.Children.Add(BuildChannelRow(0, Loc.T("mainWindow.channelRgb"),   -1, "#FF888888"));
+        ChannelRows.Children.Add(BuildChannelRow(1, Loc.T("mainWindow.channelRed"),    0, "#FFD24B4B"));
+        ChannelRows.Children.Add(BuildChannelRow(2, Loc.T("mainWindow.channelGreen"),  1, "#FF4BB04B"));
+        ChannelRows.Children.Add(BuildChannelRow(3, Loc.T("mainWindow.channelBlue"),   2, "#FF4B6BD2"));
+        ChannelRows.Children.Add(BuildChannelRow(4, Loc.T("mainWindow.channelAlpha"), -1, "#FFBBBBBB"));
+        RefreshChannelRows();
+    }
+
+    // view = 0 RGB / 1..4 R,G,B,A; visIdx = index into _chanVis (-1 = no composite-visibility eye)
+    private Border BuildChannelRow(int view, string name, int visIdx, string chipHex)
+    {
+        var dock = new DockPanel { LastChildFill = true, Height = 26 };
+
+        if (visIdx >= 0)
+        {
+            // mirror the layer rows: open eye when visible, struck-through eye (dimmed) when hidden
+            var openEye = new Avalonia.Controls.Shapes.Path
+            {
+                Classes = { "icon" }, Width = 14, Height = 14,
+                Data = Avalonia.Media.Geometry.Parse("M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z"),
+            };
+            var shutEye = new Avalonia.Controls.Shapes.Path
+            {
+                Classes = { "icon" }, Width = 14, Height = 14, Opacity = 0.4,
+                Data = Avalonia.Media.Geometry.Parse("M2 2l20 20 M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7 M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"),
+            };
+            var eye = new Avalonia.Controls.Primitives.ToggleButton
+            {
+                Classes = { "eye" }, IsChecked = _chanVis[visIdx],
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Content = new Panel { Children = { openEye, shutEye } },
+            };
+            void SyncEye() { bool on = eye.IsChecked == true; openEye.IsVisible = on; shutEye.IsVisible = !on; }
+            SyncEye();
+            ToolTip.SetTip(eye, Loc.T("mainWindow.channelVisibility"));
+            eye.IsCheckedChanged += (_, _) => { _chanVis[visIdx] = eye.IsChecked == true; SyncEye(); ApplyChannels(); };
+            DockPanel.SetDock(eye, Dock.Left);
+            dock.Children.Add(eye);
+            _chanEyes[view] = eye;
+        }
+        else
+        {
+            dock.Children.Add(new Border { Width = 20, [DockPanel.DockProperty] = Dock.Left });   // align with eye column
+        }
+
+        var chip = new Border
+        {
+            Width = 26, Height = 18, Margin = new Thickness(4, 0, 6, 0), CornerRadius = new Avalonia.CornerRadius(2),
+            Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(chipHex)),
+            BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FF454545")), BorderThickness = new Thickness(1),
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, [DockPanel.DockProperty] = Dock.Left,
+        };
+        dock.Children.Add(chip);
+
+        var label = new TextBlock { Text = name, FontSize = 12, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+        label.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeText"));
+        dock.Children.Add(label);
+
+        var row = new Border { Padding = new Thickness(6, 1), CornerRadius = new Avalonia.CornerRadius(3), Child = dock,
+                               Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+        ToolTip.SetTip(row, Loc.T("mainWindow.channelVisibility"));
+        row.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(row).Properties.IsRightButtonPressed) { LoadChannelAsSelection(view); return; }
+            _channelView = view; RefreshChannelRows(); ApplyChannels();
+        };
+        _chanRows[view] = row;
+        return row;
+    }
+
+    private void RefreshChannelRows()
+    {
+        var sel = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FF2D4A6B"));
+        for (int i = 0; i < _chanRows.Length; i++)
+            if (_chanRows[i] is { } r) r.Background = _channelView == i ? sel : Avalonia.Media.Brushes.Transparent;
+        for (int i = 0; i < _chanEyes.Length; i++)
+            if (_chanEyes[i] is { } eye && i is >= 1 and <= 3) eye.IsChecked = _chanVis[i - 1];
+    }
+
+    private void ApplyChannels()
+    {
+        int mask = (_chanVis[0] ? 1 : 0) | (_chanVis[1] ? 2 : 0) | (_chanVis[2] ? 4 : 0);
+        Canvas.SetChannelDisplay(_channelView, mask);
+    }
+
+    // Load a channel's values as a pixel selection (RGB row = luminosity).
+    private void LoadChannelAsSelection(int view)
+    {
+        if (_activeTab?.Doc is not { } doc || Canvas.ReadComposite() is not { } px) return;
+        int w = doc.Width, h = doc.Height, n = w * h;
+        if (px.Length < n * 4) return;
+        var cov = new byte[n];
+        for (int i = 0; i < n; i++)
+        {
+            int o = i * 4;
+            cov[i] = view switch
+            {
+                1 => px[o],          // R
+                2 => px[o + 1],      // G
+                3 => px[o + 2],      // B
+                4 => px[o + 3],      // A
+                _ => (byte)((px[o] * 77 + px[o + 1] * 150 + px[o + 2] * 29) >> 8),   // luminosity
+            };
+        }
+        doc.SetMaskSelection(cov);
+    }
+
     private void OnGradAddStop(object? sender, RoutedEventArgs e) => GradBar.AddStop();
     private void OnGradDelStop(object? sender, RoutedEventArgs e) => GradBar.RemoveSelected();
 
@@ -2212,6 +2367,7 @@ public partial class MainWindow : Window
         if (_activeTab is { } prev) prev.IsActive = false;
         _activeTab = tab;
         _smartLayer = null; _smartCache.Clear();   // smart-select masks/cache belong to the previous doc
+        ApplyAiVisibility();                        // AI ops enable/disable with doc presence
 
         if (tab is null)
         {

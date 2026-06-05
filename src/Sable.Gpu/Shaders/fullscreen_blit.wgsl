@@ -37,7 +37,9 @@ struct Viewport {
     loupeDocX: f32, loupeDocY: f32, loupeZoom: f32,        // sample centre (doc px) + magnification (surface px per doc px)
     loupeColR: f32, loupeColG: f32, loupeColB: f32,        // the actual would-be-picked colour (rim fill)
     gridSub: f32,                                          // grid subdivisions (minor lines per major cell; 1 = none)
-    _gpad0: f32, _gpad1: f32, _gpad2: f32,                // pad to 16-byte alignment
+    chanView: f32,                                         // Channels panel: 0 normal, 1=R 2=G 3=B 4=A shown as grayscale
+    chanMask: f32,                                         // RGB visibility bits (bit0=R,1=G,2=B), composite only; 7 = all
+    _gpad2: f32,                                           // pad to 16-byte alignment
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -85,7 +87,20 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     var outc = vec3<f32>(vp.pasteR, vp.pasteG, vp.pasteB);
     if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
         let bg = checker(vec2<f32>(docX, docY));   // doc-anchored so it doesn't swim under the image when panning
-        let col = textureSample(tex, samp, vec2<f32>(u, v));
+        var col = textureSample(tex, samp, vec2<f32>(u, v));
+        // Channels panel: isolate a single channel as grayscale, or mask RGB channel visibility
+        if (vp.chanView > 0.5) {
+            var g = col.r;
+            if (vp.chanView > 3.5) { g = col.a; }
+            else if (vp.chanView > 2.5) { g = col.b; }
+            else if (vp.chanView > 1.5) { g = col.g; }
+            col = vec4<f32>(g, g, g, 1.0);          // opaque grayscale of the chosen channel
+        } else {
+            let m = u32(vp.chanMask);
+            if ((m & 1u) == 0u) { col.r = 0.0; }
+            if ((m & 2u) == 0u) { col.g = 0.0; }
+            if ((m & 4u) == 0u) { col.b = 0.0; }
+        }
         outc = col.rgb * col.a + bg * (1.0 - col.a);
     }
 

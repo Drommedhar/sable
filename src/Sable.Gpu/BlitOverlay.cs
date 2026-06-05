@@ -89,6 +89,12 @@ public struct BlitOverlay
     public float LoupeDocX, LoupeDocY, LoupeZoom;
     public float LoupeColR, LoupeColG, LoupeColB;   // the actual would-be-picked colour (0..1), shown on the rim
 
+    // Channels panel display (view + isolate). ChannelView: 0 = normal composite, 1=R, 2=G, 3=B, 4=A
+    // shown as opaque grayscale. ChannelMask (RGB visibility bits, applied only when ChannelView==0):
+    // bit0=R, bit1=G, bit2=B; 7 = all visible (the normal case).
+    public float ChannelView;
+    public int ChannelMask;   // 0 = uninitialised; the canvas always sets this (7 = all visible)
+
     // customisable overlay colours (0..1). When HasOverlayColors is false the blitter
     // uses built-in defaults (cyan guides / magenta smart-guides / grey grid / red quick-mask).
     public bool HasOverlayColors;

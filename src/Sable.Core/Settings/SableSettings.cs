@@ -79,6 +79,11 @@ public sealed class SableSettings
     public string EffectiveModelsFolder() =>
         string.IsNullOrWhiteSpace(ModelsFolder) ? DefaultModelsFolder : ModelsFolder;
 
+    /// <summary>Where generative-preset workflows are copied so they're self-contained: %AppData%/Sable/workflows.
+    /// A preset stores the path to its private copy here, NOT the user's original file (which they may delete/move).</summary>
+    public static string WorkflowsFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sable", "workflows");
+
     /// <summary>
     /// SAM2 AMG grid side for a quality level — the decoder runs grid² times, so this dominates GPU load.
     /// 32×32 = 1024 runs (heavy, strong GPUs only); 12×12 = 144 (light). <see cref="SmartSelectQuality.Auto"/>

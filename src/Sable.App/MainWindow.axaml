@@ -568,11 +568,21 @@
                     <DockPanel Grid.Row="2">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.layers}" />
-                                <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.channels}" Foreground="{DynamicResource ChromeTextFaint}" />
+                                <TextBlock x:Name="TabLayers" Classes="panelHeader" Text="{loc:Loc mainWindow.layers}"
+                                           PointerPressed="OnSelectLayerTab" Tag="layers" />
+                                <TextBlock x:Name="TabChannels" Classes="panelHeader" Text="{loc:Loc mainWindow.channels}"
+                                           Foreground="{DynamicResource ChromeTextFaint}" PointerPressed="OnSelectLayerTab" Tag="channels" />
                                 <TextBlock Classes="panelHeader" Text="{loc:Loc mainWindow.paths}" Foreground="{DynamicResource ChromeTextFaint}" />
                             </StackPanel>
                         </Border>
+                        <!-- Layers / Channels bodies share the panel; the header tabs toggle them -->
+                        <Panel>
+                        <DockPanel x:Name="ChannelsBody" IsVisible="False">
+                            <ScrollViewer>
+                                <StackPanel x:Name="ChannelRows" Margin="0,2" />
+                            </ScrollViewer>
+                        </DockPanel>
+                        <DockPanel x:Name="LayersBody">
                         <!-- blend mode + opacity row (bound to selected layer; hidden when nothing is selected) -->
                         <Border DockPanel.Dock="Top" Padding="8,4" Background="{DynamicResource ChromePanel3}"
                                 IsVisible="{Binding SelectedLayer, Converter={x:Static ac:ObjectConverters.IsNotNull}}">
@@ -721,14 +731,38 @@
                                             <MenuFlyout>
                                                 <MenuItem Header="{loc:Loc mainWindow.rename}" Click="OnRenameLayer" />
                                                 <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" />
+                                                <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
                                                 <MenuItem Header="{loc:Loc mainWindow.delete}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="{loc:Loc mainWindow.mergeDown}" Click="OnMergeDown" />
-                                                <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
+                                                <MenuItem Header="{loc:Loc mainWindow.mergeVisible}" Click="OnMergeVisible" />
+                                                <MenuItem Header="{loc:Loc mainWindow.stampVisible}" Click="OnStamp" />
+                                                <MenuItem Header="{loc:Loc mainWindow.flattenImage}" Click="OnFlatten" />
+                                                <Separator />
                                                 <MenuItem Header="{loc:Loc mainWindow.addRemoveMask2}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="{loc:Loc mainWindow.flipHorizontal}" Click="OnFlipH" />
-                                                <MenuItem Header="{loc:Loc mainWindow.flipVertical}" Click="OnFlipV" />
+                                                <MenuItem Header="{loc:Loc mainWindow.transform}">
+                                                    <MenuItem Header="{loc:Loc mainWindow.flipHorizontal}" Click="OnFlipH" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.flipVertical}" Click="OnFlipV" />
+                                                    <Separator />
+                                                    <MenuItem Header="{loc:Loc mainWindow.rotate90CW}" Click="OnRotate90CW" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.rotate90CCW}" Click="OnRotate90CCW" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.rotate180}" Click="OnRotate180" />
+                                                    <Separator />
+                                                    <MenuItem Header="{loc:Loc mainWindow.resetTransform}" Click="OnResetTransform" />
+                                                </MenuItem>
+                                                <MenuItem Header="{loc:Loc mainWindow.align}">
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignLeft}" Click="OnAlignLeft" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignCenter}" Click="OnAlignCenterH" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignRight}" Click="OnAlignRight" />
+                                                    <Separator />
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignTop}" Click="OnAlignTop" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignMiddle}" Click="OnAlignMiddle" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.alignBottom}" Click="OnAlignBottom" />
+                                                    <Separator />
+                                                    <MenuItem Header="{loc:Loc mainWindow.distributeHorizontally}" Click="OnDistributeH" />
+                                                    <MenuItem Header="{loc:Loc mainWindow.distributeVertically}" Click="OnDistributeV" />
+                                                </MenuItem>
                                             </MenuFlyout>
                                         </DockPanel.ContextFlyout>
                                         <!-- colour-tag strip (Affinity) -->
@@ -801,6 +835,8 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+                        </DockPanel>
+                        </Panel>
                     </DockPanel>
                 </Grid>
             </Border>
