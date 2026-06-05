@@ -37,13 +37,17 @@ public partial class GenerativePanel : Window
 
     public event Action<GenFillRequest>? GenerateRequested;
 
+    /// <summary>This panel's mode: true = text-to-image presets, false = fill/edit presets.</summary>
+    public bool TextToImage { get; }
+
     public GenerativePanel() : this(new ModelRegistry(System.IO.Path.GetTempPath()), System.Array.Empty<GenerativePreset>()) { }
 
-    public GenerativePanel(ModelRegistry reg, IReadOnlyList<GenerativePreset> presets)
+    public GenerativePanel(ModelRegistry reg, IReadOnlyList<GenerativePreset> presets, bool textToImage = false)
     {
         InitializeComponent();
         _reg = reg;
-        _presets = presets.ToList();
+        TextToImage = textToImage;
+        _presets = presets.Where(p => p.IsTextToImage == textToImage).ToList();
         BuildUi();
     }
 

@@ -18,6 +18,11 @@ public sealed class ComfyProvisioner
     private const string ComfyGit = "https://github.com/comfyanonymous/ComfyUI.git";
     private const string ManagerGit = "https://github.com/ltdrdata/ComfyUI-Manager.git";
 
+    /// <summary>Pin ComfyUI to a known-good tag/branch for reproducibility (PHASE8_AI_COMFY §2.4). Empty = HEAD
+    /// (default) — bleeding-edge models (Qwen-Edit, Flux2, …) need recent nodes, so don't pin to an OLD tag.
+    /// Set to a verified recent tag (e.g. "v0.3.60") to pin; a missing tag falls back to HEAD.</summary>
+    public string ComfyRef { get; init; } = "";
+
     public string ComfyDir { get; }
     public string VenvDir => Path.Combine(ComfyDir, "venv");
     public string PythonExe => UvEnv.PythonIn(VenvDir);
@@ -33,7 +38,14 @@ public sealed class ComfyProvisioner
         if (!File.Exists(Path.Combine(ComfyDir, "main.py")))
         {
             log?.Report("Cloning ComfyUI…");
-            await RunAsync("git", new[] { "clone", "--depth", "1", ComfyGit, ComfyDir }, ComfyDir: null, log, ct).ConfigureAwait(false);
+            if (ComfyRef.Length > 0)
+            {
+                // pin to a tag/branch; if it doesn't exist, fall back to HEAD (don't hard-fail the install)
+                try { await RunAsync("git", new[] { "clone", "--depth", "1", "--branch", ComfyRef, ComfyGit, ComfyDir }, null, log, ct).ConfigureAwait(false); }
+                catch { log?.Report($"ComfyUI ref '{ComfyRef}' unavailable — using latest."); }
+            }
+            if (!File.Exists(Path.Combine(ComfyDir, "main.py")))
+                await RunAsync("git", new[] { "clone", "--depth", "1", ComfyGit, ComfyDir }, null, log, ct).ConfigureAwait(false);
         }
 
         var uv = await UvEnv.EnsureUvAsync(log, ct).ConfigureAwait(false);

@@ -282,6 +282,18 @@ public sealed class AiService
         return new AddLayerCommand(doc, parent, layer, idx);
     }
 
+    /// <summary>Text-to-image: run the generative backend with NO input image and return the produced image
+    /// (the App deposits it as a new document). The workflow defines the output size.</summary>
+    public async Task<AiImage> GenerateImageAsync(GenRequest spec, CancellationToken ct = default)
+    {
+        if (Generative is null || !Generative.IsAvailable)
+            throw new AiNotReadyException("Generative backend is not running. Enable it in Settings.");
+        if (Generative.RequiresExplicitLoad && !string.IsNullOrEmpty(spec.BaseModelId))
+            await EnsureModelLoadedAsync(spec.BaseModelId, spec.Offload, spec.Loras, ct).ConfigureAwait(false);
+        var req = spec with { Task = AiTaskKind.Txt2Img, Image = null, Mask = null };
+        return await Generative.GenerateAsync(req, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Tight bounding box of the non-zero coverage; the whole image when coverage is empty.</summary>
     private static (int X, int Y, int W, int H) Bounds(byte[] cov, int w, int h)
     {

@@ -38,6 +38,10 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
     /// <summary>The running ComfyUI base URL (for "Open ComfyUI"), or null if not started.</summary>
     public Uri? BaseUri => _client?.BaseUri;
 
+    /// <summary>GB of VRAM ComfyUI reserves (leaves free) for Sable's GPU canvas, so the editor doesn't OOM
+    /// during a generation. Passed as <c>--reserve-vram</c>. 0 = don't reserve.</summary>
+    public double ReserveVramGb { get; set; } = 2.0;
+
     // --- App-injected glue (keeps this project free of registry + image-codec deps) ---
     /// <summary>baseModelId → how ComfyUI loads it (ckpt/unet name + clip/vae for assembled).</summary>
     public Func<string, ComfyModelRef?>? ResolveModel { get; set; }
@@ -73,6 +77,12 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
         psi.ArgumentList.Add(main);
         psi.ArgumentList.Add("--listen"); psi.ArgumentList.Add("127.0.0.1");
         psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
+        // leave VRAM headroom for Sable's own GPU canvas so the editor doesn't OOM while a generation runs
+        if (ReserveVramGb > 0)
+        {
+            psi.ArgumentList.Add("--reserve-vram");
+            psi.ArgumentList.Add(ReserveVramGb.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+        }
 
         var tail = new System.Collections.Generic.Queue<string>();
         System.IO.StreamWriter? logw = null;
@@ -129,11 +139,13 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
         if (DecodePng is null || EncodePng is null) throw new InvalidOperationException("ComfyBackend not wired (App must set the codec).");
         if (string.IsNullOrWhiteSpace(WorkflowJsonPath) || !System.IO.File.Exists(WorkflowJsonPath))
             throw new InvalidOperationException("This preset has no workflow file. Configure one in AI ▸ Models ▸ Generative.");
-        if (req.Image is not { } img) throw new InvalidOperationException("No image to send.");
 
         // run the user's exported workflow (the user's own graph): inject our image/prompt/seed/params + the
         // preset's model + LoRA names (overriding the workflow's baked, possibly wrong-OS, loader names).
-        var iname = await _client.UploadImageAsync(EncodePng(img.Rgba, img.Width, img.Height), "sable_in.png", ct).ConfigureAwait(false);
+        // txt2img presets send no image (no LoadImage to fill).
+        var iname = req.Image is { } img
+            ? await _client.UploadImageAsync(EncodePng(img.Rgba, img.Width, img.Height), "sable_in.png", ct).ConfigureAwait(false)
+            : "";
         var apiJson = await System.IO.File.ReadAllTextAsync(WorkflowJsonPath, ct).ConfigureAwait(false);
         var tLoras = (req.Loras ?? (IReadOnlyList<AdapterRef>)System.Array.Empty<AdapterRef>())
             .Select(l => (Name: LoraName?.Invoke(l.ModelId) ?? "", l.Weight))

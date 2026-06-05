@@ -172,6 +172,7 @@
                 <MenuItem x:Name="AiRemoveObjItem" Header="{loc:Loc mainWindow.removeObject}" Click="OnAiRemoveObject" />
                 <Separator x:Name="AiGenSep" />
                 <MenuItem x:Name="AiGenFillItem" Header="{loc:Loc mainWindow.generativeFill}" Click="OnAiGenerativeFill" />
+                <MenuItem x:Name="AiGenImageItem" Header="{loc:Loc mainWindow.generateImage}" Click="OnAiGenerateImage" />
                 <Separator />
                 <MenuItem Header="{loc:Loc mainWindow.models}" Click="OnAiModels" />
             </MenuItem>

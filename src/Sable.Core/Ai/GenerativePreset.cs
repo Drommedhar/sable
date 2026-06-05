@@ -25,4 +25,8 @@ public sealed class GenerativePreset
     /// <summary>The exported ComfyUI API-format workflow (.json) Sable runs for this preset — the user's own
     /// graph. Sable injects the image/prompt/seed/params + the base/encoder/VAE loader names above.</summary>
     public string? WorkflowFile { get; set; }
+
+    /// <summary>True = text-to-image (no input image; output → a NEW document). False = image-fill/edit driven
+    /// by the current selection. Determines the entry point + whether a selection is needed.</summary>
+    public bool IsTextToImage { get; set; }
 }

@@ -432,7 +432,7 @@ public partial class ModelsWindow : Window
         GenPresetRoot.Children.Add(vaeCombo);
 
         // optional: run the user's own exported workflow (overrides base/encoder/VAE above)
-        GenPresetRoot.Children.Add(Text("Workflow file (exported ComfyUI 'API Format' .json) — optional, runs your exact graph", "ChromeTextDim", 11, wrap: true));
+        GenPresetRoot.Children.Add(Text("Workflow file (exported ComfyUI 'API Format' .json) — REQUIRED, runs your exact graph", "ChromeTextDim", 11, wrap: true));
         string? wfPath = null;
         var wfLabel = Text("(none)", "ChromeTextFaint", 11, wrap: true);
         var wfBtn = new Button { Content = "Choose workflow…", Classes = { "opt" }, Padding = new Avalonia.Thickness(12, 0) };
@@ -450,11 +450,15 @@ public partial class ModelsWindow : Window
         GenPresetRoot.Children.Add(wfLabel);
         GenPresetRoot.Children.Add(wfRow);
 
+        var t2iCheck = new CheckBox { Content = "Text-to-image (no input image — output is a new document)", FontSize = 11, Margin = new Avalonia.Thickness(0, 6, 0, 0) };
+        GenPresetRoot.Children.Add(t2iCheck);
+
         var save = new Button { Content = "Save preset", Classes = { "opt" }, Padding = new Avalonia.Thickness(16, 2), Margin = new Avalonia.Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         save.Click += (_, _) =>
         {
             var baseId = (baseCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-            if (_genSettings is null || (string.IsNullOrEmpty(baseId) && string.IsNullOrEmpty(wfPath))) return;
+            if (_genSettings is null) return;
+            if (string.IsNullOrEmpty(wfPath)) { wfLabel.Text = "Required — choose a workflow file (export it via Open ComfyUI)."; return; }
             var name = string.IsNullOrWhiteSpace(nameBox.Text) ? (baseCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Preset" : nameBox.Text!.Trim();
             _genSettings.GenerativePresets.Add(new GenerativePreset
             {
@@ -463,6 +467,7 @@ public partial class ModelsWindow : Window
                 EncoderIds = encChecks.Where(e => e.Cb.IsChecked == true).Select(e => e.Id).ToList(),
                 VaeId = (vaeCombo.SelectedItem as ComboBoxItem)?.Tag as string,
                 WorkflowFile = wfPath,
+                IsTextToImage = t2iCheck.IsChecked == true,
             });
             PresetsChanged?.Invoke();
             BuildGenPresets();

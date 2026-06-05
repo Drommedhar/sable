@@ -376,9 +376,11 @@ public partial class MainWindow : Window
         bool HasTier(Sable.Core.Ai.AiTaskKind t, Sable.Core.Ai.AiTier tier) =>
             ModelReg.Catalog.ForTask(t).Any(m => m.Tier == tier);
         AiRemoveObjItem.IsVisible = HasTier(Sable.Core.Ai.AiTaskKind.Inpaint, Sable.Core.Ai.AiTier.Light);
-        // Generative Fill needs the opt-in generative tier ON + at least one configured preset.
-        AiGenFillItem.IsVisible = _settings.GenerativeAiEnabled && _settings.GenerativePresets.Count > 0;
-        AiGenSep.IsVisible = AiGenFillItem.IsVisible;
+        // Generative Fill / Generate Image need the opt-in tier ON + a matching configured preset.
+        bool genOn = _settings.GenerativeAiEnabled;
+        AiGenFillItem.IsVisible = genOn && _settings.GenerativePresets.Any(p => !p.IsTextToImage);
+        AiGenImageItem.IsVisible = genOn && _settings.GenerativePresets.Any(p => p.IsTextToImage);
+        AiGenSep.IsVisible = AiGenFillItem.IsVisible || AiGenImageItem.IsVisible;
     }
 
     private async void OnAiRemoveBackground(object? sender, RoutedEventArgs e)
@@ -577,12 +579,18 @@ public partial class MainWindow : Window
     private GenerativePanel? _genPanel;
     private Sable.Core.Ai.GenerativePreset? _curPreset;   // the preset for the in-flight gen run (read by the Comfy resolver)
 
-    /// <summary>Open the modeless Generative Fill panel (§4.1). Generate is handled by <see cref="OnGenerateFill"/>.</summary>
-    private void OnAiGenerativeFill(object? sender, RoutedEventArgs e)
+    /// <summary>Open the modeless Generative Fill panel (selection-driven). Generate → <see cref="OnGenerateFill"/>.</summary>
+    private void OnAiGenerativeFill(object? sender, RoutedEventArgs e) => OpenGenPanel(textToImage: false);
+
+    /// <summary>Open the Generate Image panel (text-to-image, no selection → new document).</summary>
+    private void OnAiGenerateImage(object? sender, RoutedEventArgs e) => OpenGenPanel(textToImage: true);
+
+    private void OpenGenPanel(bool textToImage)
     {
+        if (_genPanel is not null && _genPanel.TextToImage != textToImage) _genPanel.Close();   // wrong mode → reopen
         if (_genPanel is null)
         {
-            _genPanel = new GenerativePanel(ModelReg, _settings.GenerativePresets) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            _genPanel = new GenerativePanel(ModelReg, _settings.GenerativePresets, textToImage) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
             _genPanel.GenerateRequested += req => _ = OnGenerateFill(req);
             _genPanel.Closed += (_, _) => { _genPanel = null; if (_comfy is not null) _ = _comfy.FreeMemoryAsync(); };   // free comfy VRAM when done
         }
@@ -673,6 +681,8 @@ public partial class MainWindow : Window
     /// deposit the result as an undoable layer (§4.2).</summary>
     private async System.Threading.Tasks.Task OnGenerateFill(GenFillRequest req)
     {
+        if (req.Preset.IsTextToImage) { await OnGenerateTxt2Img(req); return; }   // no selection — new document
+
         if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
         { _genPanel?.SetStatus(Sable.App.Localization.Loc.T("generative.selectPixelLayer")); return; }
 
@@ -702,6 +712,41 @@ public partial class MainWindow : Window
                 req.Negative, req.Steps, req.Cfg, req.Seed, Loras: req.Loras, Offload: req.Offload);
             var cmd = await Ai.GenerativeFillAsync(doc, px, region, spec, busy.Progress, cts.Token);
             Doc!.Undo.Execute(cmd);
+        }
+        catch (System.OperationCanceledException) { /* cancelled */ }
+        catch (System.Exception ex) { error = ex; }
+        finally { busy.Done(); }
+        if (error is not null) _genPanel?.SetStatus(Sable.App.Localization.Loc.T("generative.failed", error.Message));
+    }
+
+    /// <summary>Text-to-image: run the preset's workflow with no input image, open the result as a new document.</summary>
+    private async System.Threading.Tasks.Task OnGenerateTxt2Img(GenFillRequest req)
+    {
+        _curPreset = req.Preset;
+        using var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, Sable.App.Localization.Loc.T("generative.startingBackend"), cts);
+        System.Exception? error = null;
+        try
+        {
+            var (ok, msg) = await EnsureGenerativeAsync(cts.Token);
+            if (!ok) { busy.Done(); _genPanel?.SetStatus(msg); return; }
+            _genPanel?.SetStatus(msg);
+            busy.SetMessage(Sable.App.Localization.Loc.T("generative.fillBusy"));
+            if (_comfy is not null)
+            {
+                _comfy.Progress = busy.Progress;
+                _comfy.Denoise = req.Denoise;
+                _comfy.WorkflowJsonPath = req.Preset.WorkflowFile;
+            }
+            var spec = new Sable.Core.Ai.GenRequest(req.Preset.BaseModelId, Sable.Core.Ai.AiTaskKind.Txt2Img, req.Prompt,
+                req.Negative, req.Steps, req.Cfg, req.Seed, Loras: req.Loras, Offload: req.Offload);
+            var img = await Ai.GenerateImageAsync(spec, cts.Token);
+
+            var doc = new Sable.Engine.Document(img.Width, img.Height);
+            var layer = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, "Generated");
+            layer.SetBuffer(img.Width, img.Height, img.Rgba);
+            doc.Layers.Add(layer);
+            OpenInNewTab(doc, null, "Generated");
         }
         catch (System.OperationCanceledException) { /* cancelled */ }
         catch (System.Exception ex) { error = ex; }
