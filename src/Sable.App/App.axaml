@@ -126,6 +126,10 @@
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="8,4" />
+            <!-- hit-testable across the full padded bounds: without a Background, clicks in the padding
+                 fall THROUGH to the parent Border and the tab never registers (a TextBlock only hit-tests
+                 where it has a brush). Transparent makes the whole tab clickable, gaps included. -->
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector=":is(Button).tool">
             <Setter Property="Width" Value="{StaticResource ToolButtonSize}" />

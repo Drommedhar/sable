@@ -70,6 +70,9 @@ public partial class MainWindow : Window
         // selection keys tunnel-first so a focused panel (e.g. the layers list) can't eat Delete
         AddHandler(KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
 
+        // caption buttons act on PointerReleased (the Click gesture is unreliable in the custom title bar)
+        WireCaptionButtons();
+
         // drop image / .sable files onto the window chrome → open each as a new tab.
         // NOTE: works on Windows/macOS. On Linux/X11 these events never fire — Avalonia's X11
         // backend has no drop-target (XDND) support yet; the fix is unmerged PR #20926, slated
@@ -818,6 +821,27 @@ public partial class MainWindow : Window
     private void OnMaxRestoreWindow(object? sender, RoutedEventArgs e)
         => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     private void OnCloseWindow(object? sender, RoutedEventArgs e) => Close();
+
+    // Caption buttons (min/max/close) act on PointerReleased, not Click: in the custom BorderOnly title
+    // bar the Avalonia Click gesture is unreliable for the top row (press+release reach the button but
+    // Click only fires when the window later deactivates — see diag.log). PointerPressed/Released are
+    // 100% reliable, so we run the action on release over the button. Tunnel on the strip so we act
+    // before (and instead of) the button's own gesture handling.
+    private void WireCaptionButtons()
+        => CaptionButtons?.AddHandler(PointerReleasedEvent, OnCaptionReleased, RoutingStrategies.Tunnel);
+
+    private void OnCaptionReleased(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != Avalonia.Input.MouseButton.Left) return;
+        if ((e.Source as Visual)?.GetSelfAndVisualAncestors().OfType<Button>().FirstOrDefault() is not { Tag: string tag }) return;
+        e.Handled = true;
+        switch (tag)
+        {
+            case "min": OnMinimizeWindow(this, e); break;
+            case "max": OnMaxRestoreWindow(this, e); break;
+            case "close": OnCloseWindow(this, e); break;
+        }
+    }
 
     private void OnTitleBarPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
@@ -1691,7 +1715,9 @@ public partial class MainWindow : Window
         items?.Add(sw);
     }
 
-    private void OnSelectColorTab(object? sender, TappedEventArgs e)
+    // Tabs switch on PointerPressed (not Tapped): Tapped cancels on a few px of press->release drift, so
+    // a slightly imperfect click on a tab did nothing. Pressing acts immediately, drift-proof.
+    private void OnSelectColorTab(object? sender, Avalonia.Input.PointerPressedEventArgs e)
         => SetColorTab((sender as Control)?.Tag as string ?? "color");
 
     private void SetColorTab(string tab)

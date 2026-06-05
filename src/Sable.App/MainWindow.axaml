@@ -33,16 +33,19 @@
                Height="18" Stretch="Uniform" Margin="12,5,12,5" VerticalAlignment="Center"
                RenderOptions.BitmapInterpolationMode="HighQuality"
                ToolTip.Tip="{loc:Loc mainWindow.sable}" />
-        <!-- window caption buttons (right) -->
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Stretch">
-            <Button Classes="winbtn" Click="OnMinimizeWindow" ToolTip.Tip="{loc:Loc mainWindow.minimise}">
+        <!-- window caption buttons (right). Driven off PointerReleased (OnCaptionReleased), NOT Click:
+             in the custom BorderOnly title bar the Avalonia Click gesture is unreliable for these top-row
+             buttons (press+release reach the button but Click never fires until the window deactivates —
+             diagnosed via diag.log). PointerPressed/Released fire 100% of the time, so we act on release. -->
+        <StackPanel x:Name="CaptionButtons" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Stretch">
+            <Button Classes="winbtn" Tag="min" ToolTip.Tip="{loc:Loc mainWindow.minimise}">
                 <Border Width="11" Height="1.5" Background="{DynamicResource ChromeText}"
                         HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Button>
-            <Button x:Name="MaxRestoreBtn" Classes="winbtn" Click="OnMaxRestoreWindow" ToolTip.Tip="{loc:Loc mainWindow.maximise}">
+            <Button x:Name="MaxRestoreBtn" Classes="winbtn" Tag="max" ToolTip.Tip="{loc:Loc mainWindow.maximise}">
                 <Path Classes="icon" Width="10" Height="10" Data="M4 4h16v16H4z" />
             </Button>
-            <Button Classes="winbtn winclose" Click="OnCloseWindow" ToolTip.Tip="{loc:Loc mainWindow.close}">
+            <Button Classes="winbtn winclose" Tag="close" ToolTip.Tip="{loc:Loc mainWindow.close}">
                 <Path Classes="icon" Width="11" Height="11" Data="M5 5l14 14 M19 5l-14 14" />
             </Button>
         </StackPanel>
@@ -455,13 +458,13 @@
                     <DockPanel Grid.Row="0">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="{loc:Loc mainWindow.color}" Tapped="OnSelectColorTab" Tag="color" />
+                                <TextBlock x:Name="TabColor" Classes="panelHeader" Text="{loc:Loc mainWindow.color}" PointerPressed="OnSelectColorTab" Tag="color" />
                                 <TextBlock x:Name="TabGrad" Classes="panelHeader" Text="{loc:Loc mainWindow.gradients}"
-                                           Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="grad" />
+                                           Foreground="{DynamicResource ChromeTextFaint}" PointerPressed="OnSelectColorTab" Tag="grad" />
                                 <TextBlock x:Name="TabSwatches" Classes="panelHeader" Text="{loc:Loc mainWindow.swatches}"
-                                           Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="swatch" />
+                                           Foreground="{DynamicResource ChromeTextFaint}" PointerPressed="OnSelectColorTab" Tag="swatch" />
                                 <TextBlock x:Name="TabHist" Classes="panelHeader" Text="{loc:Loc mainWindow.histogram}"
-                                           Foreground="{DynamicResource ChromeTextFaint}" Tapped="OnSelectColorTab" Tag="hist" />
+                                           Foreground="{DynamicResource ChromeTextFaint}" PointerPressed="OnSelectColorTab" Tag="hist" />
                             </StackPanel>
                         </Border>
 
