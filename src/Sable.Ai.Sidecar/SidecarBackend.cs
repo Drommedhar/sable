@@ -26,8 +26,8 @@ public sealed class SidecarBackend : IAiBackend, IGenerativeBackend, IDisposable
     public AiTier Tier => AiTier.Generative;
     public bool IsAvailable => _healthy;
 
-    /// <summary>Where the shipped Python server lives (copied beside the app).</summary>
-    public static string DefaultServerDir => Path.Combine(AppContext.BaseDirectory, "server");
+    /// <summary>Where the shipped Python server lives (beside the app, or in Resources/ on macOS).</summary>
+    public static string DefaultServerDir => Sable.Core.AppPaths.ResolveContent("server");
 
     /// <summary>
     /// Launch the server under <paramref name="env"/> and wait until it reports healthy. <paramref name="serverDir"/>
