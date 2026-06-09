@@ -147,12 +147,26 @@ jobs:
           done
           iconutil -c icns "${iconset}" -o "${resources_dir}/sable.icns"
 
-          # .NET self-contained payload (assemblies, native libs, AND loose content files like
-          # Assets/Locales/*.json + the sidecar server/) must all sit next to the executable:
-          # AppContext.BaseDirectory == Contents/MacOS. The previous split (directories -> Resources)
-          # orphaned Assets/Locales, so Loc.Initialize loaded nothing and the UI rendered raw i18n
-          # keys. Keep the whole payload in MacOS; only sable.icns lives in Resources.
-          cp -R "${publish_dir}/." "${macos_dir}/"
+          # macOS bundle convention: Mach-O code in Contents/MacOS, resources in Contents/Resources.
+          # codesign rejects non-code files nested under MacOS ("code object is not signed at all /
+          # In subcomponent: .../server/pipeline.py"). But .NET resolves content via
+          # AppContext.BaseDirectory == Contents/MacOS, so the loose payload (Assets/Locales and the
+          # sidecar server/) must ALSO be reachable there — putting it only in Resources orphaned it
+          # and the UI rendered raw i18n keys. Fix: copy each directory into Resources and symlink it
+          # back into MacOS. codesign then sees only code + symlinks (seals clean), while the app
+          # still finds BaseDirectory/Assets + BaseDirectory/server at runtime. Loose files (the
+          # apphost, dylibs) go straight into MacOS as before.
+          shopt -s dotglob nullglob
+          for path in "${publish_dir}"/*; do
+            name="$(basename "${path}")"
+            if [[ -d "${path}" ]]; then
+              cp -R "${path}" "${resources_dir}/${name}"
+              ln -s "../Resources/${name}" "${macos_dir}/${name}"
+            else
+              cp -R "${path}" "${macos_dir}/${name}"
+            fi
+          done
+          shopt -u dotglob nullglob
           chmod +x "${macos_dir}/${{ env.EXECUTABLE_NAME }}"
 
           sed \
