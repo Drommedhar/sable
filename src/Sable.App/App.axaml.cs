@@ -1,7 +1,9 @@
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 
 namespace Sable.App;
 
@@ -26,9 +28,45 @@ public partial class App : Application
 
             // closing the main window quits the app, regardless of open tool windows
             desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
-            desktop.MainWindow = new MainWindow(desktop.Args);
+
+            // splash first. MainWindow's ctor is HEAVY (GPU init, settings, session restore) and runs
+            // on this same UI thread — built during the intro it stalls the animation, so it is
+            // deferred until the intro has fully played, then the splash cross-fades into it.
+            var splash = new SplashWindow();
+            splash.Show();
+            Dispatcher.UIThread.Post(() => _ = ShowMainAsync(desktop, splash), DispatcherPriority.Background);
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static async Task ShowMainAsync(IClassicDesktopStyleApplicationLifetime desktop, SplashWindow splash)
+    {
+        // let the intro play on an idle UI thread; the splash holds its final frame while the
+        // main window builds afterwards
+        await splash.IntroDone;
+
+        var main = new MainWindow(desktop.Args) { Opacity = 0 };
+        desktop.MainWindow = main;
+        try
+        {
+            var opened = new TaskCompletionSource();
+            main.Opened += (_, _) => opened.TrySetResult();
+            main.Show();
+            await opened.Task;
+
+            // cross-fade: splash out while the main window fades in
+            var fadeOut = splash.FadeOutAsync();
+            await SplashWindow.FadeAsync(main, 0, 1, 400);
+            await fadeOut;
+        }
+        catch
+        {
+            // never leave the app invisible behind a stuck splash
+            main.Opacity = 1;
+            if (splash.IsVisible)
+                splash.Close();
+            throw;
+        }
     }
 }
