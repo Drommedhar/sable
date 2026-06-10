@@ -29,6 +29,15 @@ public sealed class BrushTool
     public float Alpha { get; set; } = 1f;         // foreground opacity (0..1), multiplies coverage
     public float Flow { get; set; } = 1f;          // max alpha per stamp
 
+    /// <summary>Stamp spacing as a fraction of diameter (0 = legacy dense ¼-radius step).</summary>
+    public float Spacing { get; set; }
+    /// <summary>Stylus pressure scales dab size (tablets; mouse always reports 1).</summary>
+    public bool PressureSize { get; set; } = true;
+    /// <summary>Stylus pressure scales dab opacity/flow.</summary>
+    public bool PressureFlow { get; set; }
+    // pressure of the stamp being painted (set per-stamp by Stroke; 1 = full/mouse)
+    private float _pressure = 1f;
+
     /// <summary>When true the brush erases (destination-out) instead of painting.</summary>
     public bool Erase { get; set; }
 
@@ -69,7 +78,8 @@ public sealed class BrushTool
     /// <summary>Stamp a single dab centered at (cx, cy) into an RGBA8 buffer.</summary>
     public void Stamp(byte[] px, int w, int h, double cx, double cy)
     {
-        float r = Radius;
+        // pressure dynamics: size tapers with pressure (kept ≥ 10% so light touches still mark)
+        float r = Radius * (PressureSize ? 0.1f + 0.9f * Math.Clamp(_pressure, 0f, 1f) : 1f);
         int x0 = Math.Max(0, (int)Math.Floor(cx - r));
         int x1 = Math.Min(w - 1, (int)Math.Ceiling(cx + r));
         int y0 = Math.Max(0, (int)Math.Floor(cy - r));
@@ -148,7 +158,7 @@ public sealed class BrushTool
                 continue;
             }
 
-            float sa = cov * Flow * clipCov * Alpha;
+            float sa = cov * Flow * clipCov * Alpha * (PressureFlow ? Math.Clamp(_pressure, 0f, 1f) : 1f);
             if (sa <= 0f) continue;
 
             // clone: source colour sampled at the locked offset (skip outside source / transparent)
@@ -248,15 +258,23 @@ public sealed class BrushTool
 
     /// <summary>Paint a stroke from (x0,y0) to (x1,y1) into an RGBA8 buffer, interpolating stamps.</summary>
     public void Stroke(byte[] px, int w, int h, double x0, double y0, double x1, double y1)
+        => Stroke(px, w, h, x0, y0, x1, y1, 1f, 1f);
+
+    /// <summary>Stroke with per-end stylus pressure (interpolated across the stamps).</summary>
+    public void Stroke(byte[] px, int w, int h, double x0, double y0, double x1, double y1, float p0, float p1)
     {
         double dx = x1 - x0, dy = y1 - y0;
         double dist = Math.Sqrt(dx * dx + dy * dy);
-        double spacing = Math.Max(1.0, Radius * 0.25);
+        double spacing = Spacing > 0
+            ? Math.Max(1.0, Spacing * 2.0 * Radius)        // user spacing: % of diameter
+            : Math.Max(1.0, Radius * 0.25);                // legacy dense default
         int steps = (int)(dist / spacing);
         for (int s = 0; s <= steps; s++)
         {
             double f = steps == 0 ? 0 : (double)s / steps;
+            _pressure = p0 + (p1 - p0) * (float)f;
             Stamp(px, w, h, x0 + dx * f, y0 + dy * f);
         }
+        _pressure = 1f;
     }
 }

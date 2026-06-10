@@ -61,11 +61,21 @@ public partial class MainWindow : Window
 
         // the embedded adjustment/filter editor needs the composite for its Curves/Levels histogram
         AdjPanel.CompositeProvider = () => Canvas.ReadComposite();
+        AdjPanel.CompareStarted += BeginPeek;
+        AdjPanel.CompareEnded += EndPeek;
+
+        _brushPresets = Sable.Tools.BrushPresetStore.Load();
+        RebuildBrushPresetCombo();
 
         // layer drag-drop (manual pointer DnD: reorder / move into group / auto-group)
         LayerList.AddHandler(PointerPressedEvent, OnLayerPointerPressed, RoutingStrategies.Tunnel);
         LayerList.AddHandler(PointerMovedEvent, OnLayerPointerMoved, RoutingStrategies.Tunnel);
         LayerList.AddHandler(PointerReleasedEvent, OnLayerPointerReleased, RoutingStrategies.Tunnel);
+        // open the row context flyout ourselves so a multi-selection survives. ContextRequested is a
+        // BUBBLE event — registering it as Tunnel meant the handler never ran. Bubble + handledToo so
+        // we still get it after the ListBox's own handling.
+        LayerList.AddHandler(ContextRequestedEvent, OnLayerContextRequested,
+            RoutingStrategies.Bubble, handledEventsToo: true);
 
         // selection keys tunnel-first so a focused panel (e.g. the layers list) can't eat Delete
         AddHandler(KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
@@ -105,6 +115,12 @@ public partial class MainWindow : Window
             OpenLaunchArgs();               // files passed on the command line (file associations)
             StartAutosave();
             if (_settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(manual: false);   // silent launch check
+            if (!_settings.OnboardingShown)
+            {
+                _settings.OnboardingShown = true;
+                Sable.Core.Settings.SettingsService.Save(_settings);
+                new TipsWindow().Show(this);   // first-run orientation card (once)
+            }
         };
         Closing += OnWindowClosing;
 
@@ -122,14 +138,50 @@ public partial class MainWindow : Window
         var histTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         histTimer.Tick += (_, _) =>
         {
-            if (HistView is null || !HistView.IsEffectivelyVisible || Canvas.Document is null) return;
-            if (Canvas.ReadComposite() is { } rgba) HistView.SetBins(Histogram.Compute(rgba));
+            if (HistView is not null && HistView.IsEffectivelyVisible && Canvas.Document is not null
+                && Canvas.ReadComposite() is { } rgba)
+                HistView.SetBins(Histogram.Compute(rgba));
+            RefreshNavigator();
         };
         histTimer.Start();
+
+        // navigator: click/drag re-centres; view changes move the viewport rect immediately
+        NavView.ViewCenterRequested += (dx, dy) => Canvas.CenterOnDoc(dx, dy);
+        Canvas.ViewChanged += () =>
+        {
+            if (NavigatorTabPanel.IsVisible) UpdateNavRect();
+            UpdateTaskBar();   // keep the contextual pill glued to the selection during pan/zoom (no 250ms lag)
+        };
+
+        // status-bar memory readout (working set + VRAM in use), low frequency
+        var memTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        memTimer.Tick += (_, _) => UpdateMemLabel();
+        memTimer.Start();
+        UpdateMemLabel();
+
+        // contextual task bar follows the selection (position + show/hide)
+        var tbTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        tbTimer.Tick += (_, _) => UpdateTaskBar();
+        tbTimer.Start();
 
         // click a ruler to drop a guide: top ruler → vertical guide (X), left ruler → horizontal guide (Y)
         RulerH.GuideRequested += d => AddGuide(vertical: true, d);
         RulerV.GuideRequested += d => AddGuide(vertical: false, d);
+    }
+
+    /// <summary>Status-bar RAM/VRAM readout: app working set + used/total VRAM (when the probe knows it).</summary>
+    private void UpdateMemLabel()
+    {
+        static string Gb(ulong b) => b >= 10UL * 1024 * 1024 * 1024
+            ? $"{b / (1024.0 * 1024 * 1024):0} GB"
+            : $"{b / (1024.0 * 1024 * 1024):0.0} GB";
+        var ram = (ulong)System.Diagnostics.Process.GetCurrentProcess().WorkingSet64;
+        var total = _gpuProbe.TotalVramBytes();
+        var free = _gpuProbe.FreeVramBytes();
+        var text = $"RAM {Gb(ram)}";
+        if (total > 0 && free > 0 && free <= total)
+            text += $"  ·  VRAM {Gb(total - free)}/{Gb(total)}";
+        MemLabel.Text = text;
     }
 
     private void AddGuide(bool vertical, double docPos)
@@ -171,7 +223,111 @@ public partial class MainWindow : Window
         ApplyOverlayColors();
         ApplyGridAndSnap();
         ApplyAiVisibility();
+        ApplyPanelVisibility();
         RebuildRecentMenu();
+    }
+
+    /// <summary>Show/hide the tool strip and the right-side Colour/Layers panels (Window menu toggles).</summary>
+    private void ApplyPanelVisibility()
+    {
+        ToolStripHost.IsVisible = _settings.ShowToolsPanel;
+        MainSplit.ColumnDefinitions[0].Width = new GridLength(_settings.ShowToolsPanel ? 40 : 0);
+
+        ColorPanelRoot.IsVisible = _settings.ShowColorPanel;
+        LayersPanelRoot.IsVisible = _settings.ShowLayersPanel;
+        PanelSplitter.IsVisible = _settings.ShowColorPanel && _settings.ShowLayersPanel;
+        bool right = _settings.ShowColorPanel || _settings.ShowLayersPanel;
+        RightPanelRoot.IsVisible = right;
+        MainSplit.ColumnDefinitions[2].Width = new GridLength(right ? 300 : 0);
+
+        PanelToolsItem.IsChecked = _settings.ShowToolsPanel;
+        PanelColorItem.IsChecked = _settings.ShowColorPanel;
+        PanelLayersItem.IsChecked = _settings.ShowLayersPanel;
+        ContextBarItem.IsChecked = _settings.ShowContextBar;
+    }
+
+    /// <summary>Checkbox on the welcome screen itself: unticking hides the welcome content
+    /// from then on (re-enable in Preferences ▸ User Interface).</summary>
+    private void OnToggleWelcome(object? sender, RoutedEventArgs e)
+    {
+        _settings.ShowWelcomeScreen = WelcomeShowCheck.IsChecked == true;
+        Sable.Core.Settings.SettingsService.Save(_settings);
+        UpdateEmptyState();
+    }
+
+    private void OnToggleContextBar(object? sender, RoutedEventArgs e)
+    {
+        _settings.ShowContextBar = !_settings.ShowContextBar;
+        ContextBarItem.IsChecked = _settings.ShowContextBar;
+        UpdateTaskBar();
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    // ===== contextual task bar: floating pill under the active selection (airspace-safe top-level) =====
+    private TaskBarWindow? _taskBar;
+
+    private void UpdateTaskBar()
+    {
+        // NOTE: no IsActive gate — canvas clicks go to the native HWND with MA_NOACTIVATE, so the
+        // Avalonia window often isn't "active" while the user works; gating on it made the pill
+        // vanish for good after its first click. Window state covers the minimized case.
+        bool show = _settings.ShowContextBar && WindowState != WindowState.Minimized
+            && _activeTab is not null && Canvas.IsVisible
+            && Canvas.Document is { Selection: { W: > 2, H: > 2 } };
+        if (!show)
+        {
+            if (_taskBar?.IsVisible == true) _taskBar.Hide();
+            return;
+        }
+        var r = Canvas.Document!.Selection!.Value;
+        var (ox, oy, s) = Canvas.ViewportDip;
+        double cx = ox + (r.X + r.W / 2.0) * s;
+        double by = oy + r.Bottom * s + 12;
+        // clamp into the canvas area so the pill stays reachable for off-screen selections
+        cx = System.Math.Clamp(cx, 60, System.Math.Max(60, Canvas.Bounds.Width - 60));
+        by = System.Math.Clamp(by, 0, System.Math.Max(0, Canvas.Bounds.Height - 40));
+        var screen = Canvas.PointToScreen(new Avalonia.Point(cx, by));
+
+        _taskBar ??= CreateTaskBar();
+        _taskBar.SetGenFillVisible(AiGenFillItem.IsVisible && AiGenFillItem.IsEnabled);
+        double scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+        int halfW = (int)((_taskBar.Bounds.Width > 0 ? _taskBar.Bounds.Width : 240) * scale / 2);
+        _taskBar.Position = new PixelPoint(screen.X - halfW, screen.Y);
+        if (!_taskBar.IsVisible) _taskBar.Show(this);
+    }
+
+    private TaskBarWindow CreateTaskBar()
+    {
+        var w = new TaskBarWindow();
+        // clicking the pill activates IT — bring the main window back first so dialogs the
+        // action opens (AmountDialog, gen-fill) get a live, focused owner
+        void Run(System.Action act) { Activate(); act(); }
+        w.GenFillClicked += () => Run(() => OnAiGenerativeFill(null, _e));
+        w.MaskClicked += () => Run(() => Doc?.ToggleMaskCommand.Execute(null));
+        w.InvertClicked += () => Run(() => OnInvertSelection(null, _e));
+        w.DeselectClicked += () => Run(() => OnDeselect(null, _e));
+        return w;
+    }
+
+    private void OnTogglePanelTools(object? sender, RoutedEventArgs e)
+    {
+        _settings.ShowToolsPanel = !_settings.ShowToolsPanel;
+        ApplyPanelVisibility();
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    private void OnTogglePanelColor(object? sender, RoutedEventArgs e)
+    {
+        _settings.ShowColorPanel = !_settings.ShowColorPanel;
+        ApplyPanelVisibility();
+        Sable.Core.Settings.SettingsService.Save(_settings);
+    }
+
+    private void OnTogglePanelLayers(object? sender, RoutedEventArgs e)
+    {
+        _settings.ShowLayersPanel = !_settings.ShowLayersPanel;
+        ApplyPanelVisibility();
+        Sable.Core.Settings.SettingsService.Save(_settings);
     }
 
     /// <summary>Push the customisable canvas-overlay colours from settings to the GPU canvas.</summary>
@@ -180,6 +336,8 @@ public partial class MainWindow : Window
         Canvas.SetOverlayColors(
             _settings.GuideRgb(), _settings.SmartGuideRgb(),
             _settings.GridRgb(), _settings.QuickMaskRgb());
+        Canvas.SetCheckerPrefs(_settings.CheckerSize, _settings.CheckerARgb(), _settings.CheckerBRgb());
+        Canvas.SetCursorPrefs(_settings.PreciseCursor);
     }
 
     private void ApplyTheme(Sable.Core.Settings.AppTheme theme)
@@ -193,6 +351,11 @@ public partial class MainWindow : Window
             _ => Avalonia.Styling.ThemeVariant.Dark,
         };
         RequestedThemeVariant = variant;
+
+        // user accent colour: a window-level resource override beats the theme-dictionary default,
+        // and every {DynamicResource ChromeAccent} consumer updates live
+        var (ar, ag, ab) = _settings.AccentRgb();
+        Resources["ChromeAccent"] = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(ar, ag, ab));
 
         // keep the GPU pasteboard (canvas surround) in sync with the ChromeCanvas token
         // (resolved directly — variant resources aren't reliably available at ctor time)
@@ -266,6 +429,111 @@ public partial class MainWindow : Window
         if (sender is MenuItem { Tag: string path }) OpenPath(path);
     }
 
+    /// <summary>Welcome-screen recent-file cards (thumbnail + name; click opens). Thumbnails come from
+    /// the .sable embedded preview.png or a downscaled decode of the image file, loaded off-thread.</summary>
+    private void RebuildWelcome()
+    {
+        if (WelcomeRecents is null) return;
+        WelcomeRecents.Children.Clear();
+        var recents = _settings.RecentFiles.Where(System.IO.File.Exists).Take(6).ToList();
+        WelcomeRecentHeader.IsVisible = recents.Count > 0;
+        foreach (var path in recents)
+        {
+            var img = new Avalonia.Controls.Image
+            {
+                Width = 120, Height = 84,
+                Stretch = Avalonia.Media.Stretch.Uniform,
+            };
+            var thumbHost = new Border
+            {
+                Width = 124, Height = 88,
+                CornerRadius = new Avalonia.CornerRadius(3),
+                Child = img,
+            };
+            thumbHost.Bind(Border.BackgroundProperty, this.GetResourceObservable("ChromePanel2"));
+            var name = new TextBlock
+            {
+                Text = System.IO.Path.GetFileName(path),
+                FontSize = 11, TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
+                MaxWidth = 124, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            };
+            name.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeTextDim"));
+            var card = new Button
+            {
+                Padding = new Thickness(6),
+                Margin = new Thickness(5),
+                Background = Avalonia.Media.Brushes.Transparent,
+                Tag = path,
+                Content = new StackPanel { Spacing = 5, Children = { thumbHost, name } },
+            };
+            ToolTip.SetTip(card, path);
+            card.Click += (_, _) => OpenPath(path);
+            WelcomeRecents.Children.Add(card);
+            LoadWelcomeThumb(path, img);
+        }
+    }
+
+    private void LoadWelcomeThumb(string path, Avalonia.Controls.Image img)
+    {
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                Avalonia.Media.Imaging.Bitmap? bmp = null;
+                if (path.EndsWith(".sable", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    if (SableFile.TryReadPreviewPng(path) is { } png)
+                        bmp = Avalonia.Media.Imaging.Bitmap.DecodeToWidth(new System.IO.MemoryStream(png), 240);
+                }
+                else
+                {
+                    using var fs = System.IO.File.OpenRead(path);
+                    bmp = Avalonia.Media.Imaging.Bitmap.DecodeToWidth(fs, 240);
+                }
+                if (bmp is not null)
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => img.Source = bmp);
+            }
+            catch { /* thumbnail is best-effort */ }
+        });
+    }
+
+    /// <summary>Snapshot the (still-active) composite as the tab's hover-preview bitmap.</summary>
+    private void CaptureTabPreview(DocumentTab tab)
+    {
+        try
+        {
+            if (!ReferenceEquals(Canvas.Document, tab.Doc)) return;   // only the mounted doc can be read back
+            if (MakeSavePreviewPng() is { } png)
+                tab.Preview = new Avalonia.Media.Imaging.Bitmap(new System.IO.MemoryStream(png));
+        }
+        catch { /* preview is best-effort */ }
+    }
+
+    /// <summary>Downscaled composite encoded as PNG, embedded in .sable saves for fast previews.</summary>
+    private byte[]? MakeSavePreviewPng()
+    {
+        try
+        {
+            if (Canvas.Document is not { } doc || Canvas.ReadComposite() is not { } px) return null;
+            const int maxSide = 256;
+            int w = doc.Width, h = doc.Height;
+            double s = System.Math.Min(1.0, (double)maxSide / System.Math.Max(w, h));
+            int tw = System.Math.Max(1, (int)(w * s)), th = System.Math.Max(1, (int)(h * s));
+            var thumb = new byte[tw * th * 4];
+            for (int y = 0; y < th; y++)
+            {
+                int sy = System.Math.Min(h - 1, (int)((y + 0.5) / s));
+                for (int x = 0; x < tw; x++)
+                {
+                    int sx = System.Math.Min(w - 1, (int)((x + 0.5) / s));
+                    System.Array.Copy(px, (sy * w + sx) * 4, thumb, (y * tw + x) * 4, 4);
+                }
+            }
+            return Sable.Imaging.ImageCodec.EncodePngBytes(tw, th, thumb);
+        }
+        catch { return null; }
+    }
+
     /// <summary>Open a .sable or image file as a new tab (recent menu, file associations, drag-drop).</summary>
     private DocumentTab? OpenPath(string path)
     {
@@ -301,6 +569,8 @@ public partial class MainWindow : Window
         {
             ApplyTheme(_settings.Theme);
             ApplyOverlayColors();
+            ApplyPanelVisibility();
+            UpdateEmptyState();     // welcome-screen toggle may have changed
             RebuildKeyGestures();   // pick up any rebound hotkeys
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
         }
@@ -874,11 +1144,47 @@ public partial class MainWindow : Window
         var m = d.SnapshotSelectionMask() ?? Sable.Engine.Selections.Full(d.Width, d.Height);
         d.SetMaskSelection(Sable.Engine.Selections.Invert(m));
     }
-    private void OnGrowSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Grow(m, w, h, 4));
-    private void OnShrinkSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Shrink(m, w, h, 4));
-    private void OnSmoothSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Smooth(m, w, h, 4));
-    private void OnBorderSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Border(m, w, h, 4));
-    private void OnFeatherSelection(object? sender, RoutedEventArgs e) => MorphSelection((m, w, h) => Sable.Engine.Selections.Feather(m, w, h, 4));
+    // each op remembers its last radius for the session (PS-style amount prompt)
+    private static int _lastGrowPx = 4, _lastShrinkPx = 4, _lastSmoothPx = 4, _lastBorderPx = 4, _lastFeatherPx = 4;
+
+    private async void OnGrowSelection(object? sender, RoutedEventArgs e)
+    {
+        if (await PromptSelectionAmount("mainWindow.growSel", _lastGrowPx) is not { } px) return;
+        _lastGrowPx = px;
+        MorphSelection((m, w, h) => Sable.Engine.Selections.Grow(m, w, h, px));
+    }
+    private async void OnShrinkSelection(object? sender, RoutedEventArgs e)
+    {
+        if (await PromptSelectionAmount("mainWindow.shrinkSel", _lastShrinkPx) is not { } px) return;
+        _lastShrinkPx = px;
+        MorphSelection((m, w, h) => Sable.Engine.Selections.Shrink(m, w, h, px));
+    }
+    private async void OnSmoothSelection(object? sender, RoutedEventArgs e)
+    {
+        if (await PromptSelectionAmount("mainWindow.smoothSel", _lastSmoothPx) is not { } px) return;
+        _lastSmoothPx = px;
+        MorphSelection((m, w, h) => Sable.Engine.Selections.Smooth(m, w, h, px));
+    }
+    private async void OnBorderSelection(object? sender, RoutedEventArgs e)
+    {
+        if (await PromptSelectionAmount("mainWindow.borderSel", _lastBorderPx) is not { } px) return;
+        _lastBorderPx = px;
+        MorphSelection((m, w, h) => Sable.Engine.Selections.Border(m, w, h, px));
+    }
+    private async void OnFeatherSelection(object? sender, RoutedEventArgs e)
+    {
+        if (await PromptSelectionAmount("mainWindow.featherSel", _lastFeatherPx) is not { } px) return;
+        _lastFeatherPx = px;
+        MorphSelection((m, w, h) => Sable.Engine.Selections.Feather(m, w, h, px));
+    }
+
+    /// <summary>Amount prompt for the Select morphology ops; null when there is no selection or on cancel.</summary>
+    private async System.Threading.Tasks.Task<int?> PromptSelectionAmount(string titleKey, int initial)
+    {
+        if (Canvas.Document is not { } d || (d.Selection is null && d.SelectionMask is null)) return null;
+        var title = Loc.T(titleKey).TrimEnd('…', '.', ' ');
+        return await AmountDialog.Ask(this, title, initial, 1, 250);
+    }
 
     private void MorphSelection(System.Func<byte[], int, int, byte[]> op)
     {
@@ -1179,7 +1485,8 @@ public partial class MainWindow : Window
                 else Canvas.CommitCrop();
                 e.Handled = true; break;
             case Key.Escape:
-                if (Canvas.QuickMask) Canvas.CancelQuickMask();       // cancel quick mask (restore prior selection)
+                if (_radial is not null) CloseRadialMenu();            // dismiss the radial quick menu first
+                else if (Canvas.QuickMask) Canvas.CancelQuickMask();   // cancel quick mask (restore prior selection)
                 else if (Canvas.PenActive) Canvas.CancelPen();        // discard pen path
                 else if (Canvas.MeshActive) Canvas.CancelMeshWarp();
                 else if (Canvas.PolyLassoActive) Canvas.CancelPolyLasso();
@@ -1246,7 +1553,9 @@ public partial class MainWindow : Window
         _dragModels = null;
         _pendingCollapse = null;
         if (_dragSource is null || Doc is not { } d) return;
-        // right-click selects the row (Photoshop/Affinity) so the context menu acts on it
+        // Right-press: only fix the selection (select the row when it's OUTSIDE a multi-selection;
+        // keep the multi-selection intact when inside). The flyout itself is opened from the
+        // ContextRequested handler — handling the raw right-press here suppressed it.
         if (e.GetCurrentPoint(LayerList).Properties.IsRightButtonPressed)
         {
             if (!d.SelectionModels.Contains(_dragSource.Model)) LayerList.SelectedItem = _dragSource;
@@ -1336,6 +1645,27 @@ public partial class MainWindow : Window
             }
         }
         else { _dropTarget = null; DropIndicator.IsVisible = false; DropIntoBox.IsVisible = false; }
+    }
+
+    // Open the layer row's ContextFlyout ourselves: the default path collapsed a multi-selection to
+    // the clicked row, so Group/Merge acted on one layer. We keep the selection (fixed on right-press)
+    // and show the flyout on the row under the cursor. Hit-test by position — e.Source on a bubbled
+    // ContextRequested is often the ListBox, not the row.
+    private void OnLayerContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        Visual? hit = e.TryGetPosition(LayerList, out var p)
+            ? LayerList.InputHitTest(p) as Visual
+            : e.Source as Visual;
+        for (var v = hit; v is not null; v = v.GetVisualParent())
+        {
+            if (v is Control { ContextFlyout: { } flyout } c &&
+                c.DataContext is Sable.UI.ViewModels.LayerViewModel)
+            {
+                flyout.ShowAt(c);
+                e.Handled = true;
+                return;
+            }
+        }
     }
 
     private void OnLayerPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -1457,6 +1787,98 @@ public partial class MainWindow : Window
     {
         Canvas.Brush.Flow = (float)(e.NewValue / 100.0);
         if (BrushFlowLabel is not null) BrushFlowLabel.Text = Loc.T("mainWindow.percentValue", $"{e.NewValue:0}");
+    }
+
+    private void OnBrushSmoothChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        => Canvas.Stabilizer = (float)(e.NewValue / 100.0);
+
+    private void OnBrushSpacingChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        => Canvas.Brush.Spacing = (float)(e.NewValue / 100.0);
+
+    private void OnPressureToggles(object? sender, RoutedEventArgs e)
+    {
+        Canvas.Brush.PressureSize = PressureSizeCheck.IsChecked == true;
+        Canvas.Brush.PressureFlow = PressureFlowCheck.IsChecked == true;
+    }
+
+    private void OnGradShapeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (GradShapeCombo is null) return;   // fires during InitializeComponent
+        Canvas.GradientShape = (Sable.Tools.GradientShape)System.Math.Clamp(GradShapeCombo.SelectedIndex, 0, 4);
+    }
+
+    private void OnCropAspectChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (CropAspectCombo is null) return;   // fires during InitializeComponent
+        Canvas.CropAspect = CropAspectCombo.SelectedIndex switch
+        {
+            1 => 1.0,
+            2 => 4.0 / 3.0,
+            3 => 3.0 / 2.0,
+            4 => 16.0 / 9.0,
+            _ => 0,   // free
+        };
+    }
+
+    private void OnCropDeleteChanged(object? sender, RoutedEventArgs e)
+        => Canvas.CropDeletePixels = CropDeleteCheck.IsChecked == true;
+
+    private void OnZoom50(object? sender, RoutedEventArgs e) => Canvas.SetZoomPercent(50);
+    private void OnZoom200(object? sender, RoutedEventArgs e) => Canvas.SetZoomPercent(200);
+
+    private void OnFillForeground(object? sender, RoutedEventArgs e)
+        => Canvas.FillSelection(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B);
+
+    private void OnFillBackground(object? sender, RoutedEventArgs e)
+        => Canvas.FillSelection(Canvas.BgR, Canvas.BgG, Canvas.BgB);
+
+    // ===== brush presets (options-bar picker; persisted to %AppData%/Sable/brushes.json) =====
+    private List<Sable.Tools.BrushPreset> _brushPresets = new();
+    private bool _presetSync;
+
+    private void RebuildBrushPresetCombo(string? select = null)
+    {
+        if (BrushPresetCombo is null) return;
+        _presetSync = true;
+        BrushPresetCombo.Items.Clear();
+        foreach (var p in _brushPresets)
+            BrushPresetCombo.Items.Add(new ComboBoxItem { Content = p.Name });
+        BrushPresetCombo.SelectedIndex = select is null ? -1 : _brushPresets.FindIndex(p => p.Name == select);
+        _presetSync = false;
+    }
+
+    private void OnBrushPresetSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_presetSync || BrushPresetCombo is null) return;
+        int i = BrushPresetCombo.SelectedIndex;
+        if (i < 0 || i >= _brushPresets.Count) return;
+        _brushPresets[i].ApplyTo(Canvas.Brush);
+        SyncBrushSliders();
+        // reflect the non-HUD params too
+        BrushFlowSlider.Value = Canvas.Brush.Flow * 100;
+        BrushSpacingSlider.Value = Canvas.Brush.Spacing * 100;
+        PressureSizeCheck.IsChecked = Canvas.Brush.PressureSize;
+        PressureFlowCheck.IsChecked = Canvas.Brush.PressureFlow;
+    }
+
+    private async void OnSaveBrushPreset(object? sender, RoutedEventArgs e)
+    {
+        var name = await TextPromptWindow.Ask(this, Loc.T("mainWindow.savePreset"),
+            Loc.T("mainWindow.presetDefaultName", _brushPresets.Count + 1));
+        if (name is null) return;
+        _brushPresets.RemoveAll(p => p.Name == name);   // same name = overwrite
+        _brushPresets.Add(Sable.Tools.BrushPreset.From(name, Canvas.Brush));
+        Sable.Tools.BrushPresetStore.Save(_brushPresets);
+        RebuildBrushPresetCombo(name);
+    }
+
+    private void OnDeleteBrushPreset(object? sender, RoutedEventArgs e)
+    {
+        int i = BrushPresetCombo.SelectedIndex;
+        if (i < 0 || i >= _brushPresets.Count) return;
+        _brushPresets.RemoveAt(i);
+        Sable.Tools.BrushPresetStore.Save(_brushPresets);
+        RebuildBrushPresetCombo();
     }
 
     /// <summary>Reflect brush size/hardness back into the options-bar sliders (after HUD adjust).</summary>
@@ -1749,15 +2171,75 @@ public partial class MainWindow : Window
         GradientPanel.IsVisible = tab == "grad";
         SwatchesTabPanel.IsVisible = tab == "swatch";
         HistogramTabPanel.IsVisible = tab == "hist";
+        NavigatorTabPanel.IsVisible = tab == "nav";
 
         static Avalonia.Media.IBrush B(bool on) => new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(on ? "#FFAAAAAA" : "#FF666666"));
         TabColor.Foreground = B(tab == "color");
         TabGrad.Foreground = B(tab == "grad");
         TabSwatches.Foreground = B(tab == "swatch");
         TabHist.Foreground = B(tab == "hist");
+        TabNav.Foreground = B(tab == "nav");
 
         if (tab == "grad") SyncWheelToStop();
         else if (tab == "color") SetWheel(Avalonia.Media.Color.FromRgb(Canvas.Brush.R, Canvas.Brush.G, Canvas.Brush.B));
+        else if (tab == "nav") RefreshNavigator(force: true);
+    }
+
+    // --- Navigator panel: composite thumbnail + viewport rect; click/drag re-centres ---
+    private int _navThumbVersion = -1;
+
+    /// <summary>Refresh the navigator thumbnail (downscaled composite) + viewport rect.</summary>
+    private void RefreshNavigator(bool force = false)
+    {
+        if (NavView is null || !NavigatorTabPanel.IsVisible) return;
+        if (Canvas.Document is not { } doc) { NavView.SetThumbnail(null, 0, 0); return; }
+
+        UpdateNavRect();
+        // thumbnail readback is not free — only re-read when the composite may have changed
+        int ver = doc.SelectionVersion + (Doc?.Undo.Cursor ?? 0);
+        if (!force && ver == _navThumbVersion) return;
+        _navThumbVersion = ver;
+
+        if (Canvas.ReadComposite() is not { } px) return;
+        const int maxSide = 220;
+        int w = doc.Width, h = doc.Height;
+        double s = System.Math.Min(1.0, (double)maxSide / System.Math.Max(w, h));
+        int tw = System.Math.Max(1, (int)(w * s)), th = System.Math.Max(1, (int)(h * s));
+        var thumb = new byte[tw * th * 4];
+        for (int y = 0; y < th; y++)
+        {
+            int sy = System.Math.Min(h - 1, (int)((y + 0.5) / s));
+            for (int x = 0; x < tw; x++)
+            {
+                int sx = System.Math.Min(w - 1, (int)((x + 0.5) / s));
+                System.Array.Copy(px, (sy * w + sx) * 4, thumb, (y * tw + x) * 4, 4);
+            }
+        }
+        var png = Sable.Imaging.ImageCodec.EncodePngBytes(tw, th, thumb);
+        NavView.SetThumbnail(new Avalonia.Media.Imaging.Bitmap(new System.IO.MemoryStream(png)), w, h);
+    }
+
+    private void UpdateNavRect()
+    {
+        if (NavView is null) return;
+        var (x, y, w, h) = Canvas.VisibleDocRect;
+        NavView.SetVisibleRect(x, y, w, h);
+        if (NavZoomSlider is not null && !_navZoomSync)
+        {
+            _navZoomSync = true;
+            NavZoomSlider.Value = System.Math.Clamp(Canvas.EffectiveScale * 100, NavZoomSlider.Minimum, NavZoomSlider.Maximum);
+            _navZoomSync = false;
+        }
+    }
+
+    private bool _navZoomSync;
+
+    private void OnNavZoom(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_navZoomSync || Canvas.Document is null) return;
+        _navZoomSync = true;
+        Canvas.SetZoomPercent(e.NewValue);
+        _navZoomSync = false;
     }
 
     // --- Channels panel (view + isolate) --------------------------------------------------
@@ -2104,6 +2586,96 @@ public partial class MainWindow : Window
         SelectMember(g, active ? (g.Current + 1) % g.Tools.Length : g.Current);
     }
 
+    private RadialMenuWindow? _radial;
+
+    /// <summary>Quick radial tool menu at the cursor (` key) — pen-friendly tool switching.
+    /// Re-pressing ` (or Esc) closes it; the window never takes focus so the editor stays active.</summary>
+    private void OpenRadialMenu()
+    {
+        if (_radial is not null) { _radial.Close(); _radial = null; return; }   // toggle
+        if (_activeTab is null) return;
+        var items = new (string, System.Action)[]
+        {
+            (Loc.T("tools.move"), () => SetToolDirect(Sable.Tools.ToolKind.Move)),
+            (Loc.T("tools.rectangleMarquee"), () => SetToolDirect(Sable.Tools.ToolKind.Marquee)),
+            (Loc.T("tools.brush"), () => SetToolDirect(Sable.Tools.ToolKind.Brush)),
+            (Loc.T("tools.eraser"), () => SetToolDirect(Sable.Tools.ToolKind.Eraser)),
+            (Loc.T("tools.fill"), () => SetToolDirect(Sable.Tools.ToolKind.Fill)),
+            (Loc.T("tools.eyedropper"), () => SetToolDirect(Sable.Tools.ToolKind.Eyedropper)),
+            (Loc.T("tools.hand"), () => SetToolDirect(Sable.Tools.ToolKind.Hand)),
+            (Loc.T("tools.zoom"), () => SetToolDirect(Sable.Tools.ToolKind.Zoom)),
+        };
+        _radial = new RadialMenuWindow(items);
+        _radial.Closed += (_, _) => _radial = null;
+        _radial.ShowAtCursor(this);
+    }
+
+    private void CloseRadialMenu() { _radial?.Close(); _radial = null; }
+
+    // ===== before/after peek: hold \ (or the panel's Compare button) to view the document
+    // with every adjustment + live filter hidden; release restores them exactly =====
+    private readonly List<Sable.Engine.Layers.Layer> _peekHidden = new();
+
+    private void BeginPeek()
+    {
+        if (_peekHidden.Count > 0 || Canvas.Document is not { } d) return;
+        void Walk(List<Sable.Engine.Layers.Layer> list)
+        {
+            foreach (var l in list)
+            {
+                if (l.Visible && l is Sable.Engine.Layers.AdjustmentLayer or Sable.Engine.Layers.FilterLayer)
+                {
+                    l.Visible = false;
+                    l.Dirty = true;
+                    _peekHidden.Add(l);
+                }
+                Walk(l.Children);
+            }
+        }
+        Walk(d.Layers);
+    }
+
+    private void EndPeek()
+    {
+        foreach (var l in _peekHidden) { l.Visible = true; l.Dirty = true; }
+        _peekHidden.Clear();
+    }
+
+    // ===== spring-loaded tools (hold a tool letter = temporary tool, release = restore) =====
+    private Key _springKey = Key.None;
+    private Sable.Tools.ToolKind _springPrev;
+    private DateTime _springDownAt;
+
+    private void SpringTool(KeyEventArgs e, string letter)
+    {
+        if (e.Key == _springKey) return;   // key autorepeat while held — don't keep cycling
+        _springKey = e.Key;
+        _springPrev = Canvas.ActiveTool;
+        _springDownAt = DateTime.UtcNow;
+        CycleGroup(letter);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (e.Key is Key.Oem5 or Key.OemBackslash) EndPeek();   // before/after peek release
+        if (e.Key != _springKey) return;
+        bool held = (DateTime.UtcNow - _springDownAt).TotalMilliseconds > 350;
+        _springKey = Key.None;
+        if (held && Canvas.ActiveTool != _springPrev) SetToolDirect(_springPrev);
+    }
+
+    /// <summary>Activate a tool by kind, keeping its group's flyout state in sync.</summary>
+    private void SetToolDirect(Sable.Tools.ToolKind kind)
+    {
+        foreach (var g in _groups)
+        {
+            int i = System.Array.FindIndex(g.Tools, t => t.Kind == kind);
+            if (i >= 0) { SelectMember(g, i); return; }
+        }
+        Canvas.ActiveTool = kind;
+    }
+
     private object? _smartLayer;   // the layer whose SAM2 objects the canvas currently shows
     // per-layer SAM2 object cache: switching back to an unchanged layer reuses its masks instead of
     // re-running SAM2. Keyed by layer ref; the content key invalidates it when the layer's pixels or
@@ -2287,6 +2859,8 @@ public partial class MainWindow : Window
         SelectOpts.IsVisible = k is ToolKind.Marquee or ToolKind.EllipseMarquee or ToolKind.Lasso or ToolKind.PolyLasso or ToolKind.MagicWand or ToolKind.ColorRange;
         TypeOpts.IsVisible = k == ToolKind.Type;
         EyedropperOpts.IsVisible = k == ToolKind.Eyedropper;
+        GradOpts.IsVisible = k == ToolKind.Gradient;
+        CropOpts.IsVisible = k == ToolKind.Crop;
         // Flow only applies to the paint/clone brushes — not liquify/retouch (Smudge etc.) which ignore it
         if (FlowOpts is not null)
             FlowOpts.IsVisible = k is ToolKind.Brush or ToolKind.Pencil or ToolKind.Eraser
@@ -2305,26 +2879,29 @@ public partial class MainWindow : Window
             case Key.OemPlus or Key.Add: Canvas.ZoomBy(1.1); break;
             case Key.OemMinus or Key.Subtract: Canvas.ZoomBy(1.0 / 1.1); break;
             case Key.D0 or Key.NumPad0: Canvas.ResetView(); break;
-            // tool shortcuts (PLAN §14) — re-press cycles within the group
-            case Key.V: CycleGroup("V"); break;
-            case Key.M: CycleGroup("M"); break;
-            case Key.L: CycleGroup("L"); break;
-            case Key.W: CycleGroup("W"); break;
-            case Key.B: CycleGroup("B"); break;
-            case Key.G: CycleGroup("G"); break;
-            case Key.C: CycleGroup("C"); break;
-            case Key.U: CycleGroup("U"); break;
-            case Key.S when e.KeyModifiers == KeyModifiers.None: CycleGroup("S"); break;
-            case Key.O: CycleGroup("O"); break;
-            case Key.T: CycleGroup("T"); break;
-            case Key.Y when e.KeyModifiers == KeyModifiers.None: CycleGroup("Y"); break;
-            case Key.P: CycleGroup("P"); break;
-            case Key.I: CycleGroup("I"); break;
-            case Key.H: CycleGroup("H"); break;
-            case Key.Z: CycleGroup("Z"); break;
+            // tool shortcuts (PLAN §14) — re-press cycles within the group; HOLDING the key makes
+            // the switch temporary (spring-loaded): release restores the previous tool.
+            case Key.V: SpringTool(e, "V"); break;
+            case Key.M: SpringTool(e, "M"); break;
+            case Key.L: SpringTool(e, "L"); break;
+            case Key.W: SpringTool(e, "W"); break;
+            case Key.B: SpringTool(e, "B"); break;
+            case Key.G: SpringTool(e, "G"); break;
+            case Key.C: SpringTool(e, "C"); break;
+            case Key.U: SpringTool(e, "U"); break;
+            case Key.S when e.KeyModifiers == KeyModifiers.None: SpringTool(e, "S"); break;
+            case Key.O: SpringTool(e, "O"); break;
+            case Key.T: SpringTool(e, "T"); break;
+            case Key.Y when e.KeyModifiers == KeyModifiers.None: SpringTool(e, "Y"); break;
+            case Key.P: SpringTool(e, "P"); break;
+            case Key.I: SpringTool(e, "I"); break;
+            case Key.H: SpringTool(e, "H"); break;
+            case Key.Z: SpringTool(e, "Z"); break;
             // Ctrl+K (palette) and Ctrl+D (deselect) are owned by the rebindable keymap (OnGlobalKeyDown)
             case Key.X when e.KeyModifiers == KeyModifiers.None: Canvas.SwapColors(); UpdateSwatchFills(); break;   // swap fg/bg
             case Key.D when e.KeyModifiers == KeyModifiers.None: Canvas.ResetColors(); UpdateSwatchFills(); break;  // reset fg/bg
+            case Key.Oem5 or Key.OemBackslash: BeginPeek(); break;   // hold = before/after (hide adjustments)
+            case Key.OemTilde: OpenRadialMenu(); break;              // ` = quick radial tool menu at the cursor
             case Key.Q: Canvas.ToggleQuickMask(); break;   // quick mask (paint the selection as rubylith)
             case Key.K: Canvas.PaintMask = !Canvas.PaintMask; break;   // edit layer mask
             // Delete / Enter / Escape are owned by the tunnel OnGlobalKeyDown (richer pen/mesh/quickmask logic)
@@ -2367,7 +2944,11 @@ public partial class MainWindow : Window
     /// <summary>Make a tab active: swap the canvas + DataContext, rewire the canvas callbacks.</summary>
     private void ActivateTab(DocumentTab? tab)
     {
-        if (_activeTab is { } prev) prev.IsActive = false;
+        if (_activeTab is { } prev)
+        {
+            prev.IsActive = false;
+            CaptureTabPreview(prev);   // snapshot the composite for the tab's hover preview
+        }
         _activeTab = tab;
         _smartLayer = null; _smartCache.Clear();   // smart-select masks/cache belong to the previous doc
         ApplyAiVisibility();                        // AI ops enable/disable with doc presence
@@ -2415,7 +2996,12 @@ public partial class MainWindow : Window
     private void UpdateEmptyState()
     {
         bool empty = _tabs.Count == 0;
-        if (EmptyState is not null) EmptyState.IsVisible = empty;
+        if (EmptyState is not null)
+        {
+            EmptyState.IsVisible = empty && _settings.ShowWelcomeScreen;
+            WelcomeShowCheck.IsChecked = _settings.ShowWelcomeScreen;
+        }
+        if (empty && _settings.ShowWelcomeScreen) RebuildWelcome();
         // the GPU canvas is a native HWND that paints OVER the Avalonia welcome overlay (airspace);
         // hide it when there's no document so the empty/welcome state is actually visible.
         if (Canvas is not null) Canvas.IsVisible = !empty;
@@ -2433,9 +3019,11 @@ public partial class MainWindow : Window
         foreach (var mi in new[]
         {
             FileSaveItem, FileSaveAsItem, FileExportItem,
-            EditCutItem, EditCopyItem, EditCopyMergedItem, EditPasteItem, EditPasteIntoItem, EditDuplicateItem,
+            FilePlaceItem, FileRevertItem, FileCloseItem, FileCloseAllItem, FileCloseOthersItem,
+            EditCutItem, EditCopyItem, EditCopyMergedItem, EditPasteItem, EditPasteIntoItem, EditPasteInPlaceItem, EditDuplicateItem,
+            EditFillFgItem, EditFillBgItem,
             ImageMenu, LayerMenu, TypeMenu, SelectMenu, FilterMenu,
-            ViewZoomInItem, ViewZoomOutItem, ViewFitItem, ViewActualItem,
+            ViewZoomInItem, ViewZoomOutItem, ViewFitItem, ViewActualItem, ViewHalfItem, ViewDoubleItem,
         })
             if (mi is not null) mi.IsEnabled = on;
     }
@@ -2584,11 +3172,16 @@ public partial class MainWindow : Window
         ["edit.copyMerged"] = () => OnCopyMerged(null, _e),
         ["edit.paste"]      = () => OnPaste(null, _e),
         ["edit.pasteInto"]  = () => OnPasteInto(null, _e),
+        ["edit.pasteInPlace"] = () => OnPasteInPlace(null, _e),
+        ["edit.fillFg"]     = () => OnFillForeground(null, _e),
+        ["edit.fillBg"]     = () => OnFillBackground(null, _e),
         ["edit.duplicate"]  = () => OnDuplicate(null, _e),
         ["select.all"]      = () => OnSelectAll(null, _e),
         ["select.deselect"] = () => OnDeselect(null, _e),
         ["select.invert"]   = () => OnInvertSelection(null, _e),
         ["layer.new"]          = () => Doc?.NewLayerCommand.Execute(null),
+        ["layer.group"]        = () => Doc?.GroupCommand.Execute(null),
+        ["layer.ungroup"]      = () => Doc?.UngroupCommand.Execute(null),
         ["layer.mergeDown"]    = () => OnMergeDown(null, _e),
         ["layer.mergeVisible"] = () => OnMergeVisible(null, _e),
         ["layer.stamp"]        = () => OnStamp(null, _e),
@@ -2613,7 +3206,35 @@ public partial class MainWindow : Window
             try { _keyGestures.Add((Avalonia.Input.KeyGesture.Parse(g), c.Id)); }
             catch { /* a malformed override just disables that binding */ }
         }
+        RefreshMenuGestures();
     }
+
+    /// <summary>Update menu accelerator labels to the EFFECTIVE keymap (menu items carry the
+    /// command id in Tag; their static InputGesture is just the pre-init default).</summary>
+    private void RefreshMenuGestures()
+    {
+        var byId = Sable.Core.Settings.KeyCommands.Catalog.ToDictionary(c => c.Id);
+        foreach (var mi in EnumerateMenuItems(MainMenu.Items))
+        {
+            if (mi.Tag is not string id || !byId.ContainsKey(id)) continue;
+            var g = _settings.GestureFor(id);
+            if (string.IsNullOrWhiteSpace(g)) { mi.InputGesture = null; continue; }
+            try { mi.InputGesture = Avalonia.Input.KeyGesture.Parse(g); }
+            catch { /* malformed override → leave the label empty */ mi.InputGesture = null; }
+        }
+    }
+
+    private static IEnumerable<MenuItem> EnumerateMenuItems(System.Collections.IEnumerable items)
+    {
+        foreach (var it in items)
+        {
+            if (it is not MenuItem mi) continue;
+            yield return mi;
+            foreach (var child in EnumerateMenuItems(mi.Items)) yield return child;
+        }
+    }
+
+    private void OnShortcuts(object? sender, RoutedEventArgs e) => new ShortcutsWindow(_settings).Show(this);
 
     /// <summary>Run a command by id (keymap dispatch). Unknown ids are ignored.</summary>
     private void RunKeyCommand(string id)
@@ -2636,12 +3257,21 @@ public partial class MainWindow : Window
     private void OnCopy(object? sender, RoutedEventArgs e) => DoCopy(false);
     private void OnCopyMerged(object? sender, RoutedEventArgs e) => DoCopy(true);
 
+    /// <summary>Where the copied region sits in the document (selection bounds, else the layer offset).</summary>
+    private (int X, int Y) CopySourcePos()
+    {
+        if (Canvas.Document?.Selection is { } sel) return (sel.X, sel.Y);
+        if (Doc?.SelectedLayer?.Model is { } ml) return (ml.OffsetX, ml.OffsetY);
+        return (0, 0);
+    }
+
     private void DoCopy(bool merged)
     {
         var r = merged ? Canvas.CopyMerged() : Canvas.CopyRegion();
         if (r is { } reg)
         {
-            SableClipboard.SetRegion(reg.px, reg.w, reg.h);
+            var (sx, sy) = CopySourcePos();
+            SableClipboard.SetRegion(reg.px, reg.w, reg.h, sx, sy);
             _ = WriteOsImage(reg.px, reg.w, reg.h);
         }
         else if (Doc?.SelectedLayer is { } vm)
@@ -2655,7 +3285,8 @@ public partial class MainWindow : Window
         var r = Canvas.CopyRegion();
         if (r is { } reg)
         {
-            SableClipboard.SetRegion(reg.px, reg.w, reg.h);
+            var (sx, sy) = CopySourcePos();
+            SableClipboard.SetRegion(reg.px, reg.w, reg.h, sx, sy);
             _ = WriteOsImage(reg.px, reg.w, reg.h);
             Canvas.DeleteSelection();   // undoable clear of the copied region
         }
@@ -2683,12 +3314,55 @@ public partial class MainWindow : Window
         vm.PasteLayer(LayerFromRegion(px, SableClipboard.Width, SableClipboard.Height, mask));
     }
 
+    /// <summary>Paste at the exact document position the region was copied from.</summary>
+    private void OnPasteInPlace(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is not { } vm || Canvas.Document is null) return;
+        if (SableClipboard.Pixels is not { } px) { OnPaste(sender, e); return; }
+        var layer = LayerFromRegion(px, SableClipboard.Width, SableClipboard.Height, null);
+        if (SableClipboard.SourcePos is { } sp) { layer.OffsetX = sp.X; layer.OffsetY = sp.Y; }
+        vm.PasteLayer(layer);
+    }
+
     private void OnDuplicate(object? sender, RoutedEventArgs e) => Doc?.DuplicateLayerCommand.Execute(null);
 
     private void OnSetTag(object? sender, RoutedEventArgs e)
     {
         if (sender is Control c && c.Tag is int tag && Doc?.SelectedLayer is { } vm)
             vm.ColorTag = tag;
+    }
+
+    // ===== layer-FX clipboard (copy/paste/clear a layer's effect stack) =====
+    private static List<Sable.Engine.Layers.LayerEffect>? _fxClipboard;
+    private static float _fxClipboardFill = 1f;
+
+    private void OnCopyEffects(object? sender, RoutedEventArgs e)
+    {
+        if (Doc?.SelectedLayer?.Model is not { } m) return;
+        _fxClipboard = m.Effects.Select(fx => fx.Clone()).ToList();
+        _fxClipboardFill = m.FillOpacity;
+    }
+
+    private void OnPasteEffects(object? sender, RoutedEventArgs e)
+    {
+        if (_fxClipboard is null || Doc is not { } doc) return;
+        var targets = doc.SelectionModels.Count > 0
+            ? doc.SelectionModels.ToList()
+            : doc.SelectedLayer?.Model is { } one ? new List<Sable.Engine.Layers.Layer> { one } : new();
+        foreach (var m in targets)
+        {
+            m.Effects.Clear();
+            m.Effects.AddRange(_fxClipboard.Select(fx => fx.Clone()));
+            m.FillOpacity = _fxClipboardFill;
+            m.Dirty = true;
+        }
+    }
+
+    private void OnClearEffects(object? sender, RoutedEventArgs e)
+    {
+        if (Doc?.SelectedLayer?.Model is not { } m || m.Effects.Count == 0) return;
+        m.Effects.Clear();
+        m.Dirty = true;
     }
 
     // ===== document tabs (Phase 2 #1) =====
@@ -2717,6 +3391,86 @@ public partial class MainWindow : Window
         _tabs.Remove(tab);
         if (ReferenceEquals(_activeTab, tab))
             ActivateTab(_tabs.Count == 0 ? null : _tabs[System.Math.Clamp(i, 0, _tabs.Count - 1)]);
+    }
+
+    private void OnCloseActive(object? sender, RoutedEventArgs e)
+    {
+        if (_activeTab is { } t) _ = CloseTab(t);
+    }
+
+    private async void OnCloseAll(object? sender, RoutedEventArgs e)
+    {
+        foreach (var t in _tabs.ToList()) await CloseTab(t);   // dirty tabs prompt; cancel keeps that tab
+    }
+
+    private async void OnCloseOthers(object? sender, RoutedEventArgs e)
+    {
+        var keep = _activeTab;
+        foreach (var t in _tabs.ToList())
+            if (!ReferenceEquals(t, keep)) await CloseTab(t);
+    }
+
+    /// <summary>File ▸ Revert — discard changes and reload the active tab from its file.</summary>
+    private async void OnRevert(object? sender, RoutedEventArgs e)
+    {
+        if (_activeTab is not { } tab) return;
+        var src = tab.Path ?? tab.SourcePath;
+        if (string.IsNullOrEmpty(src) || !System.IO.File.Exists(src)) return;
+        if (tab.IsDirty &&
+            !await ConfirmWindow.Ask(this, Loc.T("menu.file.revert"), Loc.T("mainWindow.revertBody"))) return;
+        try
+        {
+            var doc = src.EndsWith(".sable", System.StringComparison.OrdinalIgnoreCase)
+                ? SableFile.Load(src)
+                : DocumentIO.OpenImage(src);
+            int i = _tabs.IndexOf(tab);
+            _tabs.Remove(tab);
+            var nt = OpenInNewTab(doc, tab.Path, tab.Title, tab.SourcePath);
+            nt.IsDirty = false;
+            if (_tabs.IndexOf(nt) != i && i >= 0 && i < _tabs.Count)
+            {
+                _tabs.Remove(nt);
+                _tabs.Insert(i, nt);
+            }
+            ActivateTab(nt);
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, Loc.T("menu.file.revert"), ex.Message);
+        }
+    }
+
+    /// <summary>File ▸ Place — import an image file as a new layer in the open document.</summary>
+    private async void OnPlaceImage(object? sender, RoutedEventArgs e)
+    {
+        if (Doc is null || Canvas.Document is null) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("menu.file.place"),
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType(Loc.T("mainWindow.imagesFilter"))
+                {
+                    Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp" }
+                }
+            }
+        });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            if (DocumentIO.OpenImage(path).Layers is [Sable.Engine.Layers.PixelLayer src2, ..])
+            {
+                var layer = LayerFromRegion(src2.Pixels, src2.Width, src2.Height, null);
+                layer.Name = System.IO.Path.GetFileNameWithoutExtension(path);
+                Doc.PasteLayer(layer);   // undoable add to the current document
+            }
+        }
+        catch (System.Exception ex)
+        {
+            await ConfirmWindow.Ask(this, Loc.T("menu.file.place"), ex.Message);
+        }
     }
 
     private void OnNewTabButton(object? sender, RoutedEventArgs e) => _ = OnNewDocument();
@@ -3179,7 +3933,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                SableFile.Save(doc, p);
+                SableFile.Save(doc, p, MakeSavePreviewPng());
                 if (_activeTab is { } t) t.IsDirty = false;
             }
             catch (System.Exception ex)
@@ -3208,7 +3962,7 @@ public partial class MainWindow : Window
 
         try
         {
-            SableFile.Save(doc, path);
+            SableFile.Save(doc, path, MakeSavePreviewPng());
         }
         catch (System.Exception ex)
         {
@@ -3247,7 +4001,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality);
+            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi);
         }
         catch (System.Exception ex)
         {

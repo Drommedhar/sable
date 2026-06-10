@@ -33,8 +33,9 @@ public sealed class StrokeSession
         _markTiles = markTiles;
     }
 
-    /// <summary>Snapshot the tiles this segment will touch, then paint it. Coords are document px.</summary>
-    public void StrokeTo(double x0, double y0, double x1, double y1)
+    /// <summary>Snapshot the tiles this segment will touch, then paint it. Coords are document px.
+    /// <paramref name="p0"/>/<paramref name="p1"/> = stylus pressure at the segment ends (1 = mouse).</summary>
+    public void StrokeTo(double x0, double y0, double x1, double y1, float p0 = 1f, float p1 = 1f)
     {
         // to buffer-local space (the brush re-adds the origin for doc-space selection clipping)
         x0 -= _ox; y0 -= _oy; x1 -= _ox; y1 -= _oy;
@@ -44,7 +45,7 @@ public sealed class StrokeSession
         var tiles = TilesIn(minX, minY, maxX, maxY);
         foreach (var t in tiles)
             if (!_before.ContainsKey(t)) _before[t] = RasterTiles.GetTile(_target, _w, _h, t.tx, t.ty);
-        _brush.Stroke(_target, _w, _h, x0, y0, x1, y1);
+        _brush.Stroke(_target, _w, _h, x0, y0, x1, y1, p0, p1);
         _markTiles(tiles);
     }
 

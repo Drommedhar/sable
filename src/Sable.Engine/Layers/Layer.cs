@@ -17,6 +17,13 @@ public abstract class Layer
     /// <summary>0..1 fill opacity (scales the layer's pixels only, not FX — PS "Fill"). Multiplies with Opacity for now.</summary>
     public float FillOpacity { get; set; } = 1f;
 
+    // Blend-If "underlying layer" ramps (0..1 backdrop luminance): the layer fades IN between
+    // Lo0..Lo1 and OUT between Hi0..Hi1. Defaults (0,0,1,1) = off.
+    public float BlendIfLo0 { get; set; }
+    public float BlendIfLo1 { get; set; }
+    public float BlendIfHi0 { get; set; } = 1f;
+    public float BlendIfHi1 { get; set; } = 1f;
+
     public BlendMode BlendMode { get; set; } = BlendMode.Normal;
 
     public bool Visible { get; set; } = true;
@@ -123,6 +130,8 @@ public abstract class Layer
         c.Name = Name;
         c.Opacity = Opacity;
         c.FillOpacity = FillOpacity;
+        c.BlendIfLo0 = BlendIfLo0; c.BlendIfLo1 = BlendIfLo1;
+        c.BlendIfHi0 = BlendIfHi0; c.BlendIfHi1 = BlendIfHi1;
         c.BlendMode = BlendMode;
         c.Visible = Visible;
         c.ClipToBelow = ClipToBelow;

@@ -7,18 +7,12 @@
         Background="{DynamicResource ChromePanel}"
         WindowStartupLocation="CenterOwner"
         Title="{loc:Loc settingsWindow.settings}">
-    <DockPanel LastChildFill="True">
+    <!-- single explicit grid: rows = [content *, footer Auto], cols = [sidebar 190, content *].
+         Sidebar spans both rows; the ScrollViewer (row 0) and footer (row 1) tile and never overlap. -->
+    <Grid RowDefinitions="*,Auto" ColumnDefinitions="190,*">
 
-        <!-- bottom bar -->
-        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="12,8">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="{loc:Loc settingsWindow.cancel}" Classes="opt" Padding="16,0" Click="OnCancel" />
-                <Button Content="{loc:Loc settingsWindow.ok}" Classes="opt" Padding="20,0" Click="OnOk" />
-            </StackPanel>
-        </Border>
-
-        <!-- left: search + category list -->
-        <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource ChromeFooter}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,0">
+        <!-- left: search + category list (full height) -->
+        <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Background="{DynamicResource ChromeFooter}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,1,0">
             <DockPanel LastChildFill="True">
                 <TextBox DockPanel.Dock="Top" x:Name="SearchBox" PlaceholderText="{loc:Loc settingsWindow.search}" Margin="8" TextChanged="OnSearch" />
                 <ListBox x:Name="CatList" Classes="settingsCats" Background="Transparent" Padding="0"
@@ -35,9 +29,13 @@
             </DockPanel>
         </Border>
 
-        <!-- right: the selected category's settings -->
-        <ScrollViewer Padding="20,14">
-            <Panel>
+            <!-- right: the selected category's settings. StackPanel (not overlapping Panel) is the
+                 canonical scrollable content; scrollbar always visible so overflow is obvious. -->
+            <ScrollViewer x:Name="ContentScroll" Grid.Row="0" Grid.Column="1" ClipToBounds="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <!-- spacing lives on the content (in the scroll extent), not ScrollViewer.Padding (which
+                     Avalonia excludes from extent → last row scrolled flush). Right margin clears the
+                     floating overlay scrollbar so right-edge controls (Reset) aren't covered. -->
+                <StackPanel Margin="20,14,28,20">
                 <!-- General -->
                 <StackPanel x:Name="PanelGeneral" Spacing="2">
                     <TextBlock Text="{loc:Loc settingsWindow.general}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
@@ -48,7 +46,7 @@
                 </StackPanel>
 
                 <!-- User Interface -->
-                <StackPanel x:Name="PanelUI" Spacing="2" IsVisible="False">
+                <StackPanel x:Name="PanelUI" Spacing="2" IsVisible="False" Margin="0,0,0,24">
                     <TextBlock Text="{loc:Loc settingsWindow.userInterface}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <TextBlock Text="{loc:Loc settingsWindow.appearance}" Classes="settingHeader" />
                     <local:SettingRow Label="UI style">
@@ -70,6 +68,19 @@
                     <local:SettingRow Label="Quick-mask colour"><local:HexColorField x:Name="QuickMaskColorField" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,4"
                                Text="{loc:Loc settingsWindow.coloursForTheOnCanvas}" />
+                    <TextBlock Text="{loc:Loc settingsWindow.checkerAndCursor}" Classes="settingHeader" Margin="0,10,0,0" />
+                    <local:SettingRow Label="Checker colour A"><local:HexColorField x:Name="CheckerAField" /></local:SettingRow>
+                    <local:SettingRow Label="Checker colour B"><local:HexColorField x:Name="CheckerBField" /></local:SettingRow>
+                    <local:SettingRow Label="Checker size (px)">
+                        <TextBox x:Name="CheckerSizeBox" Width="64" HorizontalContentAlignment="Right" />
+                    </local:SettingRow>
+                    <local:SettingRow Label="Precise brush cursor (crosshair)">
+                        <ToggleSwitch x:Name="PreciseCursorSwitch" />
+                    </local:SettingRow>
+                    <local:SettingRow Label="{loc:Loc settingsWindow.showWelcomeScreen}">
+                        <ToggleSwitch x:Name="WelcomeSwitch" />
+                    </local:SettingRow>
+                    <local:SettingRow Label="Accent colour"><local:HexColorField x:Name="AccentField" /></local:SettingRow>
                 </StackPanel>
 
                 <!-- Performance -->
@@ -95,7 +106,7 @@
                 </StackPanel>
 
                 <!-- Machine Learning (Phase 8 AI) -->
-                <StackPanel x:Name="PanelAI" Spacing="2" IsVisible="False">
+                <StackPanel x:Name="PanelAI" Spacing="2" IsVisible="False" Margin="0,0,0,24">
                     <TextBlock Text="{loc:Loc settingsWindow.machineLearning}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <local:SettingRow Label="Enable on-device AI"><ToggleSwitch x:Name="AiEnabledSwitch" IsCheckedChanged="OnAiEnabledChanged" /></local:SettingRow>
                     <TextBlock Classes="settingHint" Margin="0,2,0,0"
@@ -141,7 +152,7 @@
                 </StackPanel>
 
                 <!-- Keyboard (rebindable command hotkeys, PLAN §17.1) -->
-                <StackPanel x:Name="PanelKeys" Spacing="2" IsVisible="False">
+                <StackPanel x:Name="PanelKeys" Spacing="2" IsVisible="False" Margin="0,0,0,24">
                     <TextBlock Text="{loc:Loc settingsWindow.keyboard}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
                     <TextBlock Classes="settingHint" Margin="0,0,0,6"
                                Text="{loc:Loc settingsWindow.clickAShortcutThenPress}" />
@@ -156,7 +167,15 @@
                     <TextBlock Classes="settingHint" Margin="0,6,0,0"
                                Text="{loc:Loc settingsWindow.crossPlatformGPUFirstRaster}" />
                 </StackPanel>
-            </Panel>
-        </ScrollViewer>
-    </DockPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- bottom bar: own row (1), content column (1) — tiles below the ScrollViewer, no overlap -->
+            <Border x:Name="FooterBar" Grid.Row="1" Grid.Column="1" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="12,8">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="{loc:Loc settingsWindow.cancel}" Classes="opt" Padding="16,0" Click="OnCancel" />
+                    <Button Content="{loc:Loc settingsWindow.ok}" Classes="opt" Padding="20,0" Click="OnOk" />
+                </StackPanel>
+            </Border>
+    </Grid>
 </Window>

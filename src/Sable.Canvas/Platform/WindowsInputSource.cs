@@ -13,8 +13,12 @@ internal sealed class WindowsInputSource : IInputSource
     private const int GWLP_WNDPROC = -4;
     private const uint WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202,
         WM_MBUTTONDOWN = 0x0207, WM_MBUTTONUP = 0x0208, WM_MOUSEWHEEL = 0x020A,
-        WM_MOUSEACTIVATE = 0x0021;
+        WM_MOUSEACTIVATE = 0x0021,
+        // Windows Ink pointer messages (pens raise these BEFORE the synthesized legacy mouse
+        // messages, so the pressure is current when the mouse path paints)
+        WM_POINTERUPDATE = 0x0245, WM_POINTERDOWN = 0x0246, WM_POINTERUP = 0x0247;
     private const nint MA_NOACTIVATE = 3;
+    private const uint PT_PEN = 3;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -28,6 +32,30 @@ internal sealed class WindowsInputSource : IInputSource
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern int ShowCursor(bool show);
+    [DllImport("user32.dll")] private static extern bool GetPointerType(uint pointerId, out uint pointerType);
+    [DllImport("user32.dll")] private static extern bool GetPointerPenInfo(uint pointerId, out PointerPenInfo penInfo);
+
+    // POINTER_PEN_INFO: POINTER_INFO (96 bytes on x64) followed by the pen fields we want.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointerInfo
+    {
+        public uint pointerType, pointerId, frameId, pointerFlags;
+        public nint sourceDevice, hwndTarget;
+        public POINT ptPixelLocation, ptHimetricLocation, ptPixelLocationRaw, ptHimetricLocationRaw;
+        public uint dwTime, historyCount;
+        public int InputData;
+        public uint dwKeyStates;
+        public ulong PerformanceCount;
+        public int ButtonChangeType;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointerPenInfo
+    {
+        public PointerInfo pointerInfo;
+        public uint penFlags, penMask, pressure, rotation;
+        public int tiltX, tiltY;
+    }
 
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     private POINT _savedCursor;
@@ -37,6 +65,10 @@ internal sealed class WindowsInputSource : IInputSource
     private nint _orig, _hwnd;
     private ICanvasInputSink? _sink;
     private double _lastX, _lastY;   // last client pos (wheel lParam is screen coords, so we use this)
+    private float _pressure = 1f;    // live stylus pressure (WM_POINTER pen); 1 = mouse / pen up
+
+    /// <summary>Stylus pressure 0..1 from Windows Ink; 1 when no pen is down.</summary>
+    public float Pressure => _pressure;
 
     public void Attach(nint windowHandle, ICanvasInputSink sink)
     {
@@ -91,6 +123,17 @@ internal sealed class WindowsInputSource : IInputSource
     {
         // don't steal keyboard focus from the Avalonia window when the canvas is clicked
         if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+
+        // Windows Ink: pens raise WM_POINTER* BEFORE the synthesized legacy mouse messages,
+        // so reading the pressure here keeps it current for the mouse-driven paint path below.
+        // Messages are passed through (CallWindowProc at the bottom) so legacy synthesis continues.
+        if (msg is WM_POINTERDOWN or WM_POINTERUPDATE or WM_POINTERUP)
+        {
+            uint id = (uint)((int)wParam & 0xFFFF);
+            if (msg == WM_POINTERUP) _pressure = 1f;
+            else if (GetPointerType(id, out var pt) && pt == PT_PEN && GetPointerPenInfo(id, out var pen))
+                _pressure = pen.pressure > 0 ? Math.Clamp(pen.pressure / 1024f, 0.01f, 1f) : 1f;
+        }
 
         if (_sink is { } s)
         {

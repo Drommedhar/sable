@@ -61,6 +61,23 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _qmR = quickMask.R / 255f; _qmG = quickMask.G / 255f; _qmB = quickMask.B / 255f;
         _overlayColorsSet = true;
     }
+
+    // transparency-checker prefs + precise brush cursor (0 size = shader built-in default)
+    private float _ckSize;
+    private float _ckAR, _ckAG, _ckAB, _ckBR, _ckBG, _ckBB;
+    private bool _crosshairCursor;
+
+    /// <summary>Sets the transparency-checkerboard appearance (cell size in doc px + the two cell colours, 0..255).</summary>
+    public void SetCheckerPrefs(int size, (byte R, byte G, byte B) a, (byte R, byte G, byte B) b)
+    {
+        _ckSize = size;
+        _ckAR = a.R / 255f; _ckAG = a.G / 255f; _ckAB = a.B / 255f;
+        _ckBR = b.R / 255f; _ckBG = b.G / 255f; _ckBB = b.B / 255f;
+    }
+
+    /// <summary>Precise (crosshair) brush cursor toggle.</summary>
+    public void SetCursorPrefs(bool crosshair) => _crosshairCursor = crosshair;
+
     private DispatcherTimer? _timer;
     private nint _hwnd;
     private uint _width = 1, _height = 1;
@@ -196,6 +213,26 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         _panX += dx;
         _panY += dy;
         ViewChanged?.Invoke();
+    }
+
+    /// <summary>Centre the view on a document point (navigator click/drag).</summary>
+    public void CenterOnDoc(double docX, double docY)
+    {
+        var vp = ComputeViewport();
+        if (vp.Scale <= 0) return;
+        PanBy(_width / 2.0 - (vp.Ox + docX * vp.Scale),
+              _height / 2.0 - (vp.Oy + docY * vp.Scale));
+    }
+
+    /// <summary>Visible document region in doc px (x, y, w, h) — the navigator viewport rect.</summary>
+    public (double x, double y, double w, double h) VisibleDocRect
+    {
+        get
+        {
+            var vp = ComputeViewport();
+            if (vp.Scale <= 0) return (0, 0, 0, 0);
+            return (-vp.Ox / vp.Scale, -vp.Oy / vp.Scale, _width / vp.Scale, _height / vp.Scale);
+        }
     }
 
     public void ResetView()
@@ -655,6 +692,10 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             ov.GridColR = _gridR; ov.GridColG = _gridG; ov.GridColB = _gridB;
             ov.QuickMaskColR = _qmR; ov.QuickMaskColG = _qmG; ov.QuickMaskColB = _qmB;
         }
+        ov.CheckerSize = _ckSize;
+        ov.CkAR = _ckAR; ov.CkAG = _ckAG; ov.CkAB = _ckAB;
+        ov.CkBR = _ckBR; ov.CkBG = _ckBG; ov.CkBB = _ckBB;
+        ov.CrosshairCursor = _crosshairCursor;
         // reuse cached arrays — only reallocate when a list's length changes (rare), no per-frame GC churn
         if (_doc is { } gd)
         {

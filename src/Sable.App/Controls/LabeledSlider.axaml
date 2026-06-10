@@ -4,15 +4,17 @@
              x:Class="Sable.App.LabeledSlider"
              x:Name="Root">
     <StackPanel Spacing="4">
-        <TextBlock Text="{Binding Label, ElementName=Root}" Classes="adjLabel" />
+        <!-- label doubles as a horizontal scrub strip (drag to change the value) -->
+        <TextBlock x:Name="LabelText" Text="{Binding Label, ElementName=Root}" Classes="adjLabel"
+                   Background="Transparent" Cursor="SizeWestEast" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
             <local:GradientSlider Grid.Column="0"
                                   Minimum="{Binding Minimum, ElementName=Root}"
                                   Maximum="{Binding Maximum, ElementName=Root}"
                                   TrackBrush="{Binding TrackBrush, ElementName=Root}"
                                   Value="{Binding Value, ElementName=Root, Mode=TwoWay}" />
-            <TextBox Grid.Column="1" Width="52" TextAlignment="Center"
-                     Text="{Binding Value, ElementName=Root, Mode=TwoWay, StringFormat={}{0:0}}" />
+            <!-- value box accepts expressions ("512/2", "+10", "50%") — committed on Enter/blur -->
+            <TextBox x:Name="Box" Grid.Column="1" Width="52" TextAlignment="Center" />
         </Grid>
     </StackPanel>
 </UserControl>

@@ -45,10 +45,15 @@ public sealed partial class LayerViewModel : ObservableObject
     }
 
     // --- live row thumbnail (pixel layers only; effects/groups show a Path icon) ---
-    private const int ThumbW = 30, ThumbH = 24;
+    // generated larger than the row needs so the hover-preview tooltip stays sharp
+    private const int ThumbW = 96, ThumbH = 72;
 
     [ObservableProperty]
     private Bitmap? _thumbnail;
+
+    /// <summary>Row visibility under the layer-panel type-to-filter box (true = shown).</summary>
+    [ObservableProperty]
+    private bool _filterVisible = true;
 
     /// <summary>Rebuild the row thumbnail from the layer's current pixels (Affinity-style live thumb).</summary>
     public void RefreshThumbnail()
@@ -380,6 +385,29 @@ public sealed partial class LayerViewModel : ObservableObject
         }
     }
 
+    // --- Blend-If "underlying" ramps (EffectsWindow sliders, 0..100%) ---
+    private void SetBif(Action<Layer> set, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
+    {
+        set(Model); Model.Dirty = true; OnPropertyChanged(name);
+    }
+    public double BifLo0Pct { get => Model.BlendIfLo0 * 100; set => SetBif(l => l.BlendIfLo0 = (float)(value / 100.0)); }
+    public double BifLo1Pct { get => Model.BlendIfLo1 * 100; set => SetBif(l => l.BlendIfLo1 = (float)(value / 100.0)); }
+    public double BifHi0Pct { get => Model.BlendIfHi0 * 100; set => SetBif(l => l.BlendIfHi0 = (float)(value / 100.0)); }
+    public double BifHi1Pct { get => Model.BlendIfHi1 * 100; set => SetBif(l => l.BlendIfHi1 = (float)(value / 100.0)); }
+
+    /// <summary>Group pass-through (children composite onto the backdrop; PS default group mode).</summary>
+    public bool PassThrough
+    {
+        get => (Model as GroupLayer)?.PassThrough ?? false;
+        set
+        {
+            if (Model is not GroupLayer g || g.PassThrough == value) return;
+            g.PassThrough = value;
+            g.Dirty = true;
+            OnPropertyChanged();
+        }
+    }
+
     // --- locks (behaviour only; no recomposite) ---
     public bool LockPosition { get => Model.LockPosition; set { if (Model.LockPosition != value) { Model.LockPosition = value; OnPropertyChanged(); } } }
     public bool LockPixels { get => Model.LockPixels; set { if (Model.LockPixels != value) { Model.LockPixels = value; OnPropertyChanged(); } } }
@@ -442,8 +470,11 @@ public sealed partial class LayerViewModel : ObservableObject
     public bool IsColorBalance => Model is AdjustmentLayer { Kind: AdjustmentKind.ColorBalance };
     public bool IsChannelMixer => Model is AdjustmentLayer { Kind: AdjustmentKind.ChannelMixer };
     public bool IsShadowsHighlights => Model is AdjustmentLayer { Kind: AdjustmentKind.ShadowsHighlights };
+    public bool IsGradientMap => Model is AdjustmentLayer { Kind: AdjustmentKind.GradientMap };
     /// <summary>The adjustment model when this is a Curves layer (for the curve editor), else null.</summary>
     public AdjustmentLayer? CurvesAdjustment => Model is AdjustmentLayer { Kind: AdjustmentKind.Curves } a ? a : null;
+    /// <summary>The adjustment model when this is a Gradient Map layer (for the gradient editor), else null.</summary>
+    public AdjustmentLayer? GradientMapAdjustment => Model is AdjustmentLayer { Kind: AdjustmentKind.GradientMap } a ? a : null;
 
     /// <summary>Blur radius / spread (FilterLayer).</summary>
     public double BlurRadius
@@ -541,6 +572,8 @@ public sealed partial class LayerViewModel : ObservableObject
         identityBc.CopyTo(a.ChannelMix, 0);
         for (int ch = 0; ch < a.Curves.Length; ch++)
         { a.Curves[ch].Clear(); a.Curves[ch].Add((0f, 0f)); a.Curves[ch].Add((1f, 1f)); }
+        a.GradientStops.Clear();
+        a.GradientStops.Add((0f, 0, 0, 0)); a.GradientStops.Add((1f, 255, 255, 255));
         a.Dirty = true;
         // refresh every bound slider/box
         OnPropertyChanged(nameof(Brightness)); OnPropertyChanged(nameof(Contrast));

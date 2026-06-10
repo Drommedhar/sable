@@ -14,11 +14,14 @@
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="8,6">
             <Button Content="{loc:Loc historyWindow.addSnapshot}" HorizontalAlignment="Stretch" Click="OnAddSnapshot" />
         </Border>
-        <Grid RowDefinitions="*,Auto,Auto">
-            <ListBox Grid.Row="0" x:Name="HistoryList" FontSize="11" SelectionChanged="OnHistorySelected"
+        <Grid RowDefinitions="Auto,*,Auto,Auto">
+            <!-- timeline scrubber: drag through the undo history -->
+            <Slider Grid.Row="0" x:Name="Scrubber" Margin="8,4" Minimum="0" Maximum="0" IsSnapToTickEnabled="True"
+                    TickFrequency="1" ValueChanged="OnScrub" ToolTip.Tip="{loc:Loc historyWindow.scrubTip}" />
+            <ListBox Grid.Row="1" x:Name="HistoryList" FontSize="11" SelectionChanged="OnHistorySelected"
                      Background="Transparent" BorderThickness="0" />
-            <TextBlock Grid.Row="1" Text="{loc:Loc historyWindow.snapshots}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="8,4,0,2" />
-            <ListBox Grid.Row="2" x:Name="SnapshotList" FontSize="11" Height="120" DoubleTapped="OnRestoreSnapshot"
+            <TextBlock Grid.Row="2" Text="{loc:Loc historyWindow.snapshots}" Foreground="{DynamicResource ChromeTextFaint}" FontSize="10" Margin="8,4,0,2" />
+            <ListBox Grid.Row="3" x:Name="SnapshotList" FontSize="11" Height="120" DoubleTapped="OnRestoreSnapshot"
                      Background="Transparent" BorderThickness="0" />
         </Grid>
     </DockPanel>

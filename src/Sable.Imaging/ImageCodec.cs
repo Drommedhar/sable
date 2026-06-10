@@ -11,20 +11,45 @@ namespace Sable.Imaging;
 /// </summary>
 public static class ImageCodec
 {
-    /// <summary>Decode any Skia-supported image (PNG/JPEG/WebP/…) to RGBA8.</summary>
+    /// <summary>Decode any Skia-supported image (PNG/JPEG/WebP/…) to RGBA8, honouring the EXIF
+    /// orientation tag (camera photos come in upright).</summary>
     public static (int width, int height, byte[] rgba) DecodeRgba(string path)
     {
+        using var codec = SKCodec.Create(path);
+        if (codec is not null && SKBitmap.Decode(codec) is { } viaCodec)
+            using (viaCodec) return DecodeOriented(viaCodec, codec.EncodedOrigin);
+
         using var input = SKBitmap.Decode(path)
             ?? throw new IOException($"Could not decode image: {path}");
+        return DecodeOriented(input, SKEncodedOrigin.TopLeft);
+    }
 
-        var info = new SKImageInfo(input.Width, input.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+    /// <summary>Convert a decoded bitmap to straight-alpha RGBA8 in sRGB (Skia converts from the
+    /// file's embedded ICC profile when it tagged the decode), applying the EXIF origin transform.</summary>
+    private static (int width, int height, byte[] rgba) DecodeOriented(SKBitmap input, SKEncodedOrigin origin)
+    {
+        bool swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
+                            or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+        int w = swap ? input.Height : input.Width;
+        int h = swap ? input.Width : input.Height;
+        var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Unpremul, SKColorSpace.CreateSrgb());
         using var bmp = new SKBitmap(info);
         using (var canvas = new SKCanvas(bmp))
         {
             canvas.Clear(SKColors.Transparent);
+            switch (origin)
+            {
+                case SKEncodedOrigin.TopRight:    canvas.Translate(w, 0); canvas.Scale(-1, 1); break;
+                case SKEncodedOrigin.BottomRight: canvas.Translate(w, h); canvas.RotateDegrees(180); break;
+                case SKEncodedOrigin.BottomLeft:  canvas.Translate(0, h); canvas.Scale(1, -1); break;
+                case SKEncodedOrigin.LeftTop:     canvas.RotateDegrees(90); canvas.Scale(1, -1); break;
+                case SKEncodedOrigin.RightTop:    canvas.Translate(w, 0); canvas.RotateDegrees(90); break;
+                case SKEncodedOrigin.RightBottom: canvas.Translate(w, h); canvas.RotateDegrees(90); canvas.Scale(-1, 1); break;
+                case SKEncodedOrigin.LeftBottom:  canvas.Translate(0, h); canvas.RotateDegrees(-90); break;
+            }
             canvas.DrawBitmap(input, 0, 0);
         }
-        return (input.Width, input.Height, bmp.Bytes);
+        return (w, h, bmp.Bytes);
     }
 
     /// <summary>Encode RGBA8 pixels to a PNG file.</summary>
@@ -94,18 +119,11 @@ public static class ImageCodec
         return bytes;
     }
 
-    /// <summary>Decode image bytes (PNG/JPEG/…) to RGBA8, or null if undecodable (OS clipboard paste).</summary>
+    /// <summary>Decode image bytes (PNG/JPEG/…) to RGBA8 sRGB, or null if undecodable (OS clipboard paste).</summary>
     public static (int width, int height, byte[] rgba)? DecodeRgbaBytes(byte[] bytes)
     {
         using var input = SKBitmap.Decode(bytes);
         if (input is null) return null;
-        var info = new SKImageInfo(input.Width, input.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using var bmp = new SKBitmap(info);
-        using (var canvas = new SKCanvas(bmp))
-        {
-            canvas.Clear(SKColors.Transparent);
-            canvas.DrawBitmap(input, 0, 0);
-        }
-        return (input.Width, input.Height, bmp.Bytes);
+        return DecodeOriented(input, SKEncodedOrigin.TopLeft);
     }
 }

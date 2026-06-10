@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.TextPromptWindow"
+        Width="320" SizeToContent="Height"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc textPrompt.title}">
+    <Border Padding="16">
+        <StackPanel Spacing="12">
+            <TextBlock x:Name="TitleText" Classes="panelHeader" Padding="0" />
+            <TextBox x:Name="ValueBox" FontSize="12" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{loc:Loc textPrompt.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" IsCancel="True" />
+                <Button Content="{loc:Loc textPrompt.ok}" Classes="opt" Padding="14,0" Click="OnOk" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

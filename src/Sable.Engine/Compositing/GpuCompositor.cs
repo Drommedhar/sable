@@ -144,7 +144,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         api.ShaderModuleRelease(module);
 
         _dimsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _paramsBuf = NewBuffer(64, BufferUsage.Uniform | BufferUsage.CopyDst);
+        _paramsBuf = NewBuffer(80, BufferUsage.Uniform | BufferUsage.CopyDst);   // 64B + Blend-If ramps
         _adjParamsBuf = NewBuffer(64, BufferUsage.Uniform | BufferUsage.CopyDst);
         _curveLutBuf = NewBuffer(4 * 256 * 4, BufferUsage.Storage | BufferUsage.CopyDst); // 4ch×256×f32
         _blurParamsBuf = NewBuffer(16, BufferUsage.Uniform | BufferUsage.CopyDst);
@@ -676,8 +676,34 @@ public sealed unsafe class GpuCompositor : IDisposable
             }
             else if (layer is GroupLayer grp)
             {
-                var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
-                BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf, _width, _height);
+                if (grp.PassThrough)
+                {
+                    // pass-through (PS default): children composite straight onto the backdrop —
+                    // no isolation buffer, so a nested adjustment/filter affects everything below
+                    // the group. The group's blend mode is ignored; opacity/mask crossfade the
+                    // result against a snapshot of the original backdrop.
+                    bool plain = layer.Opacity >= 0.999f && maskBuf is null;
+                    if (plain)
+                    {
+                        foreach (var child in grp.Children)
+                            BlendOneLayer(child, ref current, ref other, depth);
+                    }
+                    else
+                    {
+                        ScratchPair(depth + 1, out Buffer* snap, out _);
+                        CopyBuffer(current, snap, _imgBytes);
+                        // children get depth+1 so their nested isolation never clobbers the snapshot
+                        foreach (var child in grp.Children)
+                            BlendOneLayer(child, ref current, ref other, depth + 1);
+                        DispatchFilterMix(snap, current, other, layer.Opacity, maskBuf);
+                        var t = current; current = other; other = t;
+                    }
+                }
+                else
+                {
+                    var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
+                    BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf, _width, _height);
+                }
             }
             else if (layer is AdjustmentLayer adj)
             {
@@ -689,9 +715,10 @@ public sealed unsafe class GpuCompositor : IDisposable
                 *(float*)(prm + 14) = adj.FillOpacity;
                 *(float*)(prm + 15) = adj.ClipToBelow ? 1f : 0f;   // backdrop-alpha clip (approx of per-layer clip)
                 api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 64);
-                if (adj.Kind == AdjustmentKind.Curves)
+                if (adj.Kind is AdjustmentKind.Curves or AdjustmentKind.GradientMap)
                 {
-                    adj.BuildLut(_lutScratch);
+                    if (adj.Kind == AdjustmentKind.Curves) adj.BuildLut(_lutScratch);
+                    else adj.BuildGradientLut(_lutScratch);
                     fixed (float* lp = _lutScratch)
                         api.QueueWriteBuffer(_gpu.Queue, _curveLutBuf, 0, lp, (nuint)(_lutScratch.Length * 4));
                 }
@@ -711,12 +738,12 @@ public sealed unsafe class GpuCompositor : IDisposable
         }
     }
 
-    // write the 64B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask,
-    // perspective row h6,h7,h8 (affine → 0,0,1), 2 pad
+    // write the 80B blend params: mode(u32), opacity, clip, inv-affine(6), fill, hasMask,
+    // perspective row h6,h7,h8 (affine → 0,0,1), srcMode, Blend-If ramps (4), pad
     private void WriteBlendParams(uint mode, float opacity, float clip, ReadOnlySpan<float> inv, float fill, bool hasMask,
-        ReadOnlySpan<float> perspRow = default, uint srcMode = 0)
+        ReadOnlySpan<float> perspRow = default, uint srcMode = 0, ReadOnlySpan<float> blendIf = default)
     {
-        var prm = stackalloc float[16];
+        var prm = stackalloc float[20];
         ((uint*)prm)[0] = mode;
         prm[1] = opacity;
         prm[2] = clip;
@@ -727,8 +754,14 @@ public sealed unsafe class GpuCompositor : IDisposable
         prm[12] = perspRow.Length == 3 ? perspRow[1] : 0f;   // h7
         prm[13] = perspRow.Length == 3 ? perspRow[2] : 1f;   // h8
         ((uint*)prm)[14] = srcMode;                          // 0 = contiguous src, 1 = tiled atlas
-        prm[15] = 0f;                                        // zero the trailing pad (don't ship uninit stack to the GPU)
-        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 64);
+        // Blend-If underlying-luminance ramps (defaults = off: fade-in done at 0, fade-out starts at 1)
+        bool hasBif = blendIf.Length == 4;
+        prm[15] = hasBif ? blendIf[0] : 0f;
+        prm[16] = hasBif ? blendIf[1] : 0f;
+        prm[17] = hasBif ? blendIf[2] : 1f;
+        prm[18] = hasBif ? blendIf[3] : 1f;
+        prm[19] = 0f;                                        // zero the trailing pad (don't ship uninit stack to the GPU)
+        _gpu.Api.QueueWriteBuffer(_gpu.Queue, _paramsBuf, 0, prm, 80);
     }
 
     // blend src (a pixel layer or a group's result) onto the accumulator.
@@ -749,8 +782,10 @@ public sealed unsafe class GpuCompositor : IDisposable
         Buffer* tileTable = null)
     {
         var (inv, persp) = LayerInverse(layer, srcW, srcH);
+        Span<float> bif = stackalloc float[4]
+            { layer.BlendIfLo0, layer.BlendIfLo1, layer.BlendIfHi0, layer.BlendIfHi1 };
         WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity,
-            maskBuf is not null, persp, tileTable is not null ? 1u : 0u);
+            maskBuf is not null, persp, tileTable is not null ? 1u : 0u, bif);
         DispatchBlend(current, src, other, maskBuf, srcW, srcH, tileTable);
         var tmp = current; current = other; other = tmp;
     }
@@ -1226,7 +1261,7 @@ public sealed unsafe class GpuCompositor : IDisposable
         ulong maskSize = mask is not null ? srcBytes : 16;
         var bg = stackalloc BindGroupEntry[8];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
-        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 64 };
+        bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 80 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = dst, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = srcBind, Size = srcSize };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = outp, Size = (ulong)_imgBytes };

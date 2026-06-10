@@ -69,6 +69,12 @@ public partial class SettingsWindow : Window
         SmartColorField.Hex = _s.SmartGuideColor;
         GridColorField.Hex = _s.GridColor;
         QuickMaskColorField.Hex = _s.QuickMaskColor;
+        CheckerAField.Hex = _s.CheckerColorA;
+        CheckerBField.Hex = _s.CheckerColorB;
+        CheckerSizeBox.Text = _s.CheckerSize.ToString();
+        PreciseCursorSwitch.IsChecked = _s.PreciseCursor;
+        WelcomeSwitch.IsChecked = _s.ShowWelcomeScreen;
+        AccentField.Hex = _s.AccentColor;
         // Performance
         UndoSlider.Value = _s.UndoLimit;
         UndoLabel.Text = _s.UndoLimit.ToString();
@@ -499,6 +505,12 @@ public partial class SettingsWindow : Window
         _s.SmartGuideColor = NormHex(SmartColorField.Hex, _s.SmartGuideColor);
         _s.GridColor = NormHex(GridColorField.Hex, _s.GridColor);
         _s.QuickMaskColor = NormHex(QuickMaskColorField.Hex, _s.QuickMaskColor);
+        _s.CheckerColorA = NormHex(CheckerAField.Hex, _s.CheckerColorA);
+        _s.CheckerColorB = NormHex(CheckerBField.Hex, _s.CheckerColorB);
+        _s.CheckerSize = int.TryParse(CheckerSizeBox.Text, out var ck) ? System.Math.Clamp(ck, 2, 256) : _s.CheckerSize;
+        _s.PreciseCursor = PreciseCursorSwitch.IsChecked == true;
+        _s.ShowWelcomeScreen = WelcomeSwitch.IsChecked == true;
+        _s.AccentColor = NormHex(AccentField.Hex, _s.AccentColor);
         _s.UndoLimit = (int)UndoSlider.Value;
         _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.GenerativeAiEnabled = GenerativeEnabledSwitch.IsChecked == true;

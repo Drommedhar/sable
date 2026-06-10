@@ -25,7 +25,9 @@ public static class DocumentIO
     public static void ExportPng(string path, int width, int height, byte[] rgba)
         => ImageCodec.EncodePng(path, width, height, rgba);
 
-    /// <summary>Export the flattened RGBA8 to a file in the chosen format, optionally resized (PLAN §16.12).</summary>
-    public static void Export(string path, ImageCodec.ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality)
-        => System.IO.File.WriteAllBytes(path, ImageCodec.EncodeScaled(fmt, srcW, srcH, rgba, outW, outH, quality));
+    /// <summary>Export the flattened RGBA8 to a file in the chosen format, optionally resized (PLAN §16.12).
+    /// <paramref name="dpi"/> &gt; 0 writes the physical resolution (PNG pHYs / JPEG JFIF density).</summary>
+    public static void Export(string path, ImageCodec.ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality, double dpi = 0)
+        => System.IO.File.WriteAllBytes(path,
+            ImageMeta.ApplyDpi(ImageCodec.EncodeScaled(fmt, srcW, srcH, rgba, outW, outH, quality), fmt, dpi));
 }

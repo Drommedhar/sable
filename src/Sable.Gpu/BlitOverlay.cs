@@ -102,4 +102,11 @@ public struct BlitOverlay
     public float SmartColR, SmartColG, SmartColB;
     public float GridColR, GridColG, GridColB;
     public float QuickMaskColR, QuickMaskColG, QuickMaskColB;
+
+    // transparency checkerboard prefs (0..1 colours; cell size in doc px; 0 = built-in default)
+    public float CheckerSize;
+    public float CkAR, CkAG, CkAB;
+    public float CkBR, CkBG, CkBB;
+    // precise (crosshair) brush cursor toggle
+    public bool CrosshairCursor;
 }

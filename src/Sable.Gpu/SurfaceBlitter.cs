@@ -22,7 +22,7 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     private Silk.NET.WebGPU.Buffer* _penBuf;      // pen-tool node geometry (storage)
     private const int GuidesFloats = 512;         // [countX, countY, _, _, Xs..., Ys...]
     private const int PenFloats = 512;            // [count, activeIdx, _, _, (ax,ay,inx,iny,outx,outy)×n]
-    private const int VpFloats = 84;              // 336 bytes (16-byte aligned)
+    private const int VpFloats = 92;              // 368 bytes (16-byte aligned)
     private Texture* _dummyMask;          // 1×1 R8 bound when there is no mask selection
     private TextureView* _dummyMaskView;
 
@@ -156,9 +156,9 @@ public sealed unsafe class SurfaceBlitter : IDisposable
     {
         var api = _gpu.Api;
 
-        // VpFloats (84) floats / 336 bytes: viewport, rect, gizmo, brush, maskOn, gradient, cropOn,
-        // shape, clone-source marker, overlay colours, preview mode, loupe, grid subdivisions — see the
-        // Viewport struct in fullscreen_blit.wgsl
+        // VpFloats (92) floats / 368 bytes: viewport, rect, gizmo, brush, maskOn, gradient, cropOn,
+        // shape, clone-source marker, overlay colours, preview mode, loupe, grid subdivisions,
+        // checkerboard prefs + crosshair cursor — see the Viewport struct in fullscreen_blit.wgsl
         var u = stackalloc float[VpFloats];
         bool hasPaste = ov.PasteR > 0 || ov.PasteG > 0 || ov.PasteB > 0;
         u[0] = vp.Ox; u[1] = vp.Oy; u[2] = vp.Scale > 0 ? 1f / vp.Scale : 0f; u[3] = hasPaste ? ov.PasteR : 0.16f;
@@ -168,7 +168,12 @@ public sealed unsafe class SurfaceBlitter : IDisposable
         u[14] = ov.GridOn ? 1f : 0f; u[15] = ov.GridSpacing;
         u[80] = ov.GridSubdivisions > 1f ? ov.GridSubdivisions : 1f;   // grid minor lines per cell
         u[81] = ov.ChannelView;                                        // channels panel: 0 normal, 1=R..4=A grayscale
-        u[82] = ov.ChannelView > 0.5f ? 7f : ov.ChannelMask;           // RGB visibility bits (composite only) — u[83] pad
+        u[82] = ov.ChannelView > 0.5f ? 7f : ov.ChannelMask;           // RGB visibility bits (composite only)
+        // transparency-checker prefs (83..90): size < 2 → shader falls back to built-in 16px grey
+        u[83] = ov.CheckerSize;
+        u[84] = ov.CkAR; u[85] = ov.CkAG; u[86] = ov.CkAB;
+        u[87] = ov.CrosshairCursor ? 1f : 0f;
+        u[88] = ov.CkBR; u[89] = ov.CkBG; u[90] = ov.CkBB;             // u[91] pad
         if (ov.Corners is { Length: 8 })
             for (int i = 0; i < 8; i++) u[16 + i] = ov.Corners[i];
         u[24] = ov.GizmoOn ? 1f : 0f;

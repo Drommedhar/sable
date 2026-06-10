@@ -15,6 +15,9 @@ struct Params {
     fillOpacity: f32, hasMask: f32,
     h6: f32, h7: f32, h8: f32,   // perspective row (affine → 0,0,1)
     srcMode: u32,                // 0 = contiguous `src` buffer; 1 = tiled atlas (binding 6/7)
+    // Blend-If "underlying layer" ramps: the layer fades IN from black between lo0..lo1 and
+    // OUT to white between hi0..hi1 of the backdrop luminance (defaults 0,0,1,1 = off).
+    bifLo0: f32, bifLo1: f32, bifHi0: f32, bifHi1: f32,
     _p4: f32,
 };
 
@@ -193,7 +196,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let da = d.w;
     let clipMul = mix(1.0, da, params.clip); // clip to backdrop alpha when clip=1
     let validF = select(0.0, 1.0, valid);    // beyond the horizon → fully transparent (no smeared sample)
-    let sa = s.w * params.opacity * params.fillOpacity * m * clipMul * validF;   // effective source alpha
+    // Blend-If: gate the layer by the UNDERLYING (backdrop) luminance with smooth knees
+    var bif = 1.0;
+    if (params.bifLo1 > 0.0 || params.bifHi0 < 1.0) {
+        let bl = dot(d.xyz, vec3<f32>(0.299, 0.587, 0.114));
+        bif = smoothstep(params.bifLo0, max(params.bifLo1, params.bifLo0 + 1e-4), bl)
+            * (1.0 - smoothstep(min(params.bifHi0, params.bifHi1 - 1e-4), params.bifHi1, bl));
+    }
+    let sa = s.w * params.opacity * params.fillOpacity * m * clipMul * validF * bif;   // effective source alpha
 
     // blended color, then where backdrop is opaque use blended, else raw source
     let b = blend(d.xyz, s.xyz, params.mode);

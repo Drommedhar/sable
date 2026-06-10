@@ -20,14 +20,29 @@
 
     <DockPanel LastChildFill="True">
 
-        <!-- bottom bar: fill opacity + close -->
+        <!-- bottom bar: blend-if ramps + fill opacity + close -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromePanel3}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,1,0,0" Padding="10,7">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
-                <TextBlock Grid.Column="1" Text="{loc:Loc effectsWindow.fillOpacity}" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
-                <TextBox Grid.Column="2" Width="60" VerticalAlignment="Center"
-                         Text="{Binding SelectedLayer.FillOpacityPercent, Mode=TwoWay, StringFormat={}{0:0} %}" />
-                <Button Grid.Column="3" Content="{loc:Loc effectsWindow.close}" Classes="opt" Padding="14,0" Click="OnClose" />
-            </Grid>
+            <StackPanel Spacing="6">
+                <TextBlock Text="{loc:Loc effectsWindow.blendIf}" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" />
+                <Grid ColumnDefinitions="Auto,*,*,12,*,*" ColumnSpacing="6">
+                    <TextBlock Grid.Column="0" Text="{loc:Loc effectsWindow.blendIfUnderlying}" Foreground="{DynamicResource ChromeTextFaint}"
+                               FontSize="10" VerticalAlignment="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.BifLo0Pct, Mode=TwoWay}"
+                            ToolTip.Tip="{loc:Loc effectsWindow.blendIfShadowStart}" />
+                    <Slider Grid.Column="2" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.BifLo1Pct, Mode=TwoWay}"
+                            ToolTip.Tip="{loc:Loc effectsWindow.blendIfShadowEnd}" />
+                    <Slider Grid.Column="4" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.BifHi0Pct, Mode=TwoWay}"
+                            ToolTip.Tip="{loc:Loc effectsWindow.blendIfHighlightStart}" />
+                    <Slider Grid.Column="5" Minimum="0" Maximum="100" Value="{Binding SelectedLayer.BifHi1Pct, Mode=TwoWay}"
+                            ToolTip.Tip="{loc:Loc effectsWindow.blendIfHighlightEnd}" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
+                    <TextBlock Grid.Column="1" Text="{loc:Loc effectsWindow.fillOpacity}" Foreground="{DynamicResource ChromeTextDim}" FontSize="11" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="2" Width="60" VerticalAlignment="Center"
+                             Text="{Binding SelectedLayer.FillOpacityPercent, Mode=TwoWay, StringFormat={}{0:0} %}" />
+                    <Button Grid.Column="3" Content="{loc:Loc effectsWindow.close}" Classes="opt" Padding="14,0" Click="OnClose" />
+                </Grid>
+            </StackPanel>
         </Border>
 
         <!-- master: effect list + reorder -->

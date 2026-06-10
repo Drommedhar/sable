@@ -39,6 +39,10 @@ struct Viewport {
     gridSub: f32,                                          // grid subdivisions (minor lines per major cell; 1 = none)
     chanView: f32,                                         // Channels panel: 0 normal, 1=R 2=G 3=B 4=A shown as grayscale
     chanMask: f32,                                         // RGB visibility bits (bit0=R,1=G,2=B), composite only; 7 = all
+    ckSize: f32,                                           // transparency-checker cell size (doc px; <2 = built-in 16)
+    ckAr: f32, ckAg: f32, ckAb: f32,                       // checker colour A (dark cell)
+    crossCursor: f32,                                      // 1 = precise crosshair brush cursor (with the ring)
+    ckBr: f32, ckBg: f32, ckBb: f32,                       // checker colour B (light cell)
     _gpad2: f32,                                           // pad to 16-byte alignment
 };
 
@@ -61,10 +65,13 @@ fn vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
 }
 
 fn checker(frag: vec2<f32>) -> vec3<f32> {
-    let cx = i32(floor(frag.x / 16.0));
-    let cy = i32(floor(frag.y / 16.0));
-    let g = select(0.16, 0.22, ((cx + cy) & 1) == 0);
-    return vec3<f32>(g, g, g);
+    let custom = vp.ckSize >= 2.0;
+    let sz = select(16.0, vp.ckSize, custom);
+    let cx = i32(floor(frag.x / sz));
+    let cy = i32(floor(frag.y / sz));
+    let a = select(vec3<f32>(0.16), vec3<f32>(vp.ckAr, vp.ckAg, vp.ckAb), custom);
+    let b = select(vec3<f32>(0.22), vec3<f32>(vp.ckBr, vp.ckBg, vp.ckBb), custom);
+    return select(a, b, ((cx + cy) & 1) == 0);
 }
 
 fn segDist(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -152,6 +159,15 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let inside = docX >= vp.ovX && docX <= vp.ovX + vp.ovW && docY >= vp.ovY && docY <= vp.ovY + vp.ovH;
         if (!inside) { outc = outc * 0.35; }
         let t = vp.invScale * 0.75;
+        // rule-of-thirds guides inside the pending crop
+        if (inside) {
+            let tx1 = vp.ovX + vp.ovW / 3.0; let tx2 = vp.ovX + vp.ovW * 2.0 / 3.0;
+            let ty1 = vp.ovY + vp.ovH / 3.0; let ty2 = vp.ovY + vp.ovH * 2.0 / 3.0;
+            if (abs(docX - tx1) <= t || abs(docX - tx2) <= t ||
+                abs(docY - ty1) <= t || abs(docY - ty2) <= t) {
+                outc = mix(outc, vec3<f32>(1.0), 0.35);
+            }
+        }
         let onL = abs(docX - vp.ovX) <= t; let onR = abs(docX - (vp.ovX + vp.ovW)) <= t;
         let onT = abs(docY - vp.ovY) <= t; let onB = abs(docY - (vp.ovY + vp.ovH)) <= t;
         let inX = docX >= vp.ovX - t && docX <= vp.ovX + vp.ovW + t;
@@ -338,6 +354,14 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (vp.brushOn > 0.5) {
         let d = length(frag.xy - vec2<f32>(vp.brushX, vp.brushY));
         if (abs(d - vp.brushR) <= 1.0) { outc = vec3<f32>(1.0) - outc; }   // contrast ring
+        // precise crosshair at the dab centre (Preferences ▸ User Interface ▸ cursor)
+        if (vp.crossCursor > 0.5) {
+            let dx = abs(frag.x - vp.brushX);
+            let dy = abs(frag.y - vp.brushY);
+            if ((dx <= 0.75 && dy >= 2.0 && dy <= 6.0) || (dy <= 0.75 && dx >= 2.0 && dx <= 6.0)) {
+                outc = vec3<f32>(1.0) - outc;
+            }
+        }
     }
 
     // eyedropper loupe: circular magnifier showing the pixels that would be sampled.

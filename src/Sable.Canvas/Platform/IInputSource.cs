@@ -38,4 +38,8 @@ public interface IInputSource : IDisposable
     void HideCursor();
     /// <summary>Restore the OS cursor and warp it back to where <see cref="HideCursor"/> hid it.</summary>
     void RestoreCursor();
+
+    /// <summary>Current stylus pressure 0..1 (Windows Ink / platform pen API); 1 for a mouse or
+    /// when the platform has no pen support. Read by the paint gesture per move.</summary>
+    float Pressure => 1f;
 }

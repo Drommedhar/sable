@@ -51,10 +51,12 @@
 
         <!-- header: title + Reset (adjustments only) -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromePanel3}" Padding="8,4">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding SelectedLayer.Name}" Classes="panelHeader" Padding="0"
                            VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="{loc:Loc adjustmentWindow.reset}" Classes="opt" Padding="8,0" Click="OnReset"
+                <Button Grid.Column="1" x:Name="CompareBtn" Content="{loc:Loc adjustmentWindow.compare}" Classes="opt"
+                        Padding="8,0" Margin="0,0,6,0" ToolTip.Tip="{loc:Loc adjustmentWindow.compareTip}" />
+                <Button Grid.Column="2" Content="{loc:Loc adjustmentWindow.reset}" Classes="opt" Padding="8,0" Click="OnReset"
                         IsVisible="{Binding SelectedLayer.IsAdjustment}" />
             </Grid>
         </Border>
@@ -173,6 +175,18 @@
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsShadowsHighlights}">
                     <local:LabeledSlider Label="Shadows" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.ShadowsPct, Mode=TwoWay}" />
                     <local:LabeledSlider Label="Highlights" Minimum="-100" Maximum="100" TrackBrush="{StaticResource GrayBrush}" Value="{Binding SelectedLayer.HighlightsPct, Mode=TwoWay}" />
+                </StackPanel>
+
+                <!-- Gradient Map -->
+                <StackPanel Spacing="6" IsVisible="{Binding SelectedLayer.IsGradientMap}">
+                    <local:GradientBar x:Name="GradMapBar" Height="42" />
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Left" Classes="opt" Padding="10,0"
+                                Content="{loc:Loc adjustmentWindow.addStop}" Click="OnGradMapAddStop" />
+                        <Button DockPanel.Dock="Left" Classes="opt" Padding="10,0" Margin="6,0,0,0"
+                                Content="{loc:Loc adjustmentWindow.deleteStop}" Click="OnGradMapDeleteStop" />
+                        <local:HexColorField x:Name="GradMapColor" Margin="6,0,0,0" />
+                    </DockPanel>
                 </StackPanel>
 
                 <!-- Invert (no options) -->

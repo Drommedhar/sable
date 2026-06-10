@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.TaskBarWindow"
+        SizeToContent="WidthAndHeight"
+        SystemDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False"
+        Focusable="False"
+        Title="{loc:Loc taskBar.title}">
+    <Border CornerRadius="16" Background="{DynamicResource ChromePanel2}"
+            BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1" Padding="5">
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <StackPanel.Styles>
+                <!-- uniform pill buttons (the global opt toggle style left them uneven height/width) -->
+                <Style Selector="Button.pill">
+                    <Setter Property="Height" Value="24" />
+                    <Setter Property="Padding" Value="12,0" />
+                    <Setter Property="CornerRadius" Value="12" />
+                    <Setter Property="FontSize" Value="12" />
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                    <Setter Property="Background" Value="{DynamicResource ChromeField}" />
+                    <Setter Property="Foreground" Value="{DynamicResource ChromeText}" />
+                    <Setter Property="BorderThickness" Value="0" />
+                </Style>
+                <Style Selector="Button.pill:pointerover /template/ ContentPresenter">
+                    <Setter Property="Background" Value="{DynamicResource ChromeAccent}" />
+                </Style>
+            </StackPanel.Styles>
+            <Button x:Name="GenFillBtn" Classes="pill" Content="{loc:Loc taskBar.genFill}" Click="OnGenFill" IsVisible="False" />
+            <Button Classes="pill" Content="{loc:Loc taskBar.mask}" Click="OnMask" ToolTip.Tip="{loc:Loc taskBar.maskTip}" />
+            <Button Classes="pill" Content="{loc:Loc taskBar.invert}" Click="OnInvert" />
+            <Button Classes="pill" Content="{loc:Loc taskBar.deselect}" Click="OnDeselect" />
+        </StackPanel>
+    </Border>
+</Window>

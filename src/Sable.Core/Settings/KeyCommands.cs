@@ -30,13 +30,18 @@ public static class KeyCommands
         new KeyCommandInfo("edit.copyMerged", "Copy Merged",       "Edit",   "Ctrl+Shift+C"),
         new KeyCommandInfo("edit.paste",      "Paste",             "Edit",   "Ctrl+V"),
         new KeyCommandInfo("edit.pasteInto",  "Paste Into",        "Edit",   "Ctrl+Shift+V"),
+        new KeyCommandInfo("edit.pasteInPlace", "Paste in Place",  "Edit",   "Ctrl+Alt+V"),
         new KeyCommandInfo("edit.duplicate",  "Duplicate Layer",   "Edit",   "Ctrl+J"),
+        new KeyCommandInfo("edit.fillFg",     "Fill with Foreground", "Edit", "Alt+Back"),
+        new KeyCommandInfo("edit.fillBg",     "Fill with Background", "Edit", "Ctrl+Back"),
         // Select
         new KeyCommandInfo("select.all",      "Select All",        "Select", "Ctrl+A"),
         new KeyCommandInfo("select.deselect", "Deselect",          "Select", "Ctrl+D"),
         new KeyCommandInfo("select.invert",   "Invert Selection",  "Select", "Ctrl+Shift+I"),
         // Layer
         new KeyCommandInfo("layer.new",          "New Layer",      "Layer",  ""),
+        new KeyCommandInfo("layer.group",        "Group Layers",   "Layer",  "Ctrl+G"),
+        new KeyCommandInfo("layer.ungroup",      "Ungroup",        "Layer",  "Ctrl+Shift+G"),
         new KeyCommandInfo("layer.mergeDown",    "Merge Down",     "Layer",  "Ctrl+E"),
         new KeyCommandInfo("layer.mergeVisible", "Merge Visible",  "Layer",  "Ctrl+Shift+E"),
         new KeyCommandInfo("layer.stamp",        "Stamp Visible",  "Layer",  "Ctrl+Shift+Alt+E"),

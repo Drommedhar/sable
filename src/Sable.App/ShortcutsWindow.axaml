@@ -1,0 +1,12 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.ShortcutsWindow"
+        Width="560" Height="640"
+        Background="{DynamicResource ChromePanel}"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc shortcutsWindow.title}">
+    <ScrollViewer Padding="16">
+        <StackPanel x:Name="Root" Spacing="4" Margin="0,0,12,12" />
+    </ScrollViewer>
+</Window>

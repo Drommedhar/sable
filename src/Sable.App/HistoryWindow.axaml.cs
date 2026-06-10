@@ -47,9 +47,18 @@ public partial class HistoryWindow : Window
             HistoryList.ItemsSource = items;
             HistoryList.SelectedIndex = vm.Undo.Cursor;
             SnapshotList.ItemsSource = vm.Snapshots.Select(s => s.Name).ToList();
+            Scrubber.Maximum = vm.Undo.History.Count;
+            Scrubber.Value = vm.Undo.Cursor;
         }
-        else { HistoryList.ItemsSource = null; SnapshotList.ItemsSource = null; }
+        else { HistoryList.ItemsSource = null; SnapshotList.ItemsSource = null; Scrubber.Maximum = 0; }
         _syncing = false;
+    }
+
+    private void OnScrub(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_syncing || _vm is not { } vm) return;
+        int target = (int)System.Math.Round(e.NewValue);
+        if (target != vm.Undo.Cursor) vm.Undo.JumpTo(target);
     }
 
     private void OnHistorySelected(object? sender, SelectionChangedEventArgs e)

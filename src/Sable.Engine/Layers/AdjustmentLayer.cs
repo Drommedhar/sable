@@ -62,6 +62,11 @@ public sealed class AdjustmentLayer : Layer
         = Enumerable.Range(0, CurveChannels)
             .Select(_ => new List<(float, float)> { (0f, 0f), (1f, 1f) }).ToArray();
 
+    // Gradient Map — luminance → gradient colour; stops sorted by Pos (0..1). Reuses the curve
+    // LUT path on the GPU (channels 1/2/3 = R/G/B output per luma; channel 0 unused).
+    public List<(float Pos, byte R, byte G, byte B)> GradientStops { get; }
+        = new() { (0f, 0, 0, 0), (1f, 255, 255, 255) };
+
     public AdjustmentLayer(AdjustmentKind kind = AdjustmentKind.BrightnessContrast)
     {
         Kind = kind;
@@ -81,6 +86,7 @@ public sealed class AdjustmentLayer : Layer
             AdjustmentKind.ColorBalance => "Colour Balance",
             AdjustmentKind.ChannelMixer => "Channel Mixer",
             AdjustmentKind.ShadowsHighlights => "Shadows / Highlights",
+            AdjustmentKind.GradientMap => "Gradient Map",
             _ => "Adjustment"
         };
     }
@@ -99,6 +105,7 @@ public sealed class AdjustmentLayer : Layer
         ColorBalance.CopyTo(c.ColorBalance, 0);
         ChannelMix.CopyTo(c.ChannelMix, 0);
         for (int ch = 0; ch < CurveChannels; ch++) { c.Curves[ch].Clear(); c.Curves[ch].AddRange(Curves[ch]); }
+        c.GradientStops.Clear(); c.GradientStops.AddRange(GradientStops);
         return c;
     }
 
@@ -119,6 +126,45 @@ public sealed class AdjustmentLayer : Layer
 
     /// <summary>Evaluate one channel's curve at x (0..1), clamped — matches the GPU LUT.</summary>
     public float EvalChannel(int ch, float x) => Math.Clamp(EvalCurve(Curves[ch], x), 0f, 1f);
+
+    /// <summary>
+    /// Fill the shared 4×256 LUT from <see cref="GradientStops"/> for the Gradient Map kind:
+    /// channels 1/2/3 hold the gradient's R/G/B (0..1) per luminance index; channel 0 is identity.
+    /// </summary>
+    public void BuildGradientLut(Span<float> lut)
+    {
+        var stops = GradientStops;
+        for (int i = 0; i < LutSize; i++)
+        {
+            float t = i / (float)(LutSize - 1);
+            var (r, g, b) = SampleGradient(stops, t);
+            lut[i] = t;                       // ch0 unused by the shader case — keep identity
+            lut[1 * LutSize + i] = r;
+            lut[2 * LutSize + i] = g;
+            lut[3 * LutSize + i] = b;
+        }
+    }
+
+    /// <summary>Linear-interpolate the (sorted) gradient stops at t (0..1) → 0..1 floats.</summary>
+    public static (float r, float g, float b) SampleGradient(
+        List<(float Pos, byte R, byte G, byte B)> stops, float t)
+    {
+        if (stops.Count == 0) return (t, t, t);
+        if (t <= stops[0].Pos || stops.Count == 1)
+            return (stops[0].R / 255f, stops[0].G / 255f, stops[0].B / 255f);
+        var last = stops[^1];
+        if (t >= last.Pos) return (last.R / 255f, last.G / 255f, last.B / 255f);
+        for (int i = 0; i < stops.Count - 1; i++)
+        {
+            var a = stops[i]; var b = stops[i + 1];
+            if (t > b.Pos) continue;
+            float f = b.Pos - a.Pos < 1e-6f ? 1f : (t - a.Pos) / (b.Pos - a.Pos);
+            return ((a.R + (b.R - a.R) * f) / 255f,
+                    (a.G + (b.G - a.G) * f) / 255f,
+                    (a.B + (b.B - a.B) * f) / 255f);
+        }
+        return (last.R / 255f, last.G / 255f, last.B / 255f);
+    }
 
     /// <summary>Monotone (Catmull-Rom, slope-limited) interpolation of a sorted point list at x.</summary>
     private static float EvalCurve(List<(float x, float y)> pts, float x)
@@ -200,4 +246,5 @@ public enum AdjustmentKind
     ColorBalance = 11,
     ChannelMixer = 12,
     ShadowsHighlights = 13,
+    GradientMap = 14,
 }

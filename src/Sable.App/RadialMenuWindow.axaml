@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.RadialMenuWindow"
+        Width="280" Height="280"
+        SystemDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False"
+        Topmost="True"
+        Title="{loc:Loc radialMenu.title}">
+    <Panel x:Name="Root">
+        <Border Width="36" Height="36" CornerRadius="18" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1"
+                PointerPressed="OnCentre">
+            <Path Width="12" Height="12" Stretch="Uniform" Stroke="{DynamicResource ChromeTextDim}" StrokeThickness="2"
+                  Data="M5 5l14 14 M19 5l-14 14" />
+        </Border>
+    </Panel>
+</Window>

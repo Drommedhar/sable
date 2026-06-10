@@ -15,6 +15,23 @@ namespace Sable.Format;
 public static class SableFile
 {
     private const string ManifestEntry = "document.json";
+    private const string PreviewEntry = "preview.png";
+
+    /// <summary>Read the embedded composite preview PNG without loading the document; null if absent.</summary>
+    public static byte[]? TryReadPreviewPng(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
+            if (zip.GetEntry(PreviewEntry) is not { } e) return null;
+            using var s = e.Open();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            return ms.ToArray();
+        }
+        catch { return null; }
+    }
 
     private sealed class DocDto
     {
@@ -35,6 +52,10 @@ public static class SableFile
         public int BlendMode { get; set; }
         public float Opacity { get; set; } = 1f;
         public float FillOpacity { get; set; } = 1f;
+        public float BifLo0 { get; set; }
+        public float BifLo1 { get; set; }
+        public float BifHi0 { get; set; } = 1f;
+        public float BifHi1 { get; set; } = 1f;
         public bool Visible { get; set; } = true;
         public bool Clip { get; set; }
         public bool LockPosition { get; set; }
@@ -78,6 +99,8 @@ public static class SableFile
         public float[]? ColorBalance { get; set; }
         public float[]? ChannelMix { get; set; }
         public float[][]? Curves { get; set; }   // [channel][x0,y0,x1,y1,...]
+        public float[]? GradientMapStops { get; set; }   // flat [pos,r,g,b, ...] (rgb 0..255)
+        public bool PassThrough { get; set; }            // group: composite children onto the backdrop
         public int FilterKind { get; set; }
         public float Radius { get; set; } = 8f;
         public float FilterAmount { get; set; } = 1f;
@@ -174,7 +197,11 @@ public static class SableFile
         public float Depth { get; set; } = 1f;
     }
 
-    public static void Save(Document doc, string path)
+    public static void Save(Document doc, string path) => Save(doc, path, null);
+
+    /// <summary>Save with an optional pre-encoded PNG composite preview (stored as preview.png in the
+    /// container — used by the welcome screen / future shell thumbnails without loading the layers).</summary>
+    public static void Save(Document doc, string path, byte[]? previewPng)
     {
         using var fs = File.Create(path);
         using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
@@ -184,6 +211,12 @@ public static class SableFile
         dto.GuidesX.AddRange(doc.GuidesX);
         dto.GuidesY.AddRange(doc.GuidesY);
         if (doc.SavedSelection is { } sel) { dto.SavedSelection = "selection.raw"; WriteEntry(zip, dto.SavedSelection, sel); }
+        if (previewPng is { Length: > 0 })
+        {
+            var pe = zip.CreateEntry(PreviewEntry, CompressionLevel.NoCompression);   // PNG is already compressed
+            using var ps = pe.Open();
+            ps.Write(previewPng, 0, previewPng.Length);
+        }
         foreach (var layer in doc.Layers)
             dto.Layers.Add(SaveLayer(zip, layer, doc.Width, doc.Height, ref next));
 
@@ -201,6 +234,8 @@ public static class SableFile
             BlendMode = (int)layer.BlendMode,
             Opacity = layer.Opacity,
             FillOpacity = layer.FillOpacity,
+            BifLo0 = layer.BlendIfLo0, BifLo1 = layer.BlendIfLo1,
+            BifHi0 = layer.BlendIfHi0, BifHi1 = layer.BlendIfHi1,
             Visible = layer.Visible,
             Clip = layer.ClipToBelow,
             LockPosition = layer.LockPosition,
@@ -245,6 +280,8 @@ public static class SableFile
                 ld.Shadows = adj.Shadows; ld.Highlights = adj.Highlights;
                 ld.ColorBalance = (float[])adj.ColorBalance.Clone(); ld.ChannelMix = (float[])adj.ChannelMix.Clone();
                 ld.Curves = adj.Curves.Select(ch => ch.SelectMany(p => new[] { p.x, p.y }).ToArray()).ToArray();
+                ld.GradientMapStops = adj.GradientStops
+                    .SelectMany(s => new[] { s.Pos, (float)s.R, (float)s.G, (float)s.B }).ToArray();
                 break;
             case FilterLayer flt:
                 ld.Type = "filter";
@@ -290,8 +327,9 @@ public static class SableFile
                 ld.PathStroked = pth.Stroked; ld.PsR = pth.StrokeR; ld.PsG = pth.StrokeG; ld.PsB = pth.StrokeB; ld.PsA = pth.StrokeA;
                 ld.PsWidth = pth.StrokeWidth; ld.PsCap = (int)pth.Cap; ld.PsJoin = (int)pth.Join;
                 break;
-            case GroupLayer:
+            case GroupLayer g:
                 ld.Type = "group";
+                ld.PassThrough = g.PassThrough;
                 break;
         }
         // children: a group's contained layers OR a content layer's nested effect layers
@@ -371,6 +409,8 @@ public static class SableFile
         created.BlendMode = (BlendMode)ld.BlendMode;
         created.Opacity = ld.Opacity;
         created.FillOpacity = ld.FillOpacity;
+        created.BlendIfLo0 = ld.BifLo0; created.BlendIfLo1 = ld.BifLo1;
+        created.BlendIfHi0 = ld.BifHi0; created.BlendIfHi1 = ld.BifHi1;
         created.Visible = ld.Visible;
         created.ClipToBelow = ld.Clip;
         created.LockPosition = ld.LockPosition;
@@ -437,6 +477,13 @@ public static class SableFile
                 for (int i = 0; i + 1 < flat.Length; i += 2) pts.Add((flat[i], flat[i + 1]));
                 if (pts.Count < 2) { pts.Clear(); pts.Add((0f, 0f)); pts.Add((1f, 1f)); }
             }
+        }
+        if (ld.GradientMapStops is { Length: >= 8 } gm)
+        {
+            a.GradientStops.Clear();
+            for (int i = 0; i + 3 < gm.Length; i += 4)
+                a.GradientStops.Add((gm[i], (byte)Math.Clamp(gm[i + 1], 0, 255),
+                    (byte)Math.Clamp(gm[i + 2], 0, 255), (byte)Math.Clamp(gm[i + 3], 0, 255)));
         }
         return a;
     }
@@ -507,7 +554,8 @@ public static class SableFile
 
     // Children are loaded generically by BuildLayer (any layer can hold them), so this
     // just makes the typed group shell.
-    private static GroupLayer LoadGroup(LayerDto ld, ZipArchive zip, int w, int h) => new(ld.Name);
+    private static GroupLayer LoadGroup(LayerDto ld, ZipArchive zip, int w, int h)
+        => new(ld.Name) { PassThrough = ld.PassThrough };
 
     private static void WriteEntry(ZipArchive zip, string name, byte[] data)
     {

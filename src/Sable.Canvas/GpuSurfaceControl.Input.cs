@@ -19,6 +19,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private IInputSource? _input;
 
     private bool _painting;
+    /// <summary>Stroke stabilizer strength 0..1 (0 = off): smooths paint input toward the cursor.</summary>
+    public float Stabilizer { get; set; }
+    /// <summary>Gradient-tool geometry (linear/radial/conical/reflected/diamond), set from the options bar.</summary>
+    public GradientShape GradientShape { get; set; } = GradientShape.Linear;
+    private double _smoothX, _smoothY;             // stabilizer state (per stroke)
+    private float _lastPressure = 1f;              // stylus pressure at the previous paint point
     private bool _hudAdjust;                       // Ctrl+Alt brush size/hardness HUD
     private double _hudStartSx, _hudStartSy;
     private float _hudStartRadius, _hudStartHardness;
@@ -35,6 +41,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _gradStartDocX, _gradStartDocY;       // gradient start (doc px)
     private double _gradStartSx, _gradStartSy, _gradEndSx, _gradEndSy;   // line ends (surface px, overlay)
     private bool _cropping;
+    private bool _zoomScrub, _zoomScrubMoved, _zoomScrubAlt;     // scrubby zoom gesture
+    private double _zoomScrubLastX, _zoomScrubAnchorX, _zoomScrubAnchorY;
     private double _cropStartDocX, _cropStartDocY;
     private SelRect? _cropRect;                          // pending crop rect (doc px); Enter commits
     private bool _shaping;
@@ -133,6 +141,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _gradienting = false;
         _shaping = false;
         _cropping = false; _cropRect = null;
+        _zoomScrub = false;
         _selecting = false;
         _lassoing = false; _lassoPts.Clear();
         _polyPts.Clear();                   // discard a pending polygonal-lasso
@@ -321,7 +330,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         if (_painting)
         {
             var (dx, dy) = MapToDoc(sx, sy);
-            _session?.StrokeTo(_lastDocX, _lastDocY, dx, dy);
+            // stroke stabilizer: exponential pull toward the cursor smooths hand jitter
+            if (Stabilizer > 0f)
+            {
+                double k = 1.0 - Math.Min(0.95, Stabilizer * 0.9);
+                _smoothX += (dx - _smoothX) * k;
+                _smoothY += (dy - _smoothY) * k;
+                dx = _smoothX; dy = _smoothY;
+            }
+            float p = _input?.Pressure ?? 1f;
+            _session?.StrokeTo(_lastDocX, _lastDocY, dx, dy, _lastPressure, p);
+            _lastPressure = p;
             _lastDocX = dx; _lastDocY = dy;
         }
         else if (_moving && SelLayer is { } al)
@@ -383,6 +402,16 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 (int)Math.Round(dx - _maskMoveStartX), (int)Math.Round(dy - _maskMoveStartY));
             _doc.SetSelectionMaskLive(shifted);
         }
+        else if (_zoomScrub)
+        {
+            double dxz = sx - _zoomScrubLastX;
+            if (Math.Abs(dxz) > 0.01)
+            {
+                if (Math.Abs(sx - _zoomScrubAnchorX) > 3) _zoomScrubMoved = true;
+                ZoomAt(Math.Pow(1.01, dxz), _zoomScrubAnchorX, _zoomScrubAnchorY);
+                _zoomScrubLastX = sx;
+            }
+        }
         else if (_gradienting)
         {
             _gradEndSx = sx; _gradEndSy = sy;   // track for the live line overlay
@@ -390,6 +419,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         else if (_cropping && _doc is not null)
         {
             var (dx, dy) = MapToDoc(sx, sy);
+            // aspect-constrained crop: snap the dragged corner to the chosen ratio (w/h)
+            if (CropAspect > 0)
+            {
+                double w = Math.Abs(dx - _cropStartDocX);
+                double h = w / CropAspect;
+                dx = _cropStartDocX + (dx >= _cropStartDocX ? w : -w);
+                dy = _cropStartDocY + (dy >= _cropStartDocY ? h : -h);
+            }
             _cropRect = SelRect.FromCorners(_cropStartDocX, _cropStartDocY, dx, dy, _doc.Width, _doc.Height);
         }
         else if (_shaping)
@@ -814,7 +851,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 NodeDown(dx, dy, mods);
                 break;
             case ToolKind.Zoom:
-                ZoomAt(alt ? 1.0 / 1.1 : 1.1, _lastMouseX, _lastMouseY);
+                // scrubby zoom: drag right = in, left = out, anchored at the press point;
+                // a plain click (no drag) steps once like before (Alt = out)
+                _zoomScrub = true; _zoomScrubMoved = false; _zoomScrubAlt = alt;
+                _zoomScrubLastX = sx; _zoomScrubAnchorX = sx; _zoomScrubAnchorY = sy;
+                _input?.Capture();
                 break;
             case ToolKind.Hand:
                 StartPan(sx, sy);
@@ -829,6 +870,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _selecting = true; _input?.Capture();
                     _selStartX = dx; _selStartY = dy;
                     _doc.SelectionMask = null;
+                    // zero the rect so a plain click (no drag → no move event) deselects on release
+                    if (_selMode == SelMode.Replace) _doc.Selection = new SelRect((int)dx, (int)dy, 0, 0);
                 }
                 break;
 
@@ -884,9 +927,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             case ToolKind.Marquee:
                 if (_doc is not null)
                 {
-                    // move a non-rect (mask) selection by dragging its interior
+                    // move a non-rect (mask) selection by dragging its interior — sample the mask
+                    // itself, not just the bbox, so clicks in a transparent hole deselect instead
                     if (_doc.SelectionMask is not null && _doc.Selection is { } mb &&
-                        dx >= mb.X && dx < mb.Right && dy >= mb.Y && dy < mb.Bottom)
+                        dx >= mb.X && dx < mb.Right && dy >= mb.Y && dy < mb.Bottom &&
+                        _doc.SelectionMask[(int)dy * _doc.Width + (int)dx] > 0)
                     {
                         _maskMoving = true; _input?.Capture();
                         _maskMoveOrig = (byte[])_doc.SelectionMask.Clone();
@@ -915,6 +960,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                         _selecting = true; _input?.Capture();
                         _selStartX = dx; _selStartY = dy;
                         _doc.SelectionMask = null;
+                        // zero the rect so a plain click (no drag → no move event) deselects on release
+                        if (_selMode == SelMode.Replace) _doc.Selection = new SelRect((int)dx, (int)dy, 0, 0);
                     }
                 }
                 break;
@@ -964,7 +1011,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     _input?.Capture();
                     _painting = true;
                     _lastDocX = dx; _lastDocY = dy;
-                    _session.StrokeTo(dx, dy, dx, dy);
+                    _smoothX = dx; _smoothY = dy;
+                    _lastPressure = _input?.Pressure ?? 1f;
+                    _session.StrokeTo(dx, dy, dx, dy, _lastPressure, _lastPressure);
                 }
                 break;
         }
@@ -1031,6 +1080,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             if (_doc is not null)
                 CommandProduced?.Invoke(new TransformLayerCommand(_doc, tl, _xfStart, LayerXform.From(tl)));
         }
+        else if (_zoomScrub)
+        {
+            _zoomScrub = false;
+            _input?.ReleaseCapture();
+            if (!_zoomScrubMoved)   // plain click = single zoom step (Alt = out)
+                ZoomAt(_zoomScrubAlt ? 1.0 / 1.1 : 1.1, _zoomScrubAnchorX, _zoomScrubAnchorY);
+        }
         else if (_gradienting && ActiveLayer is { } gl)
         {
             _gradienting = false;
@@ -1041,7 +1097,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             var before = SnapshotAllTiles(target, w, h);
             var clip = _doc?.Selection is { } s ? ((int, int, int, int)?)(s.X, s.Y, s.W, s.H) : null;
             int changed = GradientTool.Apply(target, w, h, _gradStartDocX, _gradStartDocY, ex, ey,
-                Gradient, clip, _doc?.SelectionMask, _doc?.Width ?? 0);
+                Gradient, clip, _doc?.SelectionMask, _doc?.Width ?? 0, GradientShape);
             if (changed > 0)
             {
                 var after = SnapshotAllTiles(target, w, h);
@@ -1220,11 +1276,20 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _doc.MarkStructureChanged();
     }
 
+    /// <summary>When true the crop discards pixels outside the rect (legacy destructive crop);
+    /// default keeps them — layers retain independent bounds, so cropping is reversible.</summary>
+    public bool CropDeletePixels { get; set; }
+
+    /// <summary>Crop aspect-ratio constraint as w/h (0 = free), set from the options bar.</summary>
+    public double CropAspect { get; set; }
+
     /// <summary>Commit the pending crop rectangle (Enter), resizing the document. Undoable.</summary>
     public void CommitCrop()
     {
         if (_doc is null || _cropRect is not { } r || r.W < 1 || r.H < 1) return;
-        CommandProduced?.Invoke(new CropCommand(_doc, r.X, r.Y, r.W, r.H));
+        CommandProduced?.Invoke(CropDeletePixels
+            ? new CropCommand(_doc, r.X, r.Y, r.W, r.H)
+            : new CropKeepCommand(_doc, r.X, r.Y, r.W, r.H));
         _cropRect = null;
         ResetView();
     }
@@ -1277,6 +1342,42 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             int i = (by * w + bx) * 4;
             if (cov >= 255) { target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0; }
             else target[i + 3] = (byte)(target[i + 3] * (255 - cov) / 255);   // feathered: erase alpha ∝ coverage
+        }
+        var after = SnapshotAllTiles(target, w, h);
+        layer.MarkTilesDirty(after.Keys);
+        CommandProduced?.Invoke(new PaintRasterCommand(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
+    }
+
+    /// <summary>Fill the selection (or the whole layer when none) with a solid colour, src-over,
+    /// honouring feathered selection coverage. Undoable (Edit ▸ Fill with FG/BG).</summary>
+    public void FillSelection(byte r, byte g, byte b)
+    {
+        if (_doc is not { } doc || ActiveLayer is not { LockPixels: false } layer) return;
+        layer.ExpandToCover(doc.Width, doc.Height);
+        var target = layer.Pixels;
+        int w = layer.Width, h = layer.Height;
+        var before = SnapshotAllTiles(target, w, h);
+        var mask = doc.SelectionMask;
+        var sel = doc.Selection ?? new SelRect(0, 0, doc.Width, doc.Height);
+        int mw = doc.Width, ox = layer.OffsetX, oy = layer.OffsetY;
+        int xs = Math.Max(0, sel.X), xe = Math.Min(doc.Width, sel.Right);
+        int ys = Math.Max(0, sel.Y), ye = Math.Min(doc.Height, sel.Bottom);
+        for (int dy = ys; dy < ye; dy++)
+        for (int dx = xs; dx < xe; dx++)
+        {
+            int bx = dx - ox, by = dy - oy;
+            if ((uint)bx >= (uint)w || (uint)by >= (uint)h) continue;
+            int cov = mask is null ? 255 : mask[dy * mw + dx];
+            if (cov == 0) continue;
+            int i = (by * w + bx) * 4;
+            float sa = cov / 255f;
+            float da = target[i + 3] / 255f;
+            float outA = sa + da * (1f - sa);
+            if (outA <= 0f) continue;
+            target[i]     = (byte)((r / 255f * sa + target[i] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
+            target[i + 1] = (byte)((g / 255f * sa + target[i + 1] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
+            target[i + 2] = (byte)((b / 255f * sa + target[i + 2] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
+            target[i + 3] = (byte)(outA * 255f + 0.5f);
         }
         var after = SnapshotAllTiles(target, w, h);
         layer.MarkTilesDirty(after.Keys);

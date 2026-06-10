@@ -18,6 +18,9 @@ public sealed partial class DocumentTab : ObservableObject
     [ObservableProperty] private bool _isDirty;
     [ObservableProperty] private bool _isActive;
 
+    /// <summary>Composite snapshot for the tab's hover preview (captured when the tab deactivates).</summary>
+    [ObservableProperty] private Avalonia.Media.Imaging.Bitmap? _preview;
+
     /// <summary>Last saved path (.sable), or null if never saved.</summary>
     public string? Path { get; set; }
 

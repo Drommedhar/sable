@@ -72,8 +72,32 @@ public sealed partial class DocumentViewModel : ObservableObject
         // else Group/DropLayer would act on dangling models.
         var live = new HashSet<Layer>(Layers.Select(vm => vm.Model));
         SelectionModels.RemoveAll(m => !live.Contains(m));
+        ApplyLayerFilter();
         UndoEditCommand.NotifyCanExecuteChanged();
         RedoEditCommand.NotifyCanExecuteChanged();
+    }
+
+    // --- layer-panel type-to-filter (hides non-matching rows; structure stays intact) ---
+    private string _layerFilter = "";
+
+    /// <summary>Filter the layer rows by name substring ("" = show all). Case-insensitive.</summary>
+    public string LayerFilter
+    {
+        get => _layerFilter;
+        set
+        {
+            _layerFilter = value ?? "";
+            ApplyLayerFilter();
+            OnPropertyChanged();
+        }
+    }
+
+    private void ApplyLayerFilter()
+    {
+        bool all = string.IsNullOrWhiteSpace(_layerFilter);
+        foreach (var vm in Layers)
+            vm.FilterVisible = all ||
+                vm.Model.Name.Contains(_layerFilter, System.StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Groups collapsed in the panel (transient, in-session). Model refs stay stable across resync.</summary>

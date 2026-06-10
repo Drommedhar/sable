@@ -11,6 +11,7 @@
 //   kind 11 ColourBalance:     p0..p8 = shadow.rgb, mid.rgb, highlight.rgb shifts (-1..1)
 //   kind 12 ChannelMixer:      p0..p8 = 3x3 row-major (outR=row0·rgb, etc.)
 //   kind 13 ShadowsHighlights: p0=shadows lift, p1=highlights recover
+//   kind 14 GradientMap:       luminance → gradient colour via the LUT (binding 5) ch1/2/3 = R/G/B
 
 struct Dims { width: u32, height: u32, _p0: u32, _p1: u32 };
 // 64B uniform: kind + opacity + p0..p11 (+2 pad). >6-param adjustments use p6..p11.
@@ -156,6 +157,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let sMask = (1.0 - l) * (1.0 - l);   // strong in shadows
             let hMask = l * l;                   // strong in highlights
             rgb = clamp(rgb + adj.p0 * sMask - adj.p1 * hMask, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        case 14u: { // Gradient Map: luminance indexes the gradient LUT (ch1/2/3 = R/G/B)
+            let l = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
+            rgb = vec3<f32>(lutSample(1u, l), lutSample(2u, l), lutSample(3u, l));
         }
         default: { // BrightnessContrast
             rgb = (rgb - vec3<f32>(0.5)) * adj.p1 + vec3<f32>(0.5) + vec3<f32>(adj.p0);

@@ -38,6 +38,15 @@ public sealed class SableSettings
     public string GridColor { get; set; } = "#808080";         // document/pixel grid (grey)
     public string QuickMaskColor { get; set; } = "#F21A33";    // quick-mask rubylith (red)
 
+    // Transparency checkerboard (cell size in doc px + the two cell colours) and cursor style.
+    public int CheckerSize { get; set; } = 16;
+    public string CheckerColorA { get; set; } = "#292929";     // dark cell (matches the old built-in 0.16 grey)
+    public string CheckerColorB { get; set; } = "#383838";     // light cell (0.22 grey)
+    public bool PreciseCursor { get; set; }                    // brush cursor: add a crosshair at the dab centre
+
+    // UI accent colour (selection highlights, drop indicators, navigator rect).
+    public string AccentColor { get; set; } = "#2D7FF9";
+
     // --- Machine Learning (PLAN §6 / Phase 8) ---
     /// <summary>On-device AI opt-in. Off by default; the AI menu is hidden until enabled, and enabling
     /// prompts to download the model set. No AI runs (and no models download) unless the user turns this on.</summary>
@@ -118,6 +127,14 @@ public sealed class SableSettings
     public bool SnapToObjects { get; set; } = true;        // other layers' bounding boxes + mid points
     public bool SnapVisibleOnly { get; set; } = true;      // ignore hidden layers as snap targets
 
+    // --- Panel visibility (Window menu toggles) ---
+    public bool ShowToolsPanel { get; set; } = true;
+    public bool ShowColorPanel { get; set; } = true;
+    public bool ShowLayersPanel { get; set; } = true;
+    public bool ShowContextBar { get; set; } = true;   // floating task pill under the selection
+    public bool ShowWelcomeScreen { get; set; } = true; // empty-state welcome (recents grid) when no doc is open
+    public bool OnboardingShown { get; set; }           // first-run tips card displayed once
+
     // --- Performance ---
     public int UndoLimit { get; set; } = 256;              // per-document undo capacity
 
@@ -176,6 +193,9 @@ public sealed class SableSettings
     public (byte, byte, byte) SmartGuideRgb() => ParseHex(SmartGuideColor, (255, 51, 153));
     public (byte, byte, byte) GridRgb() => ParseHex(GridColor, (128, 128, 128));
     public (byte, byte, byte) QuickMaskRgb() => ParseHex(QuickMaskColor, (242, 26, 51));
+    public (byte, byte, byte) CheckerARgb() => ParseHex(CheckerColorA, (41, 41, 41));
+    public (byte, byte, byte) CheckerBRgb() => ParseHex(CheckerColorB, (56, 56, 56));
+    public (byte, byte, byte) AccentRgb() => ParseHex(AccentColor, (45, 127, 249));
 
     /// <summary>Push a path to the front of the recent list (de-duplicated, capped).</summary>
     public void AddRecent(string path)

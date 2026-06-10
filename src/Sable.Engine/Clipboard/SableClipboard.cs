@@ -14,6 +14,9 @@ public static class SableClipboard
     public static int Width { get; private set; }
     public static int Height { get; private set; }
 
+    /// <summary>Document position the region was copied from (for Paste in Place). Null = unknown.</summary>
+    public static (int X, int Y)? SourcePos { get; private set; }
+
     /// <summary>A copied whole layer (already a clone). Paste clones it again so the clipboard keeps its copy.</summary>
     public static Layer? Layer { get; private set; }
 
@@ -21,13 +24,19 @@ public static class SableClipboard
 
     public static void SetRegion(byte[] pixels, int width, int height)
     {
-        Pixels = pixels; Width = width; Height = height; Layer = null;
+        Pixels = pixels; Width = width; Height = height; Layer = null; SourcePos = null;
+    }
+
+    /// <summary>Region copy that remembers its document position (enables Paste in Place).</summary>
+    public static void SetRegion(byte[] pixels, int width, int height, int srcX, int srcY)
+    {
+        Pixels = pixels; Width = width; Height = height; Layer = null; SourcePos = (srcX, srcY);
     }
 
     public static void SetLayer(Layer layer)
     {
-        Layer = layer; Pixels = null;
+        Layer = layer; Pixels = null; SourcePos = null;
     }
 
-    public static void Clear() { Pixels = null; Layer = null; }
+    public static void Clear() { Pixels = null; Layer = null; SourcePos = null; }
 }

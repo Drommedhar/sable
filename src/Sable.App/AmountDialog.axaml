@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.AmountDialog"
+        Width="300" SizeToContent="Height"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc amountDialog.title}">
+    <Border Padding="16">
+        <StackPanel Spacing="12">
+            <TextBlock x:Name="TitleText" Classes="panelHeader" Padding="0" />
+            <DockPanel LastChildFill="True">
+                <TextBlock x:Name="UnitText" DockPanel.Dock="Right" Margin="6,0,0,0"
+                           Foreground="{DynamicResource ChromeTextDim}" FontSize="12" VerticalAlignment="Center"
+                           Text="{loc:Loc amountDialog.px}" />
+                <TextBlock x:Name="LabelText" DockPanel.Dock="Left" Margin="0,0,8,0"
+                           Foreground="{DynamicResource ChromeText}" FontSize="12" VerticalAlignment="Center"
+                           Text="{loc:Loc amountDialog.amount}" />
+                <TextBox x:Name="ValueBox" FontSize="12" Height="{StaticResource ControlHeight}"
+                         HorizontalContentAlignment="Right" />
+            </DockPanel>
+            <Slider x:Name="ValueSlider" Minimum="1" Maximum="100" ValueChanged="OnSlider" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{loc:Loc amountDialog.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" IsCancel="True" />
+                <Button Content="{loc:Loc amountDialog.ok}" Classes="opt" Padding="14,0" Click="OnOk" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
