@@ -8,7 +8,7 @@ namespace Sable.App;
 /// has the full shortcut sheet for later.</summary>
 public partial class TipsWindow : Window
 {
-    public TipsWindow() => InitializeComponent();
+    public TipsWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 }

@@ -89,6 +89,7 @@ public partial class NewDocumentWindow : Window
     public NewDocumentWindow(double defaultDpi)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         BuildSections();
         _loading = true;
         DpiBox.Text = ((int)defaultDpi).ToString(CultureInfo.InvariantCulture);

@@ -24,6 +24,7 @@ public partial class SnappingWindow : Window
     public SnappingWindow(SableSettings settings, Action apply)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _s = settings;
         _apply = apply;
         _loading = true;

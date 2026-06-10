@@ -46,6 +46,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(SableSettings settings, string gpuName, ModelRegistry? registry)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _s = settings;
         _registry = registry;
         _downloader = registry is not null ? new ModelDownloader(registry) : null;

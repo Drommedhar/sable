@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 
@@ -28,6 +29,16 @@ public partial class BusyWindow : Window
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         _cts = cts;
         if (cts is null) CancelBtn.IsVisible = false;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && _cts is not null)
+        {
+            e.Handled = true;
+            _cts.Cancel();
+        }
+        base.OnKeyDown(e);
     }
 
     /// <summary>Show modally over <paramref name="owner"/> (owner is disabled while open).</summary>

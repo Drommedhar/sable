@@ -3373,6 +3373,14 @@ public partial class MainWindow : Window
             ActivateTab(tab);
     }
 
+    private async void OnTabPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Middle) return;
+        if (sender is not Control { Tag: DocumentTab tab }) return;
+        e.Handled = true;
+        await CloseTab(tab);
+    }
+
     private async void OnCloseTab(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control { Tag: DocumentTab tab }) return;

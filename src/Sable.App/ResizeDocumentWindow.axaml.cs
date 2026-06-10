@@ -24,6 +24,7 @@ public partial class ResizeDocumentWindow : Window
     public ResizeDocumentWindow(int w, int h, double dpi)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _aspect = h > 0 ? (double)w / h : 1;
         WBox.Value = w;
         HBox.Value = h;

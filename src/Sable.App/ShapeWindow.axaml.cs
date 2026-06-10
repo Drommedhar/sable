@@ -10,7 +10,7 @@ namespace Sable.App;
 /// </summary>
 public partial class ShapeWindow : Window
 {
-    public ShapeWindow() => InitializeComponent();
+    public ShapeWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 }

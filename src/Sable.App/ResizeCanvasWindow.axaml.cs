@@ -30,6 +30,7 @@ public partial class ResizeCanvasWindow : Window
     public ResizeCanvasWindow(int w, int h)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _oldW = w; _oldH = h;
         WBox.Value = w;
         HBox.Value = h;

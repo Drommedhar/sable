@@ -6,7 +6,7 @@ namespace Sable.App;
 /// <summary>Reusable single-line text prompt (e.g. "name this brush preset"). Null on cancel.</summary>
 public partial class TextPromptWindow : Window
 {
-    public TextPromptWindow() => InitializeComponent();
+    public TextPromptWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     public static async System.Threading.Tasks.Task<string?> Ask(Window owner, string title, string initial = "")
     {

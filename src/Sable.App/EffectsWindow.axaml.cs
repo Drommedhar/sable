@@ -15,6 +15,7 @@ public partial class EffectsWindow : Window
     public EffectsWindow()
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         FxList.SelectedIndex = 0;
     }
 

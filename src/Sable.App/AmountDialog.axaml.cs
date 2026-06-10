@@ -12,7 +12,7 @@ public partial class AmountDialog : Window
 {
     private bool _sync;
 
-    public AmountDialog() => InitializeComponent();
+    public AmountDialog() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     /// <summary>Show the prompt. Returns the value (clamped to min..max) or null if cancelled.</summary>
     public static async System.Threading.Tasks.Task<int?> Ask(Window owner, string title, int initial,

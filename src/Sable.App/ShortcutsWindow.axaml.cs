@@ -20,6 +20,7 @@ public partial class ShortcutsWindow : Window
     public ShortcutsWindow(SableSettings settings)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         Build(settings);
     }
 

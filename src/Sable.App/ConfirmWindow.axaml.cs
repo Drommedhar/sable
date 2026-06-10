@@ -6,7 +6,7 @@ namespace Sable.App;
 /// <summary>Minimal yes/no confirm dialog (e.g. discard unsaved changes). Returns true on confirm.</summary>
 public partial class ConfirmWindow : Window
 {
-    public ConfirmWindow() => InitializeComponent();
+    public ConfirmWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     /// <summary>Ask a confirm question. <paramref name="okText"/>/<paramref name="cancelText"/> override the
     /// default Discard/Cancel labels for true yes/no prompts (default = the discard-changes wording).</summary>

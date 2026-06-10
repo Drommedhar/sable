@@ -23,6 +23,7 @@ public partial class HistoryWindow : Window
     public HistoryWindow()
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         DataContextChanged += (_, _) => Bind(DataContext as DocumentViewModel);
         Bind(DataContext as DocumentViewModel);
     }

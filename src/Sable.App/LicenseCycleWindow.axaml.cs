@@ -33,6 +33,7 @@ public partial class LicenseCycleWindow : Window
     public LicenseCycleWindow(IReadOnlyList<RecommendedModel> models, ModelDownloader downloader)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _models = models;
         _downloader = downloader;
         Opened += async (_, _) => await ShowCurrent();

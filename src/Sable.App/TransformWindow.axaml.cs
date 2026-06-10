@@ -11,7 +11,7 @@ namespace Sable.App;
 /// </summary>
 public partial class TransformWindow : Window
 {
-    public TransformWindow() => InitializeComponent();
+    public TransformWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 

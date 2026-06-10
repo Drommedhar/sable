@@ -9,7 +9,7 @@ namespace Sable.App;
 /// </summary>
 public partial class AdjustmentWindow : Window
 {
-    public AdjustmentWindow() => InitializeComponent();
+    public AdjustmentWindow() { InitializeComponent(); WindowEscapeHelper.AddEscapeClose(this); }
 
     /// <summary>Forwarded to the hosted panel; supplies the Curves/Levels histogram source.</summary>
     public Func<byte[]?>? CompositeProvider

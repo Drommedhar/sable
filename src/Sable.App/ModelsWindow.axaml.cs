@@ -44,6 +44,7 @@ public partial class ModelsWindow : Window
     public ModelsWindow(ModelRegistry registry, Sable.Ai.Gpu.GpuProbe? probe = null)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _registry = registry;
         _downloader = new ModelDownloader(registry);
         FolderLabel.Text = Loc.T("modelsWindow.modelFolder", registry.ModelsFolder);

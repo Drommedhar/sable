@@ -18,6 +18,7 @@ public partial class AboutWindow : Window
     public AboutWindow(string gpuName)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         VersionLabel.Text = Loc.T("aboutWindow.versionFormat", VersionInfo.Version);
         RuntimeLabel.Text = Loc.T("aboutWindow.runtimeFormat", System.Runtime.InteropServices.RuntimeInformation.OSDescription);
         GpuLabel.Text = Loc.T("aboutWindow.rendererFormat", gpuName);

@@ -33,6 +33,7 @@ public partial class UpdateWindow : Window
     public UpdateWindow(UpdateInfo update, IUpdateService service)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _update = update;
         _service = service;
         VersionText.Text = Loc.T("updateWindow.availableFormat", update.TagName, VersionInfo.Version);

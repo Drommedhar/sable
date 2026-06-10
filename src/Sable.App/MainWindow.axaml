@@ -449,7 +449,7 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:DocumentTab">
                                     <Border Padding="10,0,6,0" Margin="2,4,0,0" CornerRadius="4,4,0,0"
-                                            PointerPressed="OnSelectTab" Tag="{Binding}"
+                                            PointerPressed="OnSelectTab" PointerReleased="OnTabPointerReleased" Tag="{Binding}"
                                             Background="{Binding IsActive, Converter={x:Static local:BoolToTabBgConverter.Instance}}">
                                         <ToolTip.Tip>
                                             <StackPanel Spacing="4">

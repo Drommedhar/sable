@@ -28,6 +28,7 @@ public partial class ExportDialog : Window
     public ExportDialog(int srcW, int srcH, byte[] rgba)
     {
         InitializeComponent();
+        WindowEscapeHelper.AddEscapeClose(this);
         _srcW = srcW; _srcH = srcH; _rgba = rgba;
         OutW = srcW; OutH = srcH;
 
