@@ -22,8 +22,10 @@ undoable graph nodes, never baked-in pixels.
 
 It also ships a **local AI** light tier that runs in-process on the GPU with no  
 Python and no cloud: smart selection, background removal, upscale, and object  
-removal. A heavier opt-in generative tier (Diffusers sidecar) is planned and  
-fully decoupled — the base app stays lean and offline.
+removal. A heavier opt-in **generative tier** — Generative Fill and  
+text-to-image through a locally managed ComfyUI runtime — is fully decoupled:  
+nothing is installed until you enable it, and the base app stays lean and  
+offline.
 
 Sable is MIT-licensed. AI **model weights are always user-provided** — Sable  
 ships pointers and shows each model's licence before download, never the  
@@ -67,6 +69,22 @@ weights themselves.
 *   **Object removal / inpaint** (LaMa).
 *   Built-in model manager: curated download pointers (licence shown per model),  
     any-URL / HuggingFace import, per-task defaults, and VRAM-fit badges.
+
+### Generative AI (opt-in — ComfyUI)
+
+*   **Generative Fill** and **Generate Image** — fill a selection or create an  
+    image from a text prompt, driven by a local **ComfyUI** runtime that Sable  
+    installs and manages in the background. Nothing is installed until you  
+    enable it in Preferences.
+*   **Reuses an existing ComfyUI install** if one is found — checkpoints and  
+    LoRAs are referenced in place, never copied.
+*   **Full workflow import** — bring your own workflow, exported in ComfyUI's  
+    API format. Your graph stays the source of truth; Sable injects the image,  
+    prompt, seed, steps, CFG, LoRAs and model picks at run time, so any  
+    architecture your workflow supports just works.
+*   Generative panel with model presets, compatible LoRAs, prompt / negative  
+    prompt, steps, CFG, denoise, seed, and CPU offload for models larger than  
+    your VRAM.
 
 ### Workspace
 
