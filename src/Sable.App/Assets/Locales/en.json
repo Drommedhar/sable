@@ -323,6 +323,20 @@
     "pressureSizeTip": "Stylus pressure controls dab size (tablets)",
     "pressureFlow": "Pressure: flow",
     "pressureFlowTip": "Stylus pressure controls dab opacity (tablets)",
+    "brushDynamicsTip": "Brush shape and dynamics (angle, roundness, jitter, blend mode, .abr import)",
+    "brushAngle": "Angle",
+    "brushRoundness": "Roundness %",
+    "sizeJitter": "Size jitter %",
+    "flowJitter": "Flow jitter %",
+    "scatterJitter": "Scatter %",
+    "angleJitter": "Angle jitter %",
+    "paintBlend": "Blend",
+    "importAbr": "Import .abr brushes…",
+    "abrFilter": "Photoshop brushes",
+    "abrImported": "{0} brush preset(s) imported.",
+    "clearTip": "Clear tip",
+    "tipRound": "Tip: round (computed)",
+    "tipSampled": "Tip: sampled {0}x{1}",
     "strength": "Strength",
     "feather": "Feather",
     "0Px": "0 px",
@@ -802,5 +816,14 @@
     "downloadingFormat": "Downloading… {0}%",
     "launchingInstaller": "Launching installer…",
     "updateFailed": "Update failed: {0}"
+  },
+  "toast": {
+    "title": "Notifications",
+    "dismiss": "Dismiss",
+    "missingFontsTitle": "Document contains missing fonts"
+  },
+  "psd": {
+    "importTitle": "PSD import notes",
+    "moreWarnings": "…and {0} more"
   }
 }

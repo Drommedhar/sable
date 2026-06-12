@@ -356,6 +356,15 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         if (_surface is not null && _gpu is not null) { _gpu.Api.SurfaceRelease(_surface); _surface = null; }
         _gpu?.Dispose();
         _gpu = null;
+        // The control can be RE-ATTACHED with a fresh HWND (dock layout rebuild / Reset Layout):
+        // CreateNativeControlCore re-inits the GPU from scratch, so every pointer/flag derived
+        // from the old device must reset or the first frame blits released resources / skips
+        // Configure and the canvas stays blank.
+        _compositeView = null;
+        _lastPreview = null;
+        _configured = false;
+        _selMaskTexW = _selMaskTexH = 0;
+        _selMaskVer = -1;
         base.DestroyNativeControlCore(control);
     }
 
@@ -533,8 +542,10 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         // full-doc recomposite every frame just because the brush tool is active.
         var dab = _compositor.Preview;
         bool dabChanged = !Nullable.Equals(dab, _lastPreview);
-        if (_compositeView is null || _doc.NeedsComposite || dabChanged)
+        // _gpuStrokeDirty: GPU brush dabs mutate the layer's GPU buffer directly (no Dirty flags)
+        if (_compositeView is null || _doc.NeedsComposite || dabChanged || _gpuStrokeDirty)
         {
+            _gpuStrokeDirty = false;
             // composite-cache hint: the edited layer → backdrop below it is reused (PLAN §7 hot-path)
             _compositor.CacheHintLayer = ActiveLayer;
             _compositeView = _compositor.Composite(_doc);

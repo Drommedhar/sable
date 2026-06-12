@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        xmlns:local="clr-namespace:Sable.App"
+        x:Class="Sable.App.ToastWindow"
+        Width="330"
+        SizeToContent="Height"
+        SystemDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False"
+        Focusable="False"
+        Title="{loc:Loc toast.title}">
+    <ItemsControl x:Name="List" Margin="6">
+        <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="local:ToastItem">
+                <Border CornerRadius="8" Background="{DynamicResource ChromePanel2}"
+                        BorderBrush="{DynamicResource ChromeBorder2}" BorderThickness="1"
+                        Padding="12,10" Margin="0,0,0,8">
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource ChromeText}" TextWrapping="Wrap"
+                                   VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <Button Grid.Column="1" Click="OnDismiss"
+                                Width="20" Height="20" CornerRadius="10" Padding="0"
+                                Background="{DynamicResource ChromeField}"
+                                Foreground="{DynamicResource ChromeTextDim}"
+                                BorderThickness="0" FontSize="11"
+                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Content="&#x2715;" ToolTip.Tip="{loc:Loc toast.dismiss}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Body}" FontSize="12"
+                                   Foreground="{DynamicResource ChromeTextDim}" TextWrapping="Wrap"
+                                   Margin="0,6,0,0" />
+                        <Button Grid.Row="2" Grid.Column="1" Click="OnAction"
+                                IsVisible="{Binding HasAction}" Content="{Binding ActionLabel}"
+                                Height="22" Padding="12,0" CornerRadius="11" FontSize="12"
+                                Background="{DynamicResource ChromeField}"
+                                Foreground="{DynamicResource ChromeText}" BorderThickness="0"
+                                VerticalContentAlignment="Center" Margin="0,8,0,0" />
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</Window>

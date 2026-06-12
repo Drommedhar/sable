@@ -271,6 +271,38 @@
                         <CheckBox x:Name="PressureFlowCheck" Content="{loc:Loc mainWindow.pressureFlow}" FontSize="11"
                                   Foreground="{DynamicResource ChromeTextDim}" VerticalAlignment="Center" Click="OnPressureToggles"
                                   ToolTip.Tip="{loc:Loc mainWindow.pressureFlowTip}" />
+                        <Rectangle Width="1" Height="18" Fill="{DynamicResource ChromeBorder}" />
+                        <Button x:Name="DynamicsBtn" Classes="iconbtn" Width="22" VerticalAlignment="Center"
+                                ToolTip.Tip="{loc:Loc mainWindow.brushDynamicsTip}">
+                            <Button.Flyout>
+                                <Flyout Placement="Bottom">
+                                    <StackPanel Width="250" Spacing="2">
+                                        <local:LabeledSlider x:Name="DynAngle" Label="{loc:Loc mainWindow.brushAngle}" Minimum="-180" Maximum="180" Value="0" />
+                                        <local:LabeledSlider x:Name="DynRoundness" Label="{loc:Loc mainWindow.brushRoundness}" Minimum="3" Maximum="100" Value="100" />
+                                        <local:LabeledSlider x:Name="DynSizeJitter" Label="{loc:Loc mainWindow.sizeJitter}" Minimum="0" Maximum="100" Value="0" />
+                                        <local:LabeledSlider x:Name="DynFlowJitter" Label="{loc:Loc mainWindow.flowJitter}" Minimum="0" Maximum="100" Value="0" />
+                                        <local:LabeledSlider x:Name="DynScatter" Label="{loc:Loc mainWindow.scatterJitter}" Minimum="0" Maximum="100" Value="0" />
+                                        <local:LabeledSlider x:Name="DynAngleJitter" Label="{loc:Loc mainWindow.angleJitter}" Minimum="0" Maximum="100" Value="0" />
+                                        <DockPanel Margin="0,4,0,0">
+                                            <TextBlock Text="{loc:Loc mainWindow.paintBlend}" Foreground="{DynamicResource ChromeTextDim}"
+                                                       FontSize="11" VerticalAlignment="Center" DockPanel.Dock="Left" Margin="0,0,8,0" />
+                                            <ComboBox x:Name="BrushBlendCombo" FontSize="11" HorizontalAlignment="Stretch"
+                                                      SelectionChanged="OnBrushBlendChanged" />
+                                        </DockPanel>
+                                        <DockPanel Margin="0,4,0,0">
+                                            <TextBlock x:Name="BrushTipLabel" Text="" Foreground="{DynamicResource ChromeTextDim}"
+                                                       FontSize="11" VerticalAlignment="Center" DockPanel.Dock="Left" />
+                                            <Button Content="{loc:Loc mainWindow.clearTip}" x:Name="ClearTipBtn" FontSize="11" Height="22"
+                                                    HorizontalAlignment="Right" Click="OnClearBrushTip" IsVisible="False" />
+                                        </DockPanel>
+                                        <Button Content="{loc:Loc mainWindow.importAbr}" FontSize="11" Height="24"
+                                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                                Click="OnImportAbr" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                            <Path Classes="icon" Width="12" Height="12" Data="M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6" />
+                        </Button>
                     </StackPanel>
                 </StackPanel>
 
@@ -428,7 +460,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Main work area: (2) tools | (1) canvas | (5/6) panels -->
+        <!-- Main work area: (2) tools | (1) canvas | (5/6) panels (fixed layout — docking removed) -->
         <Grid x:Name="MainSplit" Grid.Row="2" ColumnDefinitions="40,*,300">
 
             <!-- (2) Tool palette -->
@@ -438,7 +470,7 @@
             </Border>
 
             <!-- (1) Canvas area: document tabs + GPU surface mount point -->
-            <Grid Grid.Column="1" RowDefinitions="28,*,22" Background="{DynamicResource ChromeCanvas}">
+            <Grid x:Name="CanvasArea" Grid.Column="1" RowDefinitions="28,*,22" Background="{DynamicResource ChromeCanvas}">
                 <!-- document tabs (multi-doc) -->
                 <Border Grid.Row="0" Background="{DynamicResource ChromePanel2}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="0,0,0,1">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" Margin="6,0">
@@ -548,7 +580,7 @@
                 <Grid RowDefinitions="Auto,Auto,*">
 
                     <!-- (6) Color / Gradients / Swatches / Histogram tabs -->
-                    <DockPanel x:Name="ColorPanelRoot" Grid.Row="0">
+                    <DockPanel x:Name="ColorPanelRoot" Grid.Row="0" x:DataType="vm:DocumentViewModel" Background="{DynamicResource ChromePanel}">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <!-- 5 tabs don't fit 300px (esp. German) → wrap to a 2nd row so all stay visible -->
                             <WrapPanel>
@@ -667,7 +699,7 @@
                                   HorizontalAlignment="Stretch" />
 
                     <!-- (5) Layers / Channels / Paths -->
-                    <DockPanel x:Name="LayersPanelRoot" Grid.Row="2">
+                    <DockPanel x:Name="LayersPanelRoot" Grid.Row="2" x:DataType="vm:DocumentViewModel" Background="{DynamicResource ChromePanel}">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeFooter}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="TabLayers" Classes="panelHeader" Text="{loc:Loc mainWindow.layers}"
@@ -847,17 +879,19 @@
                                                 <MenuItem Header="{loc:Loc mainWindow.rename}" Click="OnRenameLayer" />
                                                 <MenuItem Header="{loc:Loc mainWindow.duplicate}" Click="OnDuplicate" />
                                                 <MenuItem Header="{loc:Loc mainWindow.rasterise}" Click="OnRasterise" />
-                                                <MenuItem Header="{loc:Loc mainWindow.delete}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
+                                                <!-- float-safe: #LayerList resolves via the XAML namescope, so these keep working
+                                                     when the Layers tool is floated into a Dock host window ($parent[Window] would not) -->
+                                                <MenuItem Header="{loc:Loc mainWindow.delete}" Command="{Binding #LayerList.((vm:DocumentViewModel)DataContext).DeleteLayerCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="{loc:Loc mainWindow.groupSelected}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).GroupCommand}" />
-                                                <MenuItem Header="{loc:Loc mainWindow.ungroup}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).UngroupCommand}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.groupSelected}" Command="{Binding #LayerList.((vm:DocumentViewModel)DataContext).GroupCommand}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.ungroup}" Command="{Binding #LayerList.((vm:DocumentViewModel)DataContext).UngroupCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="{loc:Loc mainWindow.mergeDown}" Click="OnMergeDown" />
                                                 <MenuItem Header="{loc:Loc mainWindow.mergeVisible}" Click="OnMergeVisible" />
                                                 <MenuItem Header="{loc:Loc mainWindow.stampVisible}" Click="OnStamp" />
                                                 <MenuItem Header="{loc:Loc mainWindow.flattenImage}" Click="OnFlatten" />
                                                 <Separator />
-                                                <MenuItem Header="{loc:Loc mainWindow.addRemoveMask2}" Command="{Binding $parent[Window].((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
+                                                <MenuItem Header="{loc:Loc mainWindow.addRemoveMask2}" Command="{Binding #LayerList.((vm:DocumentViewModel)DataContext).ToggleMaskCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="{loc:Loc mainWindow.copyEffects}" Click="OnCopyEffects" />
                                                 <MenuItem Header="{loc:Loc mainWindow.pasteEffects}" Click="OnPasteEffects" />

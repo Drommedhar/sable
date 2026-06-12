@@ -323,6 +323,20 @@
     "pressureSizeTip": "Stiftdruck steuert die Pinselgröße (Tabletts)",
     "pressureFlow": "Druck: Fluss",
     "pressureFlowTip": "Stiftdruck steuert die Deckkraft (Tabletts)",
+    "brushDynamicsTip": "Pinselform und -dynamik (Winkel, Rundheit, Streuung, Mischmodus, .abr-Import)",
+    "brushAngle": "Winkel",
+    "brushRoundness": "Rundheit %",
+    "sizeJitter": "Größen-Jitter %",
+    "flowJitter": "Fluss-Jitter %",
+    "scatterJitter": "Streuung %",
+    "angleJitter": "Winkel-Jitter %",
+    "paintBlend": "Mischmodus",
+    "importAbr": ".abr-Pinsel importieren…",
+    "abrFilter": "Photoshop-Pinsel",
+    "abrImported": "{0} Pinselvorgabe(n) importiert.",
+    "clearTip": "Spitze entfernen",
+    "tipRound": "Spitze: rund (berechnet)",
+    "tipSampled": "Spitze: gesampelt {0}x{1}",
     "strength": "Stärke",
     "feather": "Weiche Kante",
     "0Px": "0 px",
@@ -802,5 +816,14 @@
     "downloadingFormat": "Wird heruntergeladen… {0}%",
     "launchingInstaller": "Installer wird gestartet…",
     "updateFailed": "Update fehlgeschlagen: {0}"
+  },
+  "toast": {
+    "title": "Benachrichtigungen",
+    "dismiss": "Schließen",
+    "missingFontsTitle": "Dokument enthält fehlende Schriften"
+  },
+  "psd": {
+    "importTitle": "PSD-Import-Hinweise",
+    "moreWarnings": "…und {0} weitere"
   }
 }

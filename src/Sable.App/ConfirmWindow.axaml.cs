@@ -21,6 +21,17 @@ public partial class ConfirmWindow : Window
         return w.ShowDialog<bool>(owner);
     }
 
+    /// <summary>Single-button informational dialog (OK only).</summary>
+    public static System.Threading.Tasks.Task<bool> Info(Window owner, string title, string body, string okText)
+    {
+        var w = new ConfirmWindow();
+        w.TitleText.Text = title;
+        w.BodyText.Text = body;
+        w.OkBtn.Content = okText;
+        w.CancelBtn.IsVisible = false;
+        return w.ShowDialog<bool>(owner);
+    }
+
     private void OnOk(object? sender, RoutedEventArgs e) => Close(true);
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(false);
 }

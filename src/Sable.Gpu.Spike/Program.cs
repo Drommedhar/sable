@@ -367,6 +367,110 @@ unsafe
         Console.WriteLine($"composite-cache: fast==full={same} px=({fastB[mid]},{fastB[mid+1]},{fastB[mid+2]},{fastB[mid+3]})");
     }
 
+    // --- GPU brush engine (plan §2): GPU stroke ≈ CPU stroke + retouch sanity ----
+    {
+        Sable.Engine.Layers.PixelLayer MkLayer(byte r, byte g, byte b, byte a)
+        {
+            var l = new Sable.Engine.Layers.PixelLayer(96, 96, "paint");
+            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a; }
+            return l;
+        }
+
+        // mirror of GpuBrushSession.Stamp without jitter (deterministic CPU↔GPU compare)
+        Sable.Engine.Compositing.GpuDab MkDab(Sable.Tools.BrushTool b, float cx, float cy, int lw, int lh)
+        {
+            float r = MathF.Max(b.Radius, 0.5f);
+            bool hasTip = b.Tip is not null && b.TipW > 0 && b.TipH > 0;
+            float rad = b.Angle * MathF.PI / 180f;
+            float thx = r, thy = r;
+            if (hasTip)
+            {
+                float sc = 2f * r / Math.Max(b.TipW, b.TipH);
+                thx = b.TipW * sc * 0.5f; thy = b.TipH * sc * 0.5f;
+            }
+            float reach = hasTip || b.Angle != 0f ? MathF.Sqrt(thx * thx + thy * thy) : r;
+            int x0 = Math.Max(0, (int)Math.Floor(cx - reach));
+            int x1 = Math.Min(lw - 1, (int)Math.Ceiling(cx + reach));
+            int y0 = Math.Max(0, (int)Math.Floor(cy - reach));
+            int y1 = Math.Min(lh - 1, (int)Math.Ceiling(cy + reach));
+            uint flags = 0;
+            if (b.Erase) flags |= Sable.Engine.Compositing.GpuDabFlags.Erase;
+            if (b.Pencil) flags |= Sable.Engine.Compositing.GpuDabFlags.Pencil;
+            if (hasTip) flags |= Sable.Engine.Compositing.GpuDabFlags.Tip;
+            if (b.Clone) flags |= Sable.Engine.Compositing.GpuDabFlags.Clone;
+            if (b.Heal) flags |= Sable.Engine.Compositing.GpuDabFlags.Heal;
+            return new Sable.Engine.Compositing.GpuDab
+            {
+                Cx = cx, Cy = cy, R = r, Inner = r * Math.Clamp(b.Hardness, 0f, 0.99f),
+                CosA = MathF.Cos(rad), SinA = MathF.Sin(rad), Round = MathF.Max(b.Roundness, 0.025f),
+                Sa = b.Flow * b.Alpha, ColR = b.R / 255f, ColG = b.G / 255f, ColB = b.B / 255f,
+                Strength = b.Strength, Mode = (uint)b.Mode, Blend = (uint)b.PaintBlend, Flags = flags,
+                CloneOffX = b.CloneOffX, CloneOffY = b.CloneOffY, Thx = thx, Thy = thy,
+                Bx = x0, By = y0, Bw = x1 - x0 + 1, Bh = y1 - y0 + 1,
+            };
+        }
+
+        int MaxDiff(byte[] a, byte[] b) { int m = 0; for (int i = 0; i < a.Length; i++) m = Math.Max(m, Math.Abs(a[i] - b[i])); return m; }
+
+        using var bcmp = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var bdoc = new Sable.Engine.Document(96, 96);
+
+        // 1) paint: soft dab + Multiply blend dab + rotated ellipse + tip + erase, vs CPU
+        var gl = MkLayer(180, 180, 180, 255);
+        bdoc.Layers.Clear(); bdoc.Layers.Add(gl);
+        var cl = (Sable.Engine.Layers.PixelLayer)gl.Clone();
+        var br = new Sable.Tools.BrushTool { Radius = 12, Hardness = 0.5f, R = 255, G = 64, B = 32, PressureSize = false };
+
+        bcmp.BeginBrushStroke(gl, null, 0, 0, null, 96, 96);
+        bcmp.ConfigureBrushClip(0, 0, 0, 96, 0, 0, 0, 0);
+        void Both(float cx, float cy)
+        {
+            if (br.Tip is not null) { /* tip changed since BeginBrushStroke → restart GPU stroke */ }
+            bcmp.StampBrushDab(MkDab(br, cx, cy, gl.Width, gl.Height));
+            br.BeginStroke(); br.Stamp(cl.Pixels, cl.Width, cl.Height, cx, cy);
+        }
+        Both(30, 30);
+        br.PaintBlend = Sable.Core.BlendMode.Multiply; Both(48, 30); br.PaintBlend = Sable.Core.BlendMode.Normal;
+        br.Angle = 30; br.Roundness = 0.5f; Both(66, 30); br.Angle = 0; br.Roundness = 1f;
+        br.Erase = true; Both(38, 30); br.Erase = false;
+        bcmp.EndBrushStroke();
+        int d1 = MaxDiff(gl.Pixels, cl.Pixels);
+
+        // 2) sampled tip (own stroke: the tip binds at BeginBrushStroke)
+        var gl2 = MkLayer(0, 0, 0, 0);
+        bdoc.Layers.Clear(); bdoc.Layers.Add(gl2);
+        var cl2 = (Sable.Engine.Layers.PixelLayer)gl2.Clone();
+        br.Tip = new byte[] { 255, 0, 128, 255 }; br.TipW = 2; br.TipH = 2;
+        bcmp.BeginBrushStroke(gl2, br.Tip, 2, 2, null, 96, 96);
+        bcmp.ConfigureBrushClip(2, 2, 0, 96, 0, 0, 0, 0);
+        bcmp.StampBrushDab(MkDab(br, 48, 48, gl2.Width, gl2.Height));
+        br.BeginStroke(); br.Stamp(cl2.Pixels, cl2.Width, cl2.Height, 48, 48);
+        bcmp.EndBrushStroke();
+        int d2 = MaxDiff(gl2.Pixels, cl2.Pixels);
+        br.Tip = null; br.TipW = br.TipH = 0;
+
+        // 3) retouch sanity: dodge brightens the centre, smudge runs, heal tone-matches
+        var gl3 = MkLayer(100, 100, 100, 255);
+        bdoc.Layers.Clear(); bdoc.Layers.Add(gl3);
+        bcmp.BeginBrushStroke(gl3, null, 0, 0, null, 96, 96);
+        bcmp.ConfigureBrushClip(0, 0, 0, 96, 0, 0, 0, 0);
+        br.Mode = Sable.Tools.BrushMode.Dodge; br.Strength = 0.8f;
+        bcmp.StampBrushDab(MkDab(br, 20, 48, gl3.Width, gl3.Height));
+        br.Mode = Sable.Tools.BrushMode.Smudge;
+        bcmp.StampBrushDab(MkDab(br, 48, 48, gl3.Width, gl3.Height));
+        br.Mode = Sable.Tools.BrushMode.Paint;
+        br.Clone = true; br.Heal = true; br.CloneOffX = 10; br.CloneOffY = 0;
+        bcmp.StampBrushDab(MkDab(br, 76, 48, gl3.Width, gl3.Height));
+        br.Clone = false; br.Heal = false;
+        bcmp.EndBrushStroke();
+        int dodged = gl3.Pixels[(48 * 96 + 20) * 4];
+        int healed = gl3.Pixels[(48 * 96 + 76) * 4];
+
+        bool ok1 = d1 <= 4, ok2 = d2 <= 4, ok3 = dodged > 140 && Math.Abs(healed - 100) <= 4;
+        Console.WriteLine($"gpu brush: paint/blend/ellipse/erase maxDiff={d1} tip maxDiff={d2} " +
+            $"dodge={dodged} heal={healed} ok={ok1 && ok2 && ok3}");
+    }
+
     // --- M1 verification: .sable save/load round-trip ---------------------------
     var sdoc = Sable.Engine.Document.CreateDemo(80, 60);
     var sablePath = Path.GetFullPath("roundtrip.sable");

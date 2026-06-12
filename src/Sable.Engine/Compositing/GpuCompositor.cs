@@ -18,7 +18,7 @@ namespace Sable.Engine.Compositing;
 /// alignment). Groups / adjustment / live-filter layers slot in here as the tree
 /// walk grows.
 /// </summary>
-public sealed unsafe class GpuCompositor : IDisposable
+public sealed unsafe partial class GpuCompositor : IDisposable
 {
     private readonly WgpuDevice _gpu;
     private readonly Dictionary<Layer, nint> _layerBuffers = new();
@@ -468,6 +468,7 @@ public sealed unsafe class GpuCompositor : IDisposable
     /// </summary>
     public void ReleaseLayerCaches()
     {
+        CancelBrushStroke();   // buffers below are about to be released
         foreach (var p in _layerBuffers.Values) _gpu.Api.BufferRelease((Buffer*)p);
         _layerBuffers.Clear();
         _layerBufferBytes.Clear();
@@ -652,6 +653,12 @@ public sealed unsafe class GpuCompositor : IDisposable
                     CopyBuffer(srcBuf, _previewBuf, layerBytes);
                     DispatchStamp(_previewBuf, srcBuf, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
                     srcBuf = _previewBuf;
+                }
+                else if (ReferenceEquals(px, StrokeLayer))
+                {
+                    // GPU stroke in progress: the monolithic buffer IS the live state — never
+                    // re-upload from the (stale) CPU pixels and never route through the atlas.
+                    srcBuf = GetLayerBuffer(px);
                 }
                 else
                 {
@@ -966,6 +973,7 @@ public sealed unsafe class GpuCompositor : IDisposable
                     DispatchStamp(_previewBuf, sb, pv, px.Width, px.Height, px.OffsetX, px.OffsetY);
                     return _previewBuf;
                 }
+                if (ReferenceEquals(px, StrokeLayer)) return GetLayerBuffer(px);   // live GPU stroke
                 tileTable = GetLayerTiles(px);
                 return tileTable is not null ? _dummyStore : GetLayerBuffer(px);
             case ShapeLayer sh: srcW = _width; srcH = _height; return GetShapeBuffer(sh);

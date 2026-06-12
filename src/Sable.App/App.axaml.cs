@@ -34,7 +34,17 @@ public partial class App : Application
             // deferred until the intro has fully played, then the splash cross-fades into it.
             var splash = new SplashWindow();
             splash.Show();
-            Dispatcher.UIThread.Post(() => _ = ShowMainAsync(desktop, splash), DispatcherPriority.Background);
+            // async void: a MainWindow ctor exception rethrows on the dispatcher and crashes
+            // loudly — a discarded task swallowed it silently behind the splash before.
+            Dispatcher.UIThread.Post(async void () =>
+            {
+                try { await ShowMainAsync(desktop, splash); }
+                catch (System.Exception ex)
+                {
+                    System.Console.Error.WriteLine(ex);
+                    throw;
+                }
+            }, DispatcherPriority.Background);
         }
 
         base.OnFrameworkInitializationCompleted();

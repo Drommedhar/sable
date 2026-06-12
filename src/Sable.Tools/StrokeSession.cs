@@ -3,13 +3,21 @@ using Sable.Engine.Layers;
 
 namespace Sable.Tools;
 
+/// <summary>A brush gesture sink: CPU (<see cref="StrokeSession"/>) or the GPU stroke
+/// pipeline. Coordinates are document px; pressures are the segment-end stylus values.</summary>
+public interface IStrokeSession
+{
+    void StrokeTo(double x0, double y0, double x1, double y1, float p0 = 1f, float p1 = 1f);
+    IUndoableCommand? Finalize();
+}
+
 /// <summary>
 /// One brush gesture (press → moves → release) as a single undo unit, painting
 /// into any RGBA8 target buffer (a layer's pixels or its mask). Snapshots each
 /// touched 256² tile copy-on-first-touch, then paints. <see cref="Finalize"/>
 /// captures the after-state and produces a <see cref="PaintRasterCommand"/>.
 /// </summary>
-public sealed class StrokeSession
+public sealed class StrokeSession : IStrokeSession
 {
     private readonly byte[] _target;
     private readonly Func<byte[]?> _live;   // live buffer fetch for the produced undo command
@@ -39,7 +47,7 @@ public sealed class StrokeSession
     {
         // to buffer-local space (the brush re-adds the origin for doc-space selection clipping)
         x0 -= _ox; y0 -= _oy; x1 -= _ox; y1 -= _oy;
-        double r = _brush.Radius + 1;
+        double r = _brush.MaxReach + 1;   // covers tip diagonal + scatter, not just the radius
         double minX = Math.Min(x0, x1) - r, maxX = Math.Max(x0, x1) + r;
         double minY = Math.Min(y0, y1) - r, maxY = Math.Max(y0, y1) + r;
         var tiles = TilesIn(minX, minY, maxX, maxY);

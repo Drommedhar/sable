@@ -53,13 +53,10 @@
        Exit 1 = drift -> build error. python not found -> warn + continue (don't block python-less devs).
        Skipped during design-time/IDE intellisense builds. -->
   <Target Name="LocaleDoctor" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'">
-    <Exec Command="python &quot;$(MSBuildThisFileDirectory)..\..\tools\locale-doctor.py&quot; --strict"
-          ContinueOnError="true" StandardOutputImportance="high" StandardErrorImportance="high">
+    <Exec Command="python &quot;$(MSBuildThisFileDirectory)..\..\tools\locale-doctor.py&quot; --strict" ContinueOnError="true" StandardOutputImportance="high" StandardErrorImportance="high">
       <Output TaskParameter="ExitCode" PropertyName="_LocaleDoctorExit" />
     </Exec>
-    <Warning Condition="'$(_LocaleDoctorExit)' != '0' and '$(_LocaleDoctorExit)' != '1'"
-             Text="locale-doctor skipped: python not found (exit $(_LocaleDoctorExit)). i18n is not being checked on this machine." />
-    <Error Condition="'$(_LocaleDoctorExit)' == '1'"
-           Text="locale-doctor found i18n problems (missing keys or unlocalized .axaml strings). Run: python tools/locale-doctor.py --list-literals" />
+    <Warning Condition="'$(_LocaleDoctorExit)' != '0' and '$(_LocaleDoctorExit)' != '1'" Text="locale-doctor skipped: python not found (exit $(_LocaleDoctorExit)). i18n is not being checked on this machine." />
+    <Error Condition="'$(_LocaleDoctorExit)' == '1'" Text="locale-doctor found i18n problems (missing keys or unlocalized .axaml strings). Run: python tools/locale-doctor.py --list-literals" />
   </Target>
 </Project>

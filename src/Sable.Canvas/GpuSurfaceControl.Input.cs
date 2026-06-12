@@ -29,7 +29,8 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _hudStartSx, _hudStartSy;
     private float _hudStartRadius, _hudStartHardness;
     private double _lastDocX, _lastDocY;
-    private StrokeSession? _session;
+    private IStrokeSession? _session;
+    private bool _gpuStrokeDirty;              // a GPU dab landed since the last composite
     private PixelLayer? _strokeLayer;          // active pixel-paint layer (null for mask paint)
     private RasterState _strokeBefore;         // pre-stroke raster snapshot (whole-raster undo + auto-crop)
     private bool _panningMouse;
@@ -135,6 +136,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     {
         if (_hudAdjust) _input?.RestoreCursor();
         _painting = false; _hudAdjust = false;
+        _compositor?.CancelBrushStroke();   // a GPU stroke must not outlive its gesture
         _session = null; _strokeLayer = null;
         _panningMouse = false;
         _moving = false;
@@ -246,13 +248,26 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private TextLayer? HitTextLayer(double dx, double dy)
     {
         if (_doc is null) return null;
-        for (int i = _doc.Layers.Count - 1; i >= 0; i--)   // top-down
-            if (_doc.Layers[i] is TextLayer t && t.Visible)
+        return HitTextIn(_doc.Layers, dx, dy, 0, 0);
+    }
+
+    // recursive: text layers nested in groups (e.g. PSD imports) must be hittable too;
+    // parent offsets accumulate so grouped/offset content still maps correctly
+    private TextLayer? HitTextIn(System.Collections.Generic.List<Layer> layers, double dx, double dy, int ox, int oy)
+    {
+        for (int i = layers.Count - 1; i >= 0; i--)   // top-down
+        {
+            var l = layers[i];
+            if (!l.Visible) continue;
+            if (l.HasChildren && HitTextIn(l.Children, dx, dy, ox + l.OffsetX, oy + l.OffsetY) is { } inner)
+                return inner;
+            if (l is TextLayer t)
             {
-                var (bx, by, bw, bh) = t.ContentBounds(_doc.Width, _doc.Height);
-                if (dx >= bx + t.OffsetX && dx < bx + t.OffsetX + bw &&
-                    dy >= by + t.OffsetY && dy < by + t.OffsetY + bh) return t;
+                var (bx, by, bw, bh) = t.ContentBounds(_doc!.Width, _doc.Height);
+                if (dx >= bx + ox + t.OffsetX && dx < bx + ox + t.OffsetX + bw &&
+                    dy >= by + oy + t.OffsetY && dy < by + oy + t.OffsetY + bh) return t;
             }
+        }
         return null;
     }
 
@@ -548,7 +563,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _doc.SetMaskSelection(shown);
     }
 
-    private StrokeSession? CreateSession()
+    /// <summary>GPU brush engine master switch (plan §2): pixel-paint strokes stamp dabs in
+    /// compute and read back once at stroke end. Mask/quick-mask painting stays CPU.</summary>
+    public bool GpuBrush { get; set; } = true;
+
+    private IStrokeSession? CreateSession()
     {
         // quick-mask mode: the brush edits the selection (white = add, eraser/black = remove)
         if (QuickMask)
@@ -613,6 +632,23 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         return new StrokeSession(layer.Pixels, layer.Width, layer.Height, Brush,
             tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY,
             () => layer.Pixels);
+    }
+
+    /// <summary>Upgrade a pixel-paint gesture to the GPU stroke pipeline. Clone/heal must be
+    /// configured on the Brush BEFORE this (the snapshot bind happens at begin). Returns the
+    /// CPU session unchanged when the GPU engine is off/unavailable or for mask targets.</summary>
+    private IStrokeSession? UpgradeToGpuSession(IStrokeSession? cpu)
+    {
+        if (!GpuBrush || cpu is null || _compositor is null || _doc is null) return cpu;
+        if (_strokeLayer is not { } layer) return cpu;   // mask/quick-mask paint stays CPU
+        try
+        {
+            return new GpuBrushSession(_compositor, layer, Brush, _doc, () => _gpuStrokeDirty = true);
+        }
+        catch
+        {
+            return cpu;   // GPU stroke setup failed → CPU fallback, painting must never break
+        }
     }
 
     // guide drag state: 0 = none, 1 = vertical guide (GuidesX), 2 = horizontal guide (GuidesY)
@@ -1008,12 +1044,13 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                         }
                         else { Brush.CloneOffX = (int)Math.Round(dx - _cloneSrcX); Brush.CloneOffY = (int)Math.Round(dy - _cloneSrcY); }
                     }
+                    _session = UpgradeToGpuSession(_session);   // after clone config (snapshot binds at begin)
                     _input?.Capture();
                     _painting = true;
                     _lastDocX = dx; _lastDocY = dy;
                     _smoothX = dx; _smoothY = dy;
                     _lastPressure = _input?.Pressure ?? 1f;
-                    _session.StrokeTo(dx, dy, dx, dy, _lastPressure, _lastPressure);
+                    _session!.StrokeTo(dx, dy, dx, dy, _lastPressure, _lastPressure);
                 }
                 break;
         }
@@ -1051,6 +1088,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             {
                 // pixel paint: auto-crop the layer to its painted content, then record the whole
                 // gesture (grow + paint + trim) as one undoable raster-state swap.
+                (_session as GpuBrushSession)?.Complete();   // GPU stroke: read pixels back first
                 _session = null;
                 pl.TrimToContent();
                 var after = RasterState.Capture(pl);

@@ -104,6 +104,7 @@ public partial class MainWindow : Window
         BrushColorView.ColorChanged += OnBrushColorChanged;
 
         WireTools();
+        WireBrushDynamics();
 
         // settings: restore window placement + theme + recent menu + last session (PLAN §17.1)
         ApplySettings();
@@ -161,7 +162,7 @@ public partial class MainWindow : Window
 
         // contextual task bar follows the selection (position + show/hide)
         var tbTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        tbTimer.Tick += (_, _) => UpdateTaskBar();
+        tbTimer.Tick += (_, _) => { UpdateTaskBar(); UpdateToasts(); };
         tbTimer.Start();
 
         // click a ruler to drop a guide: top ruler → vertical guide (X), left ruler → horizontal guide (Y)
@@ -273,6 +274,7 @@ public partial class MainWindow : Window
         // vanish for good after its first click. Window state covers the minimized case.
         bool show = _settings.ShowContextBar && WindowState != WindowState.Minimized
             && _activeTab is not null && Canvas.IsVisible
+            && TopLevel.GetTopLevel(Canvas) is not null   // detached during dock rebuilds (Reset Layout)
             && Canvas.Document is { Selection: { W: > 2, H: > 2 } };
         if (!show)
         {
@@ -294,6 +296,34 @@ public partial class MainWindow : Window
         int halfW = (int)((_taskBar.Bounds.Width > 0 ? _taskBar.Bounds.Width : 240) * scale / 2);
         _taskBar.Position = new PixelPoint(screen.X - halfW, screen.Y);
         if (!_taskBar.IsVisible) _taskBar.Show(this);
+    }
+
+    // ===== notification toasts: Affinity-style cards in the canvas's top-right corner =====
+    private ToastWindow? _toasts;
+
+    /// <summary>Show a dismissable notification card (missing fonts, import notes, …).</summary>
+    private void ShowToast(string title, string body, string? actionLabel = null, System.Action? action = null)
+    {
+        _toasts ??= new ToastWindow();
+        _toasts.Push(title, body, actionLabel, action);
+        UpdateToasts();
+    }
+
+    /// <summary>Keep the toast stack glued to the canvas's top-right corner (window move/resize/minimise).</summary>
+    private void UpdateToasts()
+    {
+        if (_toasts is null || _toasts.Items.Count == 0) return;
+        // dock rebuilds (Reset Layout) detach the canvas momentarily — PointToScreen throws then
+        bool canvasAttached = TopLevel.GetTopLevel(Canvas) is not null;
+        if (WindowState == WindowState.Minimized || !Canvas.IsVisible || !canvasAttached)
+        {
+            if (_toasts.IsVisible) _toasts.Hide();
+            return;
+        }
+        double scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+        var corner = Canvas.PointToScreen(new Avalonia.Point(Canvas.Bounds.Width, 0));
+        _toasts.Position = new PixelPoint(corner.X - (int)(_toasts.Width * scale) - (int)(8 * scale), corner.Y + (int)(8 * scale));
+        if (!_toasts.IsVisible) _toasts.Show(this);
     }
 
     private TaskBarWindow CreateTaskBar()
@@ -546,11 +576,48 @@ public partial class MainWindow : Window
                 tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
                 tab.IsDirty = false;
             }
+            else if (path.EndsWith(".psd", System.StringComparison.OrdinalIgnoreCase))
+                tab = OpenPsdTab(path);
             else tab = OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
             NoteRecent(path);
             return tab;
         }
         catch { return null; }
+    }
+
+    /// <summary>Import a .psd as a new (untitled) tab. Missing fonts and lossy-mapping
+    /// notes are shown as Affinity-style notification toasts, not a modal.</summary>
+    private DocumentTab OpenPsdTab(string path)
+    {
+        var doc = PsdReader.Load(path, out var warnings, out var fonts);
+        var tab = OpenInNewTab(doc, null, System.IO.Path.GetFileName(path), path);
+
+        var missing = fonts.Where(f => !FontInstalled(f)).ToList();
+        if (missing.Count > 0)
+            ShowToast(Loc.T("toast.missingFontsTitle"), string.Join("\n", missing));
+
+        if (warnings.Count > 0)
+        {
+            var list = string.Join("\n", warnings.Take(12));
+            if (warnings.Count > 12) list += "\n" + Loc.T("psd.moreWarnings", warnings.Count - 12);
+            ShowToast(Loc.T("psd.importTitle"), list);
+        }
+        return tab;
+    }
+
+    /// <summary>Loose match of a PSD PostScript font name ("OpenSans-Bold") against installed
+    /// family names ("Open Sans") — alphanumeric-normalised family must prefix the PS name.</summary>
+    private static bool FontInstalled(string psName)
+    {
+        static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).ToArray());
+        var n = Norm(psName).ToLowerInvariant();
+        if (n.Length == 0) return true;   // unparseable → don't cry wolf
+        foreach (var fam in Sable.Imaging.TextRaster.Families())
+        {
+            var nf = Norm(fam).ToLowerInvariant();
+            if (nf.Length >= 3 && n.StartsWith(nf)) return true;
+        }
+        return false;
     }
 
     private void OpenLaunchArgs()
@@ -1859,6 +1926,7 @@ public partial class MainWindow : Window
         BrushSpacingSlider.Value = Canvas.Brush.Spacing * 100;
         PressureSizeCheck.IsChecked = Canvas.Brush.PressureSize;
         PressureFlowCheck.IsChecked = Canvas.Brush.PressureFlow;
+        SyncBrushDynamics();
     }
 
     private async void OnSaveBrushPreset(object? sender, RoutedEventArgs e)
@@ -1887,6 +1955,104 @@ public partial class MainWindow : Window
         if (BrushSizeSlider is null) return;
         BrushSizeSlider.Value = Canvas.Brush.Radius * 2.0;
         BrushHardnessSlider.Value = Canvas.Brush.Hardness * 100.0;
+    }
+
+    // ===== brush dynamics flyout: dab shape + jitter + paint blend + .abr import (plan §2) =====
+    private bool _dynSync;
+
+    private void WireBrushDynamics()
+    {
+        BrushBlendCombo.ItemsSource = System.Enum.GetValues<Sable.Core.BlendMode>();
+        BrushBlendCombo.SelectedIndex = 0;
+        void Hook(LabeledSlider s) => s.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == LabeledSlider.ValueProperty && !_dynSync) ApplyBrushDynamics();
+        };
+        Hook(DynAngle); Hook(DynRoundness); Hook(DynSizeJitter);
+        Hook(DynFlowJitter); Hook(DynScatter); Hook(DynAngleJitter);
+    }
+
+    private void ApplyBrushDynamics()
+    {
+        var b = Canvas.Brush;
+        b.Angle = (float)DynAngle.Value;
+        b.Roundness = (float)(DynRoundness.Value / 100.0);
+        b.SizeJitter = (float)(DynSizeJitter.Value / 100.0);
+        b.FlowJitter = (float)(DynFlowJitter.Value / 100.0);
+        b.ScatterJitter = (float)(DynScatter.Value / 100.0);
+        b.AngleJitter = (float)(DynAngleJitter.Value / 100.0);
+    }
+
+    /// <summary>Reflect the brush's shape/jitter/blend/tip state into the dynamics flyout.</summary>
+    private void SyncBrushDynamics()
+    {
+        if (DynAngle is null) return;
+        _dynSync = true;
+        var b = Canvas.Brush;
+        DynAngle.Value = b.Angle;
+        DynRoundness.Value = b.Roundness * 100;
+        DynSizeJitter.Value = b.SizeJitter * 100;
+        DynFlowJitter.Value = b.FlowJitter * 100;
+        DynScatter.Value = b.ScatterJitter * 100;
+        DynAngleJitter.Value = b.AngleJitter * 100;
+        BrushBlendCombo.SelectedItem = b.PaintBlend;
+        BrushTipLabel.Text = b.Tip is null
+            ? Loc.T("mainWindow.tipRound")
+            : Loc.T("mainWindow.tipSampled", b.TipW, b.TipH);
+        ClearTipBtn.IsVisible = b.Tip is not null;
+        _dynSync = false;
+    }
+
+    private void OnBrushBlendChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_dynSync || BrushBlendCombo?.SelectedItem is not Sable.Core.BlendMode m) return;
+        Canvas.Brush.PaintBlend = m;
+    }
+
+    private void OnClearBrushTip(object? sender, RoutedEventArgs e)
+    {
+        Canvas.Brush.Tip = null;
+        Canvas.Brush.TipW = Canvas.Brush.TipH = 0;
+        SyncBrushDynamics();
+    }
+
+    private async void OnImportAbr(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("mainWindow.importAbr"),
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType(Loc.T("mainWindow.abrFilter")) { Patterns = new[] { "*.abr" } }
+            }
+        });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            var presets = Sable.Tools.AbrReader.Load(path, out var notes);
+            foreach (var p in presets)
+            {
+                _brushPresets.RemoveAll(x => x.Name == p.Name);   // same name = overwrite
+                _brushPresets.Add(p);
+            }
+            Sable.Tools.BrushPresetStore.Save(_brushPresets);
+            RebuildBrushPresetCombo(presets.Count > 0 ? presets[0].Name : null);
+            if (presets.Count > 0)
+            {
+                presets[0].ApplyTo(Canvas.Brush);
+                SyncBrushSliders();
+                SyncBrushDynamics();
+            }
+            var body = Loc.T("mainWindow.abrImported", presets.Count);
+            if (notes.Count > 0) body += "\n" + string.Join("\n", notes.Take(8));
+            ShowToast(Loc.T("mainWindow.importAbr"), body);
+        }
+        catch (System.Exception ex)
+        {
+            ShowToast(Loc.T("mainWindow.importAbr"), ex.Message);
+        }
     }
 
     private void OnEyedropperSampleChanged(object? sender, SelectionChangedEventArgs e)
@@ -1931,6 +2097,7 @@ public partial class MainWindow : Window
 
     private void OnTypeSizeChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
     {
+        if (Canvas is null || TypeSizeBox is null) return;   // fires during InitializeComponent (markup Text)
         if (!float.TryParse(TypeSizeBox.Text, out var v)) return;
         Canvas.TypeFontSize = Math.Clamp(v, 4f, 512f);
         if (_syncingType || _textTarget is not { } t) return;
@@ -1940,6 +2107,7 @@ public partial class MainWindow : Window
 
     private void OnBoxWidthChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
     {
+        if (Canvas is null || BoxWidthBox is null) return;   // fires during InitializeComponent
         if (!float.TryParse(BoxWidthBox.Text, out var v)) return;
         Canvas.TypeBoxWidth = Math.Max(0f, v);
         if (_syncingType || _textTarget is not { } t) return;
@@ -1949,6 +2117,7 @@ public partial class MainWindow : Window
 
     private void OnTrackingChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
     {
+        if (Canvas is null || TrackingBox is null) return;   // fires during InitializeComponent
         if (!float.TryParse(TrackingBox.Text, out var v)) return;
         Canvas.TypeTracking = v;
         if (_syncingType || _textTarget is not { } t) return;
@@ -2308,13 +2477,13 @@ public partial class MainWindow : Window
             SyncEye();
             ToolTip.SetTip(eye, Loc.T("mainWindow.channelVisibility"));
             eye.IsCheckedChanged += (_, _) => { _chanVis[visIdx] = eye.IsChecked == true; SyncEye(); ApplyChannels(); };
-            DockPanel.SetDock(eye, Dock.Left);
+            DockPanel.SetDock(eye, Avalonia.Controls.Dock.Left);
             dock.Children.Add(eye);
             _chanEyes[view] = eye;
         }
         else
         {
-            dock.Children.Add(new Border { Width = 20, [DockPanel.DockProperty] = Dock.Left });   // align with eye column
+            dock.Children.Add(new Border { Width = 20, [DockPanel.DockProperty] = Avalonia.Controls.Dock.Left });   // align with eye column
         }
 
         var chip = new Border
@@ -2322,7 +2491,7 @@ public partial class MainWindow : Window
             Width = 26, Height = 18, Margin = new Thickness(4, 0, 6, 0), CornerRadius = new Avalonia.CornerRadius(2),
             Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(chipHex)),
             BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FF454545")), BorderThickness = new Thickness(1),
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, [DockPanel.DockProperty] = Dock.Left,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, [DockPanel.DockProperty] = Avalonia.Controls.Dock.Left,
         };
         dock.Children.Add(chip);
 
@@ -2938,7 +3107,29 @@ public partial class MainWindow : Window
         };
         _tabs.Add(tab);
         ActivateTab(tab);
+        NotifyMissingFonts(doc);
         return tab;
+    }
+
+    /// <summary>Affinity-style missing-font toast for any opened document: text layers whose
+    /// family isn't installed render with a substitute until the font is added.</summary>
+    private void NotifyMissingFonts(Document doc)
+    {
+        var missing = new System.Collections.Generic.SortedSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        var families = Sable.Imaging.TextRaster.Families();
+        void Walk(System.Collections.Generic.List<Sable.Engine.Layers.Layer> layers)
+        {
+            foreach (var l in layers)
+            {
+                if (l is Sable.Engine.Layers.TextLayer { FontFamily: { Length: > 0 } fam } &&
+                    !families.Any(f => string.Equals(f, fam, System.StringComparison.OrdinalIgnoreCase)))
+                    missing.Add(fam);
+                Walk(l.Children);
+            }
+        }
+        Walk(doc.Layers);
+        if (missing.Count > 0)
+            ShowToast(Loc.T("toast.missingFontsTitle"), string.Join("\n", missing));
     }
 
     /// <summary>Make a tab active: swap the canvas + DataContext, rewire the canvas callbacks.</summary>
@@ -2957,6 +3148,8 @@ public partial class MainWindow : Window
         {
             Canvas.Document = null;
             DataContext = null;
+            ColorPanelRoot.DataContext = null;
+            LayersPanelRoot.DataContext = null;
             _currentPath = null;
             UpdateEmptyState();
             UpdateDocInfo();
@@ -2966,6 +3159,11 @@ public partial class MainWindow : Window
         tab.IsActive = true;
         Canvas.Document = tab.Doc;
         DataContext = tab.Vm;
+        // docking: set the panel roots' DataContext EXPLICITLY (not just window inheritance) —
+        // a floated Tool re-parents into a Dock host window and would silently lose the
+        // inherited DocumentViewModel otherwise (the parked-spike failure mode).
+        ColorPanelRoot.DataContext = tab.Vm;
+        LayersPanelRoot.DataContext = tab.Vm;
         _currentPath = tab.Path;
         WireCanvas(tab.Vm);
         UpdateActiveLayer(tab.Vm);
@@ -3508,6 +3706,10 @@ public partial class MainWindow : Window
                     var tab = OpenInNewTab(SableFile.Load(path), path, System.IO.Path.GetFileName(path));
                     tab.IsDirty = false;
                 }
+                else if (ext == ".psd")
+                {
+                    OpenPsdTab(path);   // layered import always opens its own tab (placing would flatten)
+                }
                 else if (overCanvas && DocumentIO.OpenImage(path).Layers is [Sable.Engine.Layers.PixelLayer src, ..])
                 {
                     var layer = LayerFromRegion(src.Pixels, src.Width, src.Height, null);   // centred, region-sized
@@ -3893,7 +4095,7 @@ public partial class MainWindow : Window
             {
                 new FilePickerFileType(Loc.T("mainWindow.imagesFilter"))
                 {
-                    Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp" }
+                    Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.psd" }
                 }
             }
         });
@@ -3903,7 +4105,8 @@ public partial class MainWindow : Window
 
         try
         {
-            OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
+            if (path.EndsWith(".psd", System.StringComparison.OrdinalIgnoreCase)) OpenPsdTab(path);
+            else OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
             NoteRecent(path);
         }
         catch (System.Exception ex)

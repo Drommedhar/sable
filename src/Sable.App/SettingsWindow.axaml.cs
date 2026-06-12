@@ -457,7 +457,7 @@ public partial class SettingsWindow : Window
             var install = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(14, 0), Tag = m.Id, VerticalAlignment = VerticalAlignment.Center };
             install.Click += OnInstallModel;
             _aiInstallBtns[m.Id] = install;
-            DockPanel.SetDock(install, Dock.Right);
+            DockPanel.SetDock(install, Avalonia.Controls.Dock.Right);
 
             var left = new StackPanel { Spacing = 1 };
             left.Children.Add(AiText(m.Name, "ChromeText", 13));

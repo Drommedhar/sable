@@ -1,3 +1,5 @@
+using Sable.Core;
+
 namespace Sable.Tools;
 
 /// <summary>Retouch mode: transforms existing pixels under the dab instead of painting colour.</summary>
@@ -18,11 +20,54 @@ public sealed class BrushTool
     private float _smR, _smG, _smB;     // smudge carried colour
     private bool _smInit;
 
-    /// <summary>Reset per-stroke state (smudge carry). Call at the start of each gesture.</summary>
-    public void BeginStroke() => _smInit = false;
+    /// <summary>Reset per-stroke state (smudge carry, deterministic jitter). Call at the start of each gesture.</summary>
+    public void BeginStroke()
+    {
+        _smInit = false;
+        if (JitterSeed != 0) _rng = new Random(JitterSeed);
+    }
 
     public float Radius { get; set; } = 16f;
     public float Hardness { get; set; } = 0.5f;   // 0 = very soft, 1 = hard edge
+
+    // --- dab shape (improvement plan §2): elliptical dabs + sampled tip ---
+    /// <summary>Dab rotation in degrees (elliptical dabs and sampled tips rotate together).</summary>
+    public float Angle { get; set; }
+    /// <summary>Dab roundness: 1 = circle, 0.1 = thin ellipse (squashes the dab's local Y).</summary>
+    public float Roundness { get; set; } = 1f;
+    /// <summary>Sampled brush tip: greyscale coverage map (0 = transparent, 255 = full).
+    /// Null = computed round dab. Scaled so the longest side spans the brush diameter.</summary>
+    public byte[]? Tip { get; set; }
+    public int TipW { get; set; }
+    public int TipH { get; set; }
+
+    // --- dynamics/jitter (0..1 each, randomised per stamp) ---
+    /// <summary>Random dab size reduction (0 = none, 1 = down to zero).</summary>
+    public float SizeJitter { get; set; }
+    /// <summary>Random per-dab flow reduction.</summary>
+    public float FlowJitter { get; set; }
+    /// <summary>Random dab offset, as a fraction of the diameter.</summary>
+    public float ScatterJitter { get; set; }
+    /// <summary>Random dab rotation, as a fraction of ±180°.</summary>
+    public float AngleJitter { get; set; }
+    /// <summary>Non-zero = deterministic jitter stream per stroke (tests/replays).</summary>
+    public int JitterSeed { get; set; }
+    private Random _rng = new();
+
+    /// <summary>Brush paints in this blend mode against the existing pixels (PS paint modes).
+    /// Normal = plain src-over. Mirrors the compositor contract via <see cref="BlendOps"/>.</summary>
+    public BlendMode PaintBlend { get; set; } = BlendMode.Normal;
+
+    /// <summary>Conservative per-stamp reach in pixels (tile snapshotting): radius
+    /// (tip/rotation diagonal) + scatter offset.</summary>
+    public float MaxReach
+    {
+        get
+        {
+            float diag = (Tip is not null || Angle != 0f || AngleJitter > 0f) ? Radius * 1.4143f : Radius;
+            return diag + ScatterJitter * 2f * Radius + 1f;
+        }
+    }
     public byte R { get; set; } = 255;
     public byte G { get; set; } = 255;
     public byte B { get; set; } = 255;
@@ -80,10 +125,38 @@ public sealed class BrushTool
     {
         // pressure dynamics: size tapers with pressure (kept ≥ 10% so light touches still mark)
         float r = Radius * (PressureSize ? 0.1f + 0.9f * Math.Clamp(_pressure, 0f, 1f) : 1f);
-        int x0 = Math.Max(0, (int)Math.Floor(cx - r));
-        int x1 = Math.Min(w - 1, (int)Math.Ceiling(cx + r));
-        int y0 = Math.Max(0, (int)Math.Floor(cy - r));
-        int y1 = Math.Min(h - 1, (int)Math.Ceiling(cy + r));
+
+        // per-stamp jitter (size/flow/scatter/angle), deterministic when JitterSeed set
+        float ang = Angle;
+        float flowJ = 1f;
+        if (SizeJitter > 0f) r *= 1f - SizeJitter * (float)_rng.NextDouble();
+        if (FlowJitter > 0f) flowJ = 1f - FlowJitter * (float)_rng.NextDouble();
+        if (AngleJitter > 0f) ang += (float)(_rng.NextDouble() * 2 - 1) * 180f * AngleJitter;
+        if (ScatterJitter > 0f)
+        {
+            cx += (_rng.NextDouble() * 2 - 1) * ScatterJitter * 2f * Radius;
+            cy += (_rng.NextDouble() * 2 - 1) * ScatterJitter * 2f * Radius;
+        }
+        r = MathF.Max(r, 0.5f);
+
+        // dab geometry: rotation + roundness (ellipse) or a sampled tip scaled to the diameter
+        bool hasTip = Tip is not null && TipW > 0 && TipH > 0;
+        float radians = ang * MathF.PI / 180f;
+        float cosA = MathF.Cos(radians), sinA = MathF.Sin(radians);
+        float round = MathF.Max(Roundness, 0.025f);
+        float thx = r, thy = r;
+        if (hasTip)
+        {
+            float sc = 2f * r / Math.Max(TipW, TipH);
+            thx = TipW * sc * 0.5f;
+            thy = TipH * sc * 0.5f;
+        }
+        float reach = hasTip || ang != 0f ? MathF.Sqrt(thx * thx + thy * thy) : r;
+
+        int x0 = Math.Max(0, (int)Math.Floor(cx - reach));
+        int x1 = Math.Min(w - 1, (int)Math.Ceiling(cx + reach));
+        int y0 = Math.Max(0, (int)Math.Floor(cy - reach));
+        int y1 = Math.Min(h - 1, (int)Math.Ceiling(cy + reach));
         if (x1 < x0 || y1 < y0) return;
 
         float inner = r * Math.Clamp(Hardness, 0f, 0.99f);
@@ -137,17 +210,35 @@ public sealed class BrushTool
             }
             // distance from the pixel CENTRE (+0.5) to the dab centre so the dab lines up with the cursor
             float dx = (float)(x + 0.5 - cx), dy = (float)(y + 0.5 - cy);
-            float dist = MathF.Sqrt(dx * dx + dy * dy);
-            if (dist > r) continue;
 
-            // coverage: 1 inside `inner`, smooth falloff to 0 at `r` (pencil = hard binary edge)
+            // rotate into dab-local space (angle), then ellipse-squash or tip-sample
+            float rx = dx * cosA + dy * sinA;
+            float ry = -dx * sinA + dy * cosA;
+
             float cov;
-            if (Pencil) cov = dist <= r ? 1f : 0f;
+            if (hasTip)
+            {
+                if (MathF.Abs(rx) > thx || MathF.Abs(ry) > thy) continue;
+                float tu = (rx / thx * 0.5f + 0.5f) * (TipW - 1);
+                float tv = (ry / thy * 0.5f + 0.5f) * (TipH - 1);
+                cov = SampleTip(tu, tv) / 255f;
+                if (Pencil) cov = cov >= 0.5f ? 1f : 0f;
+                if (cov <= 0f) continue;
+            }
             else
             {
-                float t = dist <= inner ? 1f : 1f - (dist - inner) / MathF.Max(1e-3f, r - inner);
-                cov = Math.Clamp(t, 0f, 1f);
-                cov = cov * cov * (3f - 2f * cov);     // smoothstep
+                ry /= round;
+                float dist = MathF.Sqrt(rx * rx + ry * ry);
+                if (dist > r) continue;
+
+                // coverage: 1 inside `inner`, smooth falloff to 0 at `r` (pencil = hard binary edge)
+                if (Pencil) cov = 1f;
+                else
+                {
+                    float t = dist <= inner ? 1f : 1f - (dist - inner) / MathF.Max(1e-3f, r - inner);
+                    cov = Math.Clamp(t, 0f, 1f);
+                    cov = cov * cov * (3f - 2f * cov);     // smoothstep
+                }
             }
 
             // retouch modes: transform the existing pixel under the dab
@@ -158,7 +249,7 @@ public sealed class BrushTool
                 continue;
             }
 
-            float sa = cov * Flow * clipCov * Alpha * (PressureFlow ? Math.Clamp(_pressure, 0f, 1f) : 1f);
+            float sa = cov * Flow * flowJ * clipCov * Alpha * (PressureFlow ? Math.Clamp(_pressure, 0f, 1f) : 1f);
             if (sa <= 0f) continue;
 
             // clone: source colour sampled at the locked offset (skip outside source / transparent)
@@ -176,6 +267,16 @@ public sealed class BrushTool
 
             int i = (y * w + x) * 4;
             float dr = px[i] / 255f, dg = px[i + 1] / 255f, db = px[i + 2] / 255f, da = px[i + 3] / 255f;
+
+            // paint blend mode: blend brush colour with the backdrop, weighted by backdrop
+            // alpha (same `mix(s, B(d,s), da)` the compositor uses) — Normal = plain src-over
+            if (PaintBlend != BlendMode.Normal && !Erase && da > 0f)
+            {
+                var bl = BlendOps.Blend(PaintBlend, (dr, dg, db), (csr, csg, csb));
+                csr += (bl.r - csr) * da;
+                csg += (bl.g - csg) * da;
+                csb += (bl.b - csb) * da;
+            }
 
             if (LockAlpha)
             {
@@ -241,6 +342,18 @@ public sealed class BrushTool
         px[i] = (byte)Math.Clamp(nr + 0.5f, 0f, 255f);
         px[i + 1] = (byte)Math.Clamp(ng + 0.5f, 0f, 255f);
         px[i + 2] = (byte)Math.Clamp(nb + 0.5f, 0f, 255f);
+    }
+
+    /// <summary>Bilinear sample of the greyscale tip (u/v in [0, TipW-1]/[0, TipH-1]).</summary>
+    private float SampleTip(float u, float v)
+    {
+        var t = Tip!;
+        int tx0 = (int)u, ty0 = (int)v;
+        int tx1 = Math.Min(tx0 + 1, TipW - 1), ty1 = Math.Min(ty0 + 1, TipH - 1);
+        float fx = u - tx0, fy = v - ty0;
+        float a = t[ty0 * TipW + tx0] * (1f - fx) + t[ty0 * TipW + tx1] * fx;
+        float b = t[ty1 * TipW + tx0] * (1f - fx) + t[ty1 * TipW + tx1] * fx;
+        return a * (1f - fy) + b * fy;
     }
 
     private static (float r, float g, float b) Avg3(byte[] px, int w, int h, int cx, int cy)
