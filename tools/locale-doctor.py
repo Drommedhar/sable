@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -87,18 +88,23 @@ def load_locale(path: Path) -> dict[str, str]:
 
 
 def iter_source_files():
+    # Use os.walk with in-place dirnames pruning so we never descend into
+    # bin/obj/.git — rglob("*") enumerates every file in those dirs first
+    # and on slow mounts (USB) that can take minutes / appear to hang.
+    skip_dirs = {"bin", "obj", ".git"}
     for root in SCAN_ROOTS:
         if not root.exists():
             continue
-        for path in root.rglob("*"):
-            if path.suffix not in SCAN_EXTS:
-                continue
-            if "bin" in path.parts or "obj" in path.parts:
-                continue
-            # the Loc engine itself carries {loc:Loc ...} / Loc.T("key") examples in doc comments
-            if "Localization" in path.parts:
-                continue
-            yield path
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+            for name in filenames:
+                path = Path(dirpath, name)
+                if path.suffix not in SCAN_EXTS:
+                    continue
+                # the Loc engine itself carries {loc:Loc ...} / Loc.T("key") examples in doc comments
+                if "Localization" in path.parts:
+                    continue
+                yield path
 
 
 def scan_key_references() -> set[str]:

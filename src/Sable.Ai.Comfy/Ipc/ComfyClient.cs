@@ -95,6 +95,21 @@ public sealed class ComfyClient : IDisposable
             $"view?filename={Uri.EscapeDataString(img.Filename)}&subfolder={Uri.EscapeDataString(img.Subfolder)}&type={Uri.EscapeDataString(img.Type)}",
             ct).ConfigureAwait(false);
 
+    /// <summary>POST /upload/delete — remove a stored image (input or output) so temp files don't
+    /// accumulate in ComfyUI's directories after each generation.</summary>
+    public async Task DeleteImageAsync(string filename, string subfolder, string type, CancellationToken ct = default)
+    {
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            form.Add(new StringContent(filename), "filename");
+            form.Add(new StringContent(subfolder), "subfolder");
+            form.Add(new StringContent(type), "type");
+            await _http.PostAsync("upload/delete", form, ct).ConfigureAwait(false);
+        }
+        catch { /* best-effort cleanup: a failed delete is harmless */ }
+    }
+
     /// <summary>POST /upload/image (multipart) → the stored filename to reference in a graph's LoadImage.</summary>
     public async Task<string> UploadImageAsync(byte[] png, string name, CancellationToken ct = default)
     {
@@ -165,7 +180,10 @@ public sealed class ComfyClient : IDisposable
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).ConfigureAwait(false); } catch { }
 
         if (result is null) throw new InvalidOperationException("ComfyUI produced no image (check the workflow / model).");
-        return await ViewImageAsync(result, ct).ConfigureAwait(false);
+        var pngBytes = await ViewImageAsync(result, ct).ConfigureAwait(false);
+        // clean up the output image from ComfyUI's output directory so temp files don't accumulate
+        await DeleteImageAsync(result.Filename, result.Subfolder, result.Type, CancellationToken.None).ConfigureAwait(false);
+        return pngBytes;
     }
 
     /// <summary>Parse one ComfyUI WS frame into a typed event. Pure → unit-tested with canned frames.</summary>

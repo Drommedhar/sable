@@ -331,6 +331,41 @@ public class ImageOpsTests
     }
 
     [Fact]
+    public void AutoLevelsMask_StretchesToFullRange()
+    {
+        // compressed mid-range → should span 0..255
+        var mask = new byte[] { 128, 140, 160, 180, 186 };
+        ImageOps.AutoLevelsMask(mask);
+        Assert.Equal((byte)0, mask[0]);     // min (128) → 0
+        Assert.Equal((byte)255, mask[4]);   // max (186) → 255
+        Assert.True(mask[1] > 0 && mask[1] < 255);   // interpolated
+    }
+
+    [Fact]
+    public void AutoLevelsMask_NoOpWhenFullRange()
+    {
+        var mask = new byte[] { 0, 0, 128, 255, 255 };
+        var copy = (byte[])mask.Clone();
+        ImageOps.AutoLevelsMask(mask);
+        Assert.Equal(copy, mask);   // already full-range → unchanged
+    }
+
+    [Fact]
+    public void AutoLevelsMask_UniformMaskUnchanged()
+    {
+        var mask = new byte[] { 100, 100, 100 };
+        ImageOps.AutoLevelsMask(mask);
+        Assert.Equal(new byte[] { 100, 100, 100 }, mask);   // min==max → no stretch
+    }
+
+    [Fact]
+    public void AutoLevelsMask_EmptyIsSafe()
+    {
+        var mask = Array.Empty<byte>();
+        ImageOps.AutoLevelsMask(mask);   // must not throw
+    }
+
+    [Fact]
     public void Crop_ExtractsSubRect_AndZeroesOutOfBounds()
     {
         // 2x2: TL=10, TR=20, BL=30, BR=40 (R channel)

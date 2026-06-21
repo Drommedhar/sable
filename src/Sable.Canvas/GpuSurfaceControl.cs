@@ -463,14 +463,21 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
             var vp = ComputeViewport();
             double docX = vp.Scale > 0 ? (_lastMouseX - vp.Ox) / vp.Scale : -1;
             double docY = vp.Scale > 0 ? (_lastMouseY - vp.Oy) / vp.Scale : -1;
-            if (docX >= 0 && docY >= 0 && docX < al.Width && docY < al.Height)
+            // layer bounds are offset-aware: the buffer's (0,0) sits at (OffsetX,OffsetY) in doc space
+            if (docX >= al.OffsetX && docY >= al.OffsetY
+                && docX < al.OffsetX + al.Width && docY < al.OffsetY + al.Height)
             {
                 bool clone = ActiveTool == Sable.Tools.ToolKind.CloneStamp;
                 // clone: preview the source content under the cursor (offset = cursor - source)
                 if (clone && !_cloneSet) { _compositor.Preview = null; return; }   // no source yet
+                // During the HUD size/hardness adjust (Ctrl+Alt drag), show a WHITE brush preview
+                // regardless of the active tool — the user is adjusting settings, not erasing.
+                bool hud = _hudAdjust;
+                bool isEraser = ActiveTool == Sable.Tools.ToolKind.Eraser && !hud;
                 dab = new Sable.Engine.Compositing.PreviewDab(al, (float)docX, (float)docY,
-                    Brush.Radius, Brush.Hardness, Brush.R, Brush.G, Brush.B,
-                    Erase: ActiveTool == Sable.Tools.ToolKind.Eraser,
+                    Brush.Radius, Brush.Hardness,
+                    hud ? (byte)255 : Brush.R, hud ? (byte)255 : Brush.G, hud ? (byte)255 : Brush.B,
+                    Erase: isEraser,
                     IsClone: clone,
                     CloneOffX: clone ? (int)System.Math.Round(docX - _cloneSrcX) : 0,
                     CloneOffY: clone ? (int)System.Math.Round(docY - _cloneSrcY) : 0);
@@ -655,10 +662,12 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
                 ov.BrushX = (float)_lastMouseX;
                 ov.BrushY = (float)_lastMouseY;
                 ov.BrushR = Brush.Radius * vp.Scale;
-                ov.BrushColR = Brush.R / 255f;
-                ov.BrushColG = Brush.G / 255f;
-                ov.BrushColB = Brush.B / 255f;
-                ov.BrushErase = ActiveTool == Sable.Tools.ToolKind.Eraser;
+                // During HUD adjust, show a white ring + white dab (not the eraser effect)
+                bool hud = _hudAdjust;
+                ov.BrushColR = hud ? 1f : Brush.R / 255f;
+                ov.BrushColG = hud ? 1f : Brush.G / 255f;
+                ov.BrushColB = hud ? 1f : Brush.B / 255f;
+                ov.BrushErase = ActiveTool == Sable.Tools.ToolKind.Eraser && !hud;
                 ov.BrushHardness = Brush.Hardness;
             }
             else if (ActiveTool == Sable.Tools.ToolKind.Gradient && _gradienting)

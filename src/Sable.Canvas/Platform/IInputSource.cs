@@ -18,6 +18,8 @@ public interface ICanvasInputSink
     void PointerMove(double sx, double sy, CanvasMods mods);
     void PointerUp(CanvasButton button, double sx, double sy, CanvasMods mods);
     void Wheel(double sx, double sy, int delta, CanvasMods mods);
+    /// <summary>OS-level file drag-drop (Linux/X11 XDND — Avalonia 12.0 doesn't fire DragDrop on X11).</summary>
+    void FilesDropped(string[] paths);
 }
 
 /// <summary>

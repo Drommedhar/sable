@@ -1,3 +1,4 @@
+using Avalonia.Controls;
 using Sable.Canvas.Platform;
 using Sable.Core.Undo;
 using Sable.Engine;
@@ -287,6 +288,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
 
     void ICanvasInputSink.PointerDown(CanvasButton button, double sx, double sy, CanvasMods mods)
     {
+        // The native canvas HWND doesn't participate in Avalonia's focus system, so clicking it
+        // never blurs a chrome TextBox (numeric value boxes, rename field, hex colour, …).  Left
+        // focused, IsTypingInTextField() stays true and ALL bare-key hotkeys (tool letters, X, D,
+        // arrows, …) silently die until the user clicks some other Avalonia control.  Clear focus
+        // on every canvas click so hotkeys keep working.
+        if (button == CanvasButton.Left)
+            TopLevel.GetTopLevel(this)?.FocusManager?.Focus(null);
+
         _lastMouseX = sx; _lastMouseY = sy; _lastMods = mods;
         if (button == CanvasButton.Middle) { StartPan(sx, sy); return; }   // middle-drag = pan
         if (button == CanvasButton.Left) OnLeftDown(sx, sy, mods);
@@ -308,6 +317,11 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         _lastMouseX = sx; _lastMouseY = sy; _lastMods = mods;
         ZoomAt(delta > 0 ? 1.1 : 1.0 / 1.1, sx, sy);
     }
+
+    /// <summary>Raised when files are dragged onto the canvas (Linux/X11 XDND path).</summary>
+    public event Action<string[]>? FilesDropped;
+
+    void ICanvasInputSink.FilesDropped(string[] paths) => FilesDropped?.Invoke(paths);
 
     void ICanvasInputSink.PointerMove(double sx, double sy, CanvasMods mods)
     {
@@ -1445,9 +1459,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 int bx = dx - ox, by = dy - oy;
                 if ((uint)bx >= (uint)lw || (uint)by >= (uint)lh) continue;   // outside layer → transparent
                 int si = (by * lw + bx) * 4;
-                byte cov = mask is not null ? mask[dy * mw + dx] : (byte)255;
+                if (mask is not null && mask[dy * mw + dx] < 128) continue;   // not selected
                 outp[di] = src[si]; outp[di + 1] = src[si + 1]; outp[di + 2] = src[si + 2];
-                outp[di + 3] = (byte)(src[si + 3] * cov / 255);
+                outp[di + 3] = src[si + 3];
             }
             return (outp, w, h);
         }
@@ -1472,9 +1486,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             {
                 int si = ((y0 + y) * _doc.Width + (x0 + x)) * 4;
                 int di = (y * w + x) * 4;
-                byte cov = mask is not null ? mask[(y0 + y) * mw + (x0 + x)] : (byte)255;
+                if (mask is not null && mask[(y0 + y) * mw + (x0 + x)] < 128) continue;
                 outp[di] = comp[si]; outp[di + 1] = comp[si + 1]; outp[di + 2] = comp[si + 2];
-                outp[di + 3] = (byte)(comp[si + 3] * cov / 255);
+                outp[di + 3] = comp[si + 3];
             }
             return (outp, w, h);
         }

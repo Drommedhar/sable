@@ -84,13 +84,13 @@ public partial class MainWindow : Window
         WireCaptionButtons();
 
         // drop image / .sable files onto the window chrome → open each as a new tab.
-        // NOTE: works on Windows/macOS. On Linux/X11 these events never fire — Avalonia's X11
-        // backend has no drop-target (XDND) support yet; the fix is unmerged PR #20926, slated
-        // for Avalonia 12.1. This handler is correct and auto-activates on that upgrade. Until
-        // then, Linux users import via File ▸ Open / Open Image / paste-from-clipboard.
+        // Works on Windows/macOS via Avalonia DragDrop. On Linux/X11, Avalonia 12.0 doesn't fire
+        // these events (no XDND support), so the X11InputSource handles XDND directly and raises
+        // Canvas.FilesDropped — both paths call the same OnFilesDropPaths handler.
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnFilesDragOver);
         AddHandler(DragDrop.DropEvent, OnFilesDrop);
+        Canvas.FilesDropped += paths => Avalonia.Threading.Dispatcher.UIThread.Post(() => OnFilesDropPaths(paths));
 
         // gradient editor shares the canvas's gradient def; selecting a stop routes the colour wheel to it
         GradBar.Def = Canvas.Gradient;
@@ -774,7 +774,12 @@ public partial class MainWindow : Window
         try
         {
             var mask = await Ai.SelectSubjectAsync(px, prompts: null, cts.Token);   // one-click = centre point
-            doc.SetMaskSelection(mask.Coverage);
+            // SAM2 produces a soft probability mask; binarise so the selection is hard-edged
+            // and copy/paste preserves the layer's original alpha.
+            var cov = mask.Coverage;
+            for (int i = 0; i < cov.Length; i++)
+                cov[i] = cov[i] >= 128 ? (byte)255 : (byte)0;
+            doc.SetMaskSelection(cov);
         }
         catch (System.OperationCanceledException) { /* user cancelled */ }
         catch (System.Exception ex) { error = ex; }
@@ -901,7 +906,10 @@ public partial class MainWindow : Window
         string title = Loc.T("mainWindow.removeObject");
         if (_activeTab?.Doc is not { } doc || Doc?.SelectedLayer?.Model is not Sable.Engine.Layers.PixelLayer px)
         { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectPixelLayer")); return; }
-        if (doc.SelectionMask is not { } selMask)
+        // SnapshotSelectionMask rasterizes a plain rect selection → mask, so a rectangular marquee
+        // (which only sets doc.Selection, not SelectionMask) also works here.
+        var selMask = doc.SnapshotSelectionMask();
+        if (selMask is null)
         { await ConfirmWindow.Ask(this, title, Loc.T("ai.selectObjectFirst")); return; }
         if (px.Width != doc.Width || px.Height != doc.Height)
         { await ConfirmWindow.Ask(this, title, Loc.T("ai.fullCanvasOnly")); return; }
@@ -2629,8 +2637,8 @@ public partial class MainWindow : Window
                           new ToolDef(colRng, LocToolName(Sable.Tools.ToolKind.ColorRange), Sable.Tools.ToolKind.ColorRange),
                           new ToolDef(smartS, LocToolName(Sable.Tools.ToolKind.SmartSelect), Sable.Tools.ToolKind.SmartSelect) }),
             ("B", new[] { new ToolDef(brush, LocToolName(Sable.Tools.ToolKind.Brush), Sable.Tools.ToolKind.Brush),
-                          new ToolDef(pencil, LocToolName(Sable.Tools.ToolKind.Pencil), Sable.Tools.ToolKind.Pencil),
-                          new ToolDef(eraser, LocToolName(Sable.Tools.ToolKind.Eraser), Sable.Tools.ToolKind.Eraser) }),
+                          new ToolDef(pencil, LocToolName(Sable.Tools.ToolKind.Pencil), Sable.Tools.ToolKind.Pencil) }),
+            ("E", new[] { new ToolDef(eraser, LocToolName(Sable.Tools.ToolKind.Eraser), Sable.Tools.ToolKind.Eraser) }),
             ("G", new[] { new ToolDef(fill, LocToolName(Sable.Tools.ToolKind.Fill), Sable.Tools.ToolKind.Fill),
                           new ToolDef(grad, LocToolName(Sable.Tools.ToolKind.Gradient), Sable.Tools.ToolKind.Gradient) }),
             ("C", new[] { new ToolDef(crop, LocToolName(Sable.Tools.ToolKind.Crop), Sable.Tools.ToolKind.Crop) }),
@@ -3055,6 +3063,7 @@ public partial class MainWindow : Window
             case Key.L: SpringTool(e, "L"); break;
             case Key.W: SpringTool(e, "W"); break;
             case Key.B: SpringTool(e, "B"); break;
+            case Key.E: SpringTool(e, "E"); break;   // eraser — its own tool (Affinity-style)
             case Key.G: SpringTool(e, "G"); break;
             case Key.C: SpringTool(e, "C"); break;
             case Key.U: SpringTool(e, "U"); break;
@@ -3693,10 +3702,15 @@ public partial class MainWindow : Window
         var p = e.GetPosition(Canvas);
         bool overCanvas = Canvas.Document is not null && Doc is not null &&
             p.X >= 0 && p.Y >= 0 && p.X < Canvas.Bounds.Width && p.Y < Canvas.Bounds.Height;
+        var paths = files.Select(f => f.TryGetLocalPath()).Where(p => !string.IsNullOrEmpty(p)).Cast<string>().ToList();
+        OnFilesDropPaths(paths, overCanvas);
+    }
 
-        foreach (var f in files)
+    /// <summary>Shared drop handler for both Avalonia DragDrop (Windows/macOS) and X11 XDND (Linux).</summary>
+    private void OnFilesDropPaths(System.Collections.Generic.IEnumerable<string> paths, bool overCanvas = false)
+    {
+        foreach (var path in paths)
         {
-            var path = f.TryGetLocalPath();
             if (string.IsNullOrEmpty(path)) continue;
             try
             {
@@ -4153,7 +4167,34 @@ public partial class MainWindow : Window
             }
             return;
         }
+        // No .sable save path yet — but if the doc was opened from an image file (PNG/JPG/etc.),
+        // overwrite the original image directly (like Photoshop's Save on an imported image).
+        if (_activeTab?.SourcePath is { } src && Canvas.Document is { } imgDoc && IsImageExtension(src))
+        {
+            try
+            {
+                var rgba = Canvas.ReadComposite();
+                if (rgba is not null)
+                {
+                    DocumentIO.Export(src, ImageCodec.FormatFromExtension(src),
+                        imgDoc.Width, imgDoc.Height, rgba, imgDoc.Width, imgDoc.Height, 95, imgDoc.Dpi);
+                    _activeTab.IsDirty = false;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                await ConfirmWindow.Ask(this, Loc.T("mainWindow.saveErrorTitle"), Loc.T("mainWindow.saveError", ex.Message));
+            }
+            return;
+        }
         await SaveAs();
+    }
+
+    /// <summary>True if the path has a raster-image extension (not .sable / .psd).</summary>
+    private static bool IsImageExtension(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp" or ".tif" or ".tiff";
     }
 
     private async void OnSaveAsSable(object? sender, RoutedEventArgs e) => await SaveAs();

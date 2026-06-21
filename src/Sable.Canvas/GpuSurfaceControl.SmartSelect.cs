@@ -121,6 +121,11 @@ public sealed unsafe partial class GpuSurfaceControl
         if (obj is null) return;
         var cov = ObjectToDocCoverage(obj);
         if (cov is null) return;
+        // SAM2 produces a soft probability mask; binarise so the selection is hard-edged
+        // and copy/paste preserves the layer's original alpha. Feather is a separate,
+        // intentional user action applied afterwards via the options bar.
+        for (int i = 0; i < cov.Length; i++)
+            cov[i] = cov[i] >= 128 ? (byte)255 : (byte)0;
         CaptureSelMode(mods);
         ApplyMask(cov);
         ClearSmartHover();   // committed → marching ants take over

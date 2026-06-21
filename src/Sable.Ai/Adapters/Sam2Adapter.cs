@@ -79,6 +79,7 @@ public sealed class Sam2Adapter : IMaskModel
         var dec = _backend.GetSession(_decoderPath, _cpu);
         var (plane, mw, mh, _) = DecodeBest(embed, dec, coords, labels, img);
         var maskSmall = ImageOps.MaskFromFloat(plane, mw, mh, sigmoid: true);
+        ImageOps.AutoLevelsMask(maskSmall);
         var mask = ImageOps.ResizeGray(maskSmall, mw, mh, img.Width, img.Height);
         return new AiMask(mask, img.Width, img.Height);
     }
@@ -151,6 +152,7 @@ public sealed class Sam2Adapter : IMaskModel
                 new[] { new AiPrompt(AiPromptKind.Point, px, py, 0, 0, true) }, img.Width, img.Height, _size);
             var (plane, mw, mh, score) = DecodeBest(embed, dec, coords, labels, img);
             var small = ImageOps.MaskFromFloat(plane, mw, mh, sigmoid: true);
+            ImageOps.AutoLevelsMask(small);
             var cov = ImageOps.ResizeGray(small, mw, mh, ww, wh);
             int area = 0, minx = ww, miny = wh, maxx = -1, maxy = -1;
             for (int yy = 0; yy < wh; yy++)

@@ -126,6 +126,31 @@ public static class ImageOps
 
     private static byte Q(float v) => (byte)Math.Clamp(v * 255f + 0.5f, 0, 255);
 
+    /// <summary>
+    /// Stretch a single-channel coverage mask so its value range spans the full 0..255.
+    /// Fixes two failure modes: (a) ONNX models that already include a sigmoid in the graph,
+    /// where an extra sigmoid pushes values into the 128–186 mid-range; (b) models whose
+    /// logit tails leave faint non-zero background values. After auto-levelling the mask spans
+    /// true 0 (unselected) to 255 (fully selected). Applied BEFORE bilinear resize so the
+    /// resize creates smooth antialiased edges. When the mask already spans the full range
+    /// this is a cheap no-op (min≈0, max≈255).
+    /// </summary>
+    public static void AutoLevelsMask(byte[] mask)
+    {
+        if (mask.Length == 0) return;
+        byte min = 255, max = 0;
+        for (int i = 0; i < mask.Length; i++)
+        {
+            byte v = mask[i];
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+        if (max <= min) return;   // uniform mask — leave as-is
+        float scale = 255f / (max - min);
+        for (int i = 0; i < mask.Length; i++)
+            mask[i] = (byte)Math.Clamp((mask[i] - min) * scale + 0.5f, 0, 255);
+    }
+
     /// <summary>Pack single-channel coverage into an RGBA8 layer mask (R=G=B=coverage, A=255).</summary>
     public static byte[] CoverageToRgbaMask(byte[] coverage, int w, int h)
     {

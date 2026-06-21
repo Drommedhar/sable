@@ -157,6 +157,9 @@ public sealed class ComfyBackend : IGenerativeBackend, IDisposable
             CheckpointName: mref?.Kind == ComfyModelKind.Checkpoint ? mref.Name : null,
             ClipNames: mref?.ClipNames, VaeName: mref?.VaeName));
         var png = await _client.RunPromptAsync(graph, Progress, ct).ConfigureAwait(false);
+        // clean up the uploaded input image so it doesn't accumulate in ComfyUI's input directory
+        if (!string.IsNullOrEmpty(iname))
+            await _client.DeleteImageAsync(iname, "", "input", CancellationToken.None).ConfigureAwait(false);
         var (outRgba, ow, oh) = DecodePng(png);
         return new AiImage(outRgba, ow, oh);
     }

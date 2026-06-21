@@ -80,6 +80,15 @@ public static class ImageCodec
         _ => "png",
     };
 
+    /// <summary>Pick the best supported format for a file extension (default = PNG).</summary>
+    public static ImageFormat FormatFromExtension(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".jpg" or ".jpeg" ? ImageFormat.Jpeg
+            : ext is ".webp" ? ImageFormat.Webp
+            : ImageFormat.Png;
+    }
+
     /// <summary>Encode RGBA8 to bytes in the given format, optionally resized. quality 1..100 (PNG ignores it).
     /// JPEG has no alpha → flattened over white.</summary>
     public static byte[] EncodeScaled(ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality)
