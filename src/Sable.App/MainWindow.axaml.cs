@@ -39,6 +39,12 @@ public partial class MainWindow : Window
     private bool _dropInto;        // dropping ONTO the target row (nest / into-group / auto-group)
     private LayerViewModel? _pendingCollapse;   // row to collapse the selection to on release-without-drag
 
+    // arrow-key nudge coalescing: while an arrow is held (autorepeat), move the layer live and
+    // commit ONE undo entry on KeyUp — avoids a flood of undo entries + Resync per keypress.
+    private Sable.Engine.Layers.Layer? _nudgeLayer;
+    private int _nudgeStartX, _nudgeStartY;
+    private Key _nudgeKey = Key.None;
+
     private static FilePickerFileType SableType => new(Loc.T("mainWindow.sableDocumentType")) { Patterns = new[] { "*.sable" } };
 
     private readonly string[] _launchArgs;
@@ -2836,6 +2842,7 @@ public partial class MainWindow : Window
     {
         base.OnKeyUp(e);
         if (e.Key is Key.Oem5 or Key.OemBackslash) EndPeek();   // before/after peek release
+        if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down) CommitNudge(e.Key);
         if (e.Key != _springKey) return;
         bool held = (DateTime.UtcNow - _springDownAt).TotalMilliseconds > 350;
         _springKey = Key.None;
@@ -3083,13 +3090,59 @@ public partial class MainWindow : Window
             case Key.Q: Canvas.ToggleQuickMask(); break;   // quick mask (paint the selection as rubylith)
             case Key.K: Canvas.PaintMask = !Canvas.PaintMask; break;   // edit layer mask
             // Delete / Enter / Escape are owned by the tunnel OnGlobalKeyDown (richer pen/mesh/quickmask logic)
-            case Key.Left: Canvas.PanBy(step, 0); break;
-            case Key.Right: Canvas.PanBy(-step, 0); break;
-            case Key.Up: Canvas.PanBy(0, step); break;
-            case Key.Down: Canvas.PanBy(0, -step); break;
+            case Key.Left:
+                if (Canvas.ActiveTool == Sable.Tools.ToolKind.Move && Canvas.SelLayer is { } nll)
+                    NudgeLayer(nll, -1, 0, e);
+                else Canvas.PanBy(step, 0);
+                break;
+            case Key.Right:
+                if (Canvas.ActiveTool == Sable.Tools.ToolKind.Move && Canvas.SelLayer is { } nlr)
+                    NudgeLayer(nlr, 1, 0, e);
+                else Canvas.PanBy(-step, 0);
+                break;
+            case Key.Up:
+                if (Canvas.ActiveTool == Sable.Tools.ToolKind.Move && Canvas.SelLayer is { } nlu)
+                    NudgeLayer(nlu, 0, -1, e);
+                else Canvas.PanBy(0, step);
+                break;
+            case Key.Down:
+                if (Canvas.ActiveTool == Sable.Tools.ToolKind.Move && Canvas.SelLayer is { } nld)
+                    NudgeLayer(nld, 0, 1, e);
+                else Canvas.PanBy(0, -step);
+                break;
             default: base.OnKeyDown(e); return;
         }
         e.Handled = true;
+    }
+
+    /// <summary>Move the selected layer by dx/dy pixels (Move tool arrow-key nudge). Shift = 10x step.
+    /// While the same arrow key is held (autorepeat), moves live and defers the undo entry until
+    /// KeyUp — so a held-key drag is one undo step, not a flood, and skips the per-press Resync.</summary>
+    private void NudgeLayer(Layer layer, int dx, int dy, KeyEventArgs e)
+    {
+        if (_activeTab?.Vm is not { } vm) return;
+        int mult = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : 1;
+        // start a new nudge gesture on the first press of a different key (or a different layer)
+        if (_nudgeKey != e.Key || !ReferenceEquals(_nudgeLayer, layer))
+        {
+            _nudgeKey = e.Key;
+            _nudgeLayer = layer;
+            _nudgeStartX = layer.OffsetX;
+            _nudgeStartY = layer.OffsetY;
+        }
+        layer.OffsetX += dx * mult;
+        layer.OffsetY += dy * mult;
+        vm.Model.MarkStructureChanged();   // live recomposite — no undo push, no Resync
+    }
+
+    /// <summary>Commit the coalesced arrow-key nudge as a single undo entry on key release.</summary>
+    private void CommitNudge(Key key)
+    {
+        if (_nudgeKey != key || _nudgeLayer is not { } layer || _activeTab?.Vm is not { } vm) { _nudgeKey = Key.None; return; }
+        if (layer.OffsetX != _nudgeStartX || layer.OffsetY != _nudgeStartY)
+            vm.Undo.Execute(new Sable.Engine.Commands.MoveOffsetCommand(vm.Model, layer, _nudgeStartX, _nudgeStartY, layer.OffsetX, layer.OffsetY));
+        _nudgeKey = Key.None;
+        _nudgeLayer = null;
     }
 
     /// <summary>Open a document in a new tab and make it active (PLAN Phase 2 multi-tab).</summary>
