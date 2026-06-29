@@ -367,6 +367,40 @@ unsafe
         Console.WriteLine($"composite-cache: fast==full={same} px=({fastB[mid]},{fastB[mid+1]},{fastB[mid+2]},{fastB[mid+3]})");
     }
 
+    // --- clipping mask: clip to the BASE layer alpha, not the running backdrop (ROADMAP §7) ---
+    // bg (opaque red, full) · base (green, left half opaque / right half transparent) · clip (blue,
+    // full, ClipToBelow). Correct PS semantics: blue shows only on the base (left); the right half
+    // shows the background (clip masked out). The old "clip to backdrop alpha" leaked blue everywhere
+    // because the opaque background kept backdrop alpha = 1 across the whole canvas.
+    {
+        Sable.Engine.Layers.PixelLayer MkHalf(string n, byte r, byte g, byte b, bool leftOnly)
+        {
+            var l = new Sable.Engine.Layers.PixelLayer(64, 64, n);
+            for (int y = 0; y < 64; y++)
+                for (int x = 0; x < 64; x++)
+                {
+                    int i = (y * 64 + x) * 4;
+                    byte a = (byte)(leftOnly && x >= 32 ? 0 : 255);
+                    l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a;
+                }
+            return l;
+        }
+        var clipDoc = new Sable.Engine.Document(64, 64);
+        var bg = MkHalf("bg", 200, 30, 30, false);
+        var baseL = MkHalf("base", 30, 200, 30, true);     // opaque left, transparent right
+        var clip = MkHalf("clip", 30, 30, 200, false);
+        clip.ClipToBelow = true;
+        clipDoc.Layers.Add(bg); clipDoc.Layers.Add(baseL); clipDoc.Layers.Add(clip);
+        using var clc = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var cb = clc.CompositeToBytes(clipDoc);
+        int li = (32 * 64 + 16) * 4;   // left half — over the base
+        int ri = (32 * 64 + 48) * 4;   // right half — base transparent
+        bool leftBlue = cb[li + 2] > 150 && cb[li] < 90;          // clip shows on the base
+        bool rightBg = cb[ri] > 150 && cb[ri + 2] < 90;           // background, NOT clip (no leak)
+        Console.WriteLine($"clip-mask: left=({cb[li]},{cb[li+1]},{cb[li+2]}) right=({cb[ri]},{cb[ri+1]},{cb[ri+2]}) " +
+            $"ok={leftBlue && rightBg} (leftBlue={leftBlue} rightNoLeak={rightBg})");
+    }
+
     // --- GPU brush engine (plan §2): GPU stroke ≈ CPU stroke + retouch sanity ----
     {
         Sable.Engine.Layers.PixelLayer MkLayer(byte r, byte g, byte b, byte a)

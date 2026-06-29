@@ -8,7 +8,10 @@
 // width/height = output (document) grid; srcW/srcH = the source layer buffer's own size
 // (may differ from the document for layers with independent bounds).
 struct Dims { width: u32, height: u32, srcW: u32, srcH: u32 };
-// clip: 1 = clip to backdrop alpha; m*/b* = inverse (doc→layer) affine for the layer transform
+// clip: 0 = off; 1 = clip to backdrop alpha (running accumulator — used inside isolated/nested
+// groups where the backdrop IS the clip base); 2 = clip to the base layer's standalone alpha
+// (binding 8 `clipBase`) — true Photoshop clipping-mask semantics (clip to the base layer only,
+// ignoring whatever is composited below it). m*/b* = inverse (doc→layer) affine for the transform.
 struct Params {
     mode: u32, opacity: f32, clip: f32,
     m00: f32, m01: f32, m10: f32, m11: f32, b0: f32, b1: f32,
@@ -32,6 +35,8 @@ struct Params {
 // layer's tile grid → atlas slot (0xffffffff = empty/transparent tile, no slot). srcMode=1 only.
 @group(0) @binding(6) var<storage, read>        tileTable: array<u32>;   // [gridW, gridH, slot per tile row-major]
 @group(0) @binding(7) var<storage, read>        atlas:     array<vec4<f32>>;   // resident tiles, 65536 px (256×256) each
+// doc-sized standalone alpha of the clip-chain BASE layer (clip mode 2). Indexed by doc pixel idx.
+@group(0) @binding(8) var<storage, read>        clipBase:  array<vec4<f32>>;
 
 fn unpack(c: u32) -> vec4<f32> {
     return vec4<f32>(
@@ -194,7 +199,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 mix(maskTexel(x0, y0 + 1), maskTexel(x0 + 1, y0 + 1), fx), fy);
     }
     let da = d.w;
-    let clipMul = mix(1.0, da, params.clip); // clip to backdrop alpha when clip=1
+    // clip mode: 0 off, 1 = backdrop alpha (nested/group), 2 = base-layer standalone alpha (PS)
+    var clipMul = 1.0;
+    if (params.clip > 1.5) { clipMul = clipBase[idx].w; }
+    else if (params.clip > 0.5) { clipMul = da; }
     let validF = select(0.0, 1.0, valid);    // beyond the horizon → fully transparent (no smeared sample)
     // Blend-If: gate the layer by the UNDERLYING (backdrop) luminance with smooth knees
     var bif = 1.0;

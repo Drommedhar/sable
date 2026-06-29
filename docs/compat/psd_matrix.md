@@ -205,22 +205,24 @@ Mapped adjustments remain editable (sliders in `AdjustmentPanel`); round-trip in
 **SUPPORTED**
 
 ### Current implementation
-- importer path: `PsdReader.ParseLayerInfo` reads the clipping flag byte; `BuildPixelLayer`/`BuildTextLayer`/`BuildSoCoLayer` set `ClipToBelow = rec.Clipping`.
-- layer model path: `Layer.ClipToBelow` → `composite.wgsl` `params.clip` multiplies coverage by backdrop alpha.
-- renderer path: `GpuCompositor.BlendOneLayer`.
+- importer path: `PsdReader.ParseLayerInfo` reads the clipping flag byte; `BuildPixelLayer`/`BuildTextLayer`/`BuildSoCoLayer`/`BuildAdjustmentLayer` set `ClipToBelow = rec.Clipping`.
+- layer model path: `Layer.ClipToBelow` → `composite.wgsl` `params.clip` (mode 0 off / 1 backdrop-alpha / 2 base-alpha).
+- renderer path: `GpuCompositor.BlendLayerSequence` resolves clip runs and stamps the base layer's standalone alpha into `_clipBase`; `BlendOneLayer` → `BlendInto`/`BlendDocContentWithFx` consume `CurrentClip`.
 
-### User-visible problems
-- None known for straight clipping chains.
+### Fixed (2026-06-29)
+- **Bug:** clipped layers multiplied coverage by the *running backdrop alpha* (the whole accumulator below), so any opaque layer beneath the base (e.g. a background) drove backdrop alpha ≈ 1 across the canvas and the clip leaked everywhere — clipped content showed well outside the base shape. Photoshop clips to the **base layer's transparency only**, independent of what sits below it.
+- **Fix:** clip mode 2 binds `_clipBase` (binding 8) = the base layer's standalone coverage (own content + mask + transform, rendered over a permanently-zero backdrop, FX/opacity excluded — matching PS, which clips to raw layer transparency). `BlendLayerSequence` finds the base (nearest non-clipped layer below the run), stamps it once per run, and every clipped layer in the chain clips to it. Nested effect children keep mode 1 (backdrop = parent content, correct there). Verified by the `clip-mask` GPU smoke (Sable.Gpu.Spike): background no longer leaks; clip shows only over the base.
 
-### Proposed implementation
-- None — keep as is. Add a fixture for a 3-layer clipping chain to lock the behaviour.
+### Known remaining gaps
+- **Clipped adjustment layers** still use backdrop-alpha clip (`adjust.wgsl` has no `clipBase` binding) — a clipped Curves/Levels over an opaque background still leaks. Follow-up: thread `_clipBase` into the adjustment pass.
 
 ### Required tests
-- fixture: `psd/clipping_chain.psd` (3 clipped layers)
-- fixture: `psd/clipping_with_mask.psd`
+- GPU smoke: `clip-mask` (Sable.Gpu.Spike) — base/clip/background, asserts no leak. DONE.
+- fixture: `psd/clipping_chain.psd` (3 clipped layers) — TODO
+- fixture: `psd/clipping_with_mask.psd` — TODO
 
 ### Acceptance criteria
-- clipped rendering matches reference within tolerance; no silent flattening.
+- clipped rendering matches reference within tolerance; no silent flattening; clip does not extend beyond the base layer's transparency. MET for pixel/shape/text/path/group bases.
 
 ---
 

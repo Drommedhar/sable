@@ -48,6 +48,11 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     /// <summary>The layer currently being edited; the backdrop below it is reused while painting.</summary>
     public Layer? CacheHintLayer { get; set; }
     private Buffer* _backdropCache;        // doc-sized snapshot of the accumulator below the active layer
+    private Buffer* _clipBase;             // doc-sized standalone alpha of the current clip-chain base layer
+    private Buffer* _zeroBuf;              // doc-sized, permanently zero — transparent backdrop for clip-base stamping
+    // clip value fed to WriteBlendParams for the next BlendInto/BlendDocContentWithFx: 0 off,
+    // 1 backdrop-alpha (nested), 2 base-alpha (PS clipping mask). Set by the layer-sequence loop.
+    private float CurrentClip;
     private bool _cacheValid;
     private Layer? _cacheActive;           // the active layer the snapshot was built for
     private Layer[]? _cachePrefix;         // the layers below active, to detect a structural change
@@ -115,7 +120,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     private void BuildPipeline()
     {
         var api = _gpu.Api;
-        var bglEntries = stackalloc BindGroupLayoutEntry[8];
+        var bglEntries = stackalloc BindGroupLayoutEntry[9];
         bglEntries[0] = Entry(0, BufferBindingType.Uniform);
         bglEntries[1] = Entry(1, BufferBindingType.Uniform);
         bglEntries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);
@@ -124,7 +129,8 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         bglEntries[5] = Entry(5, BufferBindingType.ReadOnlyStorage);   // mask
         bglEntries[6] = Entry(6, BufferBindingType.ReadOnlyStorage);   // tile table (atlas mode)
         bglEntries[7] = Entry(7, BufferBindingType.ReadOnlyStorage);   // tile atlas (atlas mode)
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 8, Entries = bglEntries };
+        bglEntries[8] = Entry(8, BufferBindingType.ReadOnlyStorage);   // clip-base standalone alpha (clip mode 2)
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 9, Entries = bglEntries };
         _bgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
 
         var bglLocal = _bgl;
@@ -394,8 +400,11 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         _fxTint = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _fxBlur = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
         _backdropCache = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _clipBase = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);
+        _zeroBuf = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst);
         _cacheValid = false;   // size changed → old snapshot invalid
         _zero = new byte[_imgBytes];
+        ClearBuffer(_zeroBuf);   // permanently-zero transparent backdrop (blend never writes dst)
 
         // shared "fully revealing" white mask for layers without a mask (f32 1.0 per channel)
         _whiteMask = NewBuffer(_imgBytes, BufferUsage.Storage | BufferUsage.CopyDst);
@@ -566,24 +575,15 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         {
             ScratchPair(0, out Buffer* cur, out Buffer* oth);
             CopyBuffer(_backdropCache, cur, _imgBytes);
-            for (int i = ai; i < layers.Count; i++) BlendOneLayer(layers[i], ref cur, ref oth, 0);
+            // BlendLayerSequence re-derives the clip base for layers[ai] (may sit below ai in the cache).
+            BlendLayerSequence(layers, ai, ref cur, ref oth, 0, -1);
             return cur;
         }
 
         // full walk; snapshot the backdrop the moment we reach the active layer
         ScratchPair(0, out Buffer* current, out Buffer* other);
         ClearBuffer(current);
-        for (int i = 0; i < layers.Count; i++)
-        {
-            if (canCache && i == ai)
-            {
-                CopyBuffer(current, _backdropCache, _imgBytes);
-                _cacheActive = CacheHintLayer;
-                _cachePrefix = layers.GetRange(0, ai).ToArray();
-                _cacheValid = true;
-            }
-            BlendOneLayer(layers[i], ref current, ref other, 0);
-        }
+        BlendLayerSequence(layers, 0, ref current, ref other, 0, canCache ? ai : -1);
         if (!canCache) _cacheValid = false;
         return current;
     }
@@ -614,8 +614,71 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     {
         ScratchPair(depth, out Buffer* current, out Buffer* other);
         ClearBuffer(current);
-        foreach (var layer in layers) BlendOneLayer(layer, ref current, ref other, depth);
+        BlendLayerSequence(layers, 0, ref current, ref other, depth, -1);
         return current;
+    }
+
+    /// <summary>
+    /// Blend <paramref name="layers"/>[start..] bottom→top, applying Photoshop clipping-mask
+    /// semantics: a run of clipped layers (<see cref="Layer.ClipToBelow"/>) clips to the standalone
+    /// alpha of the nearest non-clipped layer below them (the clip base) — NOT the running backdrop —
+    /// so layers composited below the base don't leak the clip through. <paramref name="snapshotAt"/>
+    /// = index at which to snapshot the accumulator into <see cref="_backdropCache"/> (composite-cache
+    /// hot-path), or -1 for no snapshot.
+    /// </summary>
+    private void BlendLayerSequence(List<Layer> layers, int start, ref Buffer* cur, ref Buffer* oth, int depth, int snapshotAt)
+    {
+        Layer? baseForClip = FindClipBase(layers, start);
+        Layer? stampedBase = null;
+        for (int i = start; i < layers.Count; i++)
+        {
+            var L = layers[i];
+            if (i == snapshotAt)
+            {
+                CopyBuffer(cur, _backdropCache, _imgBytes);
+                _cacheActive = CacheHintLayer;
+                _cachePrefix = layers.GetRange(0, i).ToArray();
+                _cacheValid = true;
+            }
+            if (L.ClipToBelow && baseForClip is not null)
+            {
+                // stamp the base's standalone alpha once per base, then clip to it (mode 2)
+                if (!ReferenceEquals(stampedBase, baseForClip)) { StampClipBase(baseForClip, depth); stampedBase = baseForClip; }
+                CurrentClip = 2f;
+            }
+            else
+            {
+                CurrentClip = 0f;   // base layer, orphan clip (no base below), or plain layer
+            }
+            BlendOneLayer(L, ref cur, ref oth, depth);
+            if (!L.ClipToBelow) baseForClip = L;   // a non-clipped layer is the clip base for the layers above it
+        }
+    }
+
+    // The clip-chain base for a clipped layer at index `start`: the nearest non-clipped layer below it.
+    private static Layer? FindClipBase(List<Layer> layers, int start)
+    {
+        for (int i = start - 1; i >= 0; i--) if (!layers[i].ClipToBelow) return layers[i];
+        return null;
+    }
+
+    // Render the clip base's standalone coverage (own content + mask + transform, NO effects/opacity)
+    // into _clipBase over the permanently-zero backdrop. Clipped layers above then clip to this alpha.
+    private void StampClipBase(Layer baseLayer, int depth)
+    {
+        if (baseLayer is GroupLayer grp)
+        {
+            var gr = CompositeList(grp.Children, depth + 1);   // group coverage = composited children alpha
+            CopyBuffer(gr, _clipBase, _imgBytes);
+            return;
+        }
+        var maskBuf = GetMaskBuffer(baseLayer);
+        var content = GetContentBuffer(baseLayer, out int sw, out int sh, out Buffer* tileTable);
+        if (content is null && tileTable is null) { ClearBuffer(_clipBase); return; }
+        var (inv, persp) = LayerInverse(baseLayer, sw, sh);
+        // Normal blend, opacity/fill = 1, clip off → _clipBase.a = the base's transform+mask coverage.
+        WriteBlendParams((uint)BlendMode.Normal, 1f, 0f, inv, 1f, maskBuf is not null, persp, tileTable is not null ? 1u : 0u);
+        DispatchBlend(_zeroBuf, content, _clipBase, maskBuf, sw, sh, tileTable);
     }
 
     /// <summary>Blend one layer onto the accumulator (ping-pongs current/other). No-op if hidden.</summary>
@@ -630,7 +693,9 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         // the Affinity nested-child model — a filter inside a layer affects ONLY that layer.
         if (layer.HasChildren && layer is PixelLayer or ShapeLayer or TextLayer or PathLayer)
         {
+            float savedClip = CurrentClip;                    // RenderContentWithChildren mutates CurrentClip per child
             var docContent = RenderContentWithChildren(layer, maskBuf, depth);
+            CurrentClip = savedClip;                          // restore this layer's clip for its own blend
             BlendDocContentWithFx(ref current, ref other, docContent, layer);
             return;
         }
@@ -692,23 +757,25 @@ public sealed unsafe partial class GpuCompositor : IDisposable
                     bool plain = layer.Opacity >= 0.999f && maskBuf is null;
                     if (plain)
                     {
-                        foreach (var child in grp.Children)
-                            BlendOneLayer(child, ref current, ref other, depth);
+                        // children composite straight onto the real backdrop; clip chains among them
+                        // still clip to their base layer (BlendLayerSequence handles clip semantics).
+                        BlendLayerSequence(grp.Children, 0, ref current, ref other, depth, -1);
                     }
                     else
                     {
                         ScratchPair(depth + 1, out Buffer* snap, out _);
                         CopyBuffer(current, snap, _imgBytes);
                         // children get depth+1 so their nested isolation never clobbers the snapshot
-                        foreach (var child in grp.Children)
-                            BlendOneLayer(child, ref current, ref other, depth + 1);
+                        BlendLayerSequence(grp.Children, 0, ref current, ref other, depth + 1, -1);
                         DispatchFilterMix(snap, current, other, layer.Opacity, maskBuf);
                         var t = current; current = other; other = t;
                     }
                 }
                 else
                 {
+                    float savedClip = CurrentClip;                              // CompositeList mutates CurrentClip
                     var groupResult = CompositeList(grp.Children, depth + 1);   // isolated group
+                    CurrentClip = savedClip;                                    // restore the group's own clip
                     BlendContentWithFx(ref current, ref other, groupResult, layer, maskBuf, _width, _height);
                 }
             }
@@ -791,7 +858,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         var (inv, persp) = LayerInverse(layer, srcW, srcH);
         Span<float> bif = stackalloc float[4]
             { layer.BlendIfLo0, layer.BlendIfLo1, layer.BlendIfHi0, layer.BlendIfHi1 };
-        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, layer.ClipToBelow ? 1f : 0f, inv, layer.FillOpacity,
+        WriteBlendParams((uint)layer.BlendMode, layer.Opacity, CurrentClip, inv, layer.FillOpacity,
             maskBuf is not null, persp, tileTable is not null ? 1u : 0u, bif);
         DispatchBlend(current, src, other, maskBuf, srcW, srcH, tileTable);
         var tmp = current; current = other; other = tmp;
@@ -872,7 +939,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     // already-doc-space content buffer (transform + mask baked in, transform = identity).
     private void BlendDocContentWithFx(ref Buffer* current, ref Buffer* other, Buffer* docContent, Layer layer)
     {
-        float clip = layer.ClipToBelow ? 1f : 0f;
+        float clip = CurrentClip;
         if (!layer.HasEffects)
         {
             BlendBufferInto(ref current, ref other, docContent, layer.BlendMode, layer.Opacity, 0f, 0f, null, layer.FillOpacity, clip);
@@ -950,7 +1017,13 @@ public sealed unsafe partial class GpuCompositor : IDisposable
             var t = cur; cur = oth; oth = t;
         }
 
-        foreach (var child in layer.Children) BlendOneLayer(child, ref cur, ref oth, depth + 1);
+        // nested effect children clip to THIS layer's content (the scratch backdrop) — backdrop-alpha
+        // clip (mode 1) is exactly right here, since the backdrop IS the parent content + lower children.
+        foreach (var child in layer.Children)
+        {
+            CurrentClip = child.ClipToBelow ? 1f : 0f;
+            BlendOneLayer(child, ref cur, ref oth, depth + 1);
+        }
         return cur;
     }
 
@@ -1267,7 +1340,12 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         // mask (binding 5): real layer-aligned mask, or a 16-byte dummy when the layer has none
         Buffer* maskBind = mask is not null ? mask : _dummyStore;
         ulong maskSize = mask is not null ? srcBytes : 16;
-        var bg = stackalloc BindGroupEntry[8];
+        // clip-base alpha (binding 8). Bind the real doc-sized buffer unless it IS the output
+        // (the clip-base stamp itself) — aliasing a read + read_write binding is invalid. The
+        // shader only reads it in clip mode 2, which never targets _clipBase as output.
+        bool clipBound = _clipBase is not null && _clipBase != outp;
+        Buffer* clipBind = clipBound ? _clipBase : _dummyStore;
+        var bg = stackalloc BindGroupEntry[9];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _paramsBuf, Size = 80 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = dst, Size = (ulong)_imgBytes };
@@ -1276,7 +1354,8 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         bg[5] = new BindGroupEntry { Binding = 5, Buffer = maskBind, Size = maskSize };
         bg[6] = new BindGroupEntry { Binding = 6, Buffer = atlas ? tileTable : _dummyStore, Size = atlas ? (ulong)_tileTableWords * 4 : 4 };
         bg[7] = new BindGroupEntry { Binding = 7, Buffer = atlas ? _atlasBuf : _dummyStore, Size = atlas ? _atlasBytes : 16 };
-        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 8, Entries = bg };
+        bg[8] = new BindGroupEntry { Binding = 8, Buffer = clipBind, Size = clipBound ? (ulong)_imgBytes : 16 };
+        var bgDesc = new BindGroupDescriptor { Layout = _bgl, EntryCount = 9, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var encDesc = new CommandEncoderDescriptor();
@@ -1635,6 +1714,8 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         if (_fxTint is not null) { api.BufferRelease(_fxTint); _fxTint = null; }
         if (_fxBlur is not null) { api.BufferRelease(_fxBlur); _fxBlur = null; }
         if (_backdropCache is not null) { api.BufferRelease(_backdropCache); _backdropCache = null; }
+        if (_clipBase is not null) { api.BufferRelease(_clipBase); _clipBase = null; }
+        if (_zeroBuf is not null) { api.BufferRelease(_zeroBuf); _zeroBuf = null; }
         _cacheValid = false;
         _lastResult = null;
     }
