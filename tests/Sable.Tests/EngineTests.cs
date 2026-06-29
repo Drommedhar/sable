@@ -723,9 +723,9 @@ public class PixelLayerBoundsTests
         var layer = new PixelLayer(1, 1, "L");
         var before = RasterState.Capture(layer);
 
-        layer.SetBuffer(8, 8, new byte[8 * 8 * 4]);
+        layer.SetBuffer(8, 8, new float[8 * 8 * 4]);
         layer.OffsetX = 20; layer.OffsetY = 20;
-        for (int k = 3; k < layer.Pixels.Length; k += 4) layer.Pixels[k] = 255;
+        for (int k = 3; k < layer.Pixels.Length; k += 4) layer.Pixels[k] = 1f;
         var after = RasterState.Capture(layer);
 
         var cmd = new RasterStateCommand(layer, before, after, () => { });
@@ -735,7 +735,7 @@ public class PixelLayerBoundsTests
         cmd.Do();
         Assert.Equal(8, layer.Width);
         Assert.Equal(20, layer.OffsetX);
-        Assert.Equal(255, layer.Pixels[3]);
+        Assert.Equal(1f, layer.Pixels[3]);
     }
 
     [Fact]
@@ -747,7 +747,7 @@ public class PixelLayerBoundsTests
         var before = RasterState.Capture(layer);
 
         // a paint gesture grows the layer (and its mask) to 8x8
-        layer.SetBuffer(8, 8, new byte[8 * 8 * 4]);
+        layer.SetBuffer(8, 8, new float[8 * 8 * 4]);
         layer.Mask = new byte[8 * 8 * 4];
         layer.Mask![0] = 99;
         var after = RasterState.Capture(layer);

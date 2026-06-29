@@ -1091,6 +1091,39 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         return outBytes;
     }
 
+    /// <summary>Composite and read the flattened result back as <b>RGBA32F</b> (working units, HDR-preserving)
+    /// — for merge/flatten into a float pixel layer + 16/32-bit export, without an 8-bit round-trip.</summary>
+    public float[] CompositeToFloats(Document doc)
+    {
+        Composite(doc, sweepDead: false);
+        var api = _gpu.Api;
+
+        var encDesc = new CommandEncoderDescriptor();
+        var encoder = api.DeviceCreateCommandEncoder(_gpu.Device, in encDesc);
+        api.CommandEncoderCopyBufferToBuffer(encoder, _lastResult, 0, _readback, 0, (ulong)_imgBytes);
+        var cmdDesc = new CommandBufferDescriptor();
+        var cmd = api.CommandEncoderFinish(encoder, in cmdDesc);
+        api.QueueSubmit(_gpu.Queue, 1, &cmd);
+        api.CommandEncoderRelease(encoder);
+        api.CommandBufferRelease(cmd);
+
+        bool mapped = false;
+        var cb = PfnBufferMapCallback.From((status, _) =>
+        {
+            if (status != BufferMapAsyncStatus.Success)
+                throw new InvalidOperationException($"wgpu: readback map failed: {status}");
+            mapped = true;
+        });
+        api.BufferMapAsync(_readback, MapMode.Read, 0, (nuint)_imgBytes, cb, null);
+        while (!mapped) _gpu.Poll(wait: true);
+
+        var src = (float*)api.BufferGetMappedRange(_readback, 0, (nuint)_imgBytes);
+        var outFloats = new float[_rgbaBytes];
+        new ReadOnlySpan<float>(src, _rgbaBytes).CopyTo(outFloats);
+        api.BufferUnmap(_readback);
+        return outFloats;
+    }
+
     private void DispatchAdjust(Buffer* src, Buffer* outp, Buffer* mask)
     {
         var api = _gpu.Api;
@@ -1429,7 +1462,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
             // partial upload: only the dirty tiles (row-by-row, since tiles are strided)
             if (px.DirtyTiles.Count > 0)
             {
-                fixed (byte* p = px.Pixels)
+                fixed (float* p = px.Pixels)
                 {
                     foreach (var (tx, ty) in px.DirtyTiles)
                     {
@@ -1438,7 +1471,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
                         for (int ry = 0; ry < th; ry++)
                         {
                             int off = ((ty * RasterTiles.TileSize + ry) * px.Width + tx * RasterTiles.TileSize) * 4;
-                            UploadRgbaAsFloat(buf, p, off, (ulong)off, tw * 4);   // rgba8 row → f32
+                            UploadFloats(buf, p, off, (ulong)off, tw * 4);   // f32 row → f32 buffer
                         }
                     }
                 }
@@ -1446,7 +1479,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
             else
             {
                 // bulk/external change with no tile info → upload whole
-                fixed (byte* p = px.Pixels) UploadRgbaAsFloat(buf, p, 0, 0, layerBytes);
+                fixed (float* p = px.Pixels) UploadFloats(buf, p, 0, 0, layerBytes);
             }
         }
         else
@@ -1454,7 +1487,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
             buf = NewBuffer(layerBytes * 4, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc);   // f32
             _layerBuffers[px] = (nint)buf;
             _layerBufferBytes[px] = layerBytes;   // tracked in rgba8 units (resize detection)
-            fixed (byte* p = px.Pixels) UploadRgbaAsFloat(buf, p, 0, 0, layerBytes);
+            fixed (float* p = px.Pixels) UploadFloats(buf, p, 0, 0, layerBytes);
         }
 
         // Coherence: this monolithic (preview) path is about to clear px.Dirty/DirtyTiles. Mirror the
@@ -1585,13 +1618,13 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         int tw = RasterTiles.TileWidth(px.Width, tx);
         int th = RasterTiles.TileHeight(px.Height, ty);
         int rgbaSlotBase = slot * (TileBytes / 4);   // slot base in rgba8-layout bytes (TileBytes is f32)
-        fixed (byte* p = px.Pixels)
+        fixed (float* p = px.Pixels)
         {
             for (int ry = 0; ry < th; ry++)
             {
                 int srcOff = ((ty * TileSz + ry) * px.Width + tx * TileSz) * 4;
                 ulong dstRgbaOff = (ulong)(rgbaSlotBase + ry * TileSz * 4);
-                UploadRgbaAsFloat(_atlasBuf, p, srcOff, dstRgbaOff, tw * 4);   // rgba8 tile row → f32 atlas
+                UploadFloats(_atlasBuf, p, srcOff, dstRgbaOff, tw * 4);   // f32 tile row → f32 atlas
             }
         }
     }
@@ -1694,6 +1727,14 @@ public sealed unsafe partial class GpuCompositor : IDisposable
         for (int i = 0; i < n; i++) s[i] = src[srcOff + i] * (1f / 255f);
         fixed (float* fp = s) _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, dstRgbaByteOff * 4, fp, (nuint)(n * 4));
     }
+
+    /// <summary>Upload <paramref name="n"/> RGBA32F channels (straight alpha, already in working units) at
+    /// <c>src+srcOff</c> directly into the f32 buffer — the pixel-layer path now stores float (bit-depth
+    /// pipeline, PLAN §6), so this is a plain memcpy, no 8-bit conversion. <paramref name="dstRgbaByteOff"/>
+    /// is the rgba8-layout element offset (same convention as <see cref="UploadRgbaAsFloat"/>); the f32
+    /// buffer lands it at <c>dstRgbaByteOff*4</c> bytes.</summary>
+    private void UploadFloats(Buffer* buf, float* src, int srcOff, ulong dstRgbaByteOff, int n)
+        => _gpu.Api.QueueWriteBuffer(_gpu.Queue, buf, dstRgbaByteOff * 4, src + srcOff, (nuint)(n * 4));
 
     private static BindGroupLayoutEntry Entry(uint binding, BufferBindingType type) => new()
     {

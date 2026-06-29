@@ -1,37 +1,69 @@
 namespace Sable.Engine.Layers;
 
 /// <summary>
-/// A raster layer. M1: stores a single full-resolution RGBA8 buffer (straight
-/// alpha, byte order R,G,B,A). Tiled 256×256 GPU-resident storage (PLAN §4) is
-/// the immediate follow-up — this is the correctness-first stepping stone.
+/// A raster layer. Stores a single full-resolution <b>RGBA32F</b> buffer (straight alpha,
+/// channel order R,G,B,A; length = Width*Height*4 floats). This is the document working
+/// precision: 0..1 for SDR, values &gt;1 allowed for HDR headroom (bit-depth pipeline, PLAN §6).
+/// The numeric encoding matches the old RGBA8 values un-quantized (sRGB-encoded in float) — a
+/// precision widening, not a colour-space change. 8/16-bit is an import/export boundary
+/// (<see cref="Sable.Engine.Document.Depth"/>); internal storage is always float. The mask
+/// stays 8-bit (<see cref="Layer.Mask"/>, R = coverage), matching Photoshop. Tiled 256² access
+/// (<see cref="RasterTiles"/>) backs dirty-tile undo snapshots.
 /// </summary>
 public sealed class PixelLayer : Layer
 {
     public int Width { get; private set; }
     public int Height { get; private set; }
 
-    /// <summary>RGBA8 pixels, length = Width * Height * 4.</summary>
-    public byte[] Pixels { get; private set; }
+    /// <summary>RGBA32F pixels, length = Width * Height * 4 (straight alpha, R,G,B,A).</summary>
+    public float[] Pixels { get; private set; }
 
     public PixelLayer(int width, int height, string name = "Layer")
     {
         Width = width;
         Height = height;
-        Pixels = new byte[width * height * 4];
+        Pixels = new float[width * height * 4];
         Name = name;
     }
 
     /// <summary>Layer-local content bounds (the move/select overlay adds OffsetX/Y for doc space).</summary>
     public override (int x, int y, int w, int h) ContentBounds(int docW, int docH) => (0, 0, Width, Height);
 
-    /// <summary>Replace the pixel buffer and dimensions (e.g. on crop/resize). Undo restores the old buffer.</summary>
-    public void SetBuffer(int width, int height, byte[] pixels)
+    /// <summary>Replace the float pixel buffer and dimensions (e.g. on crop/resize). Undo restores the old buffer.</summary>
+    public void SetBuffer(int width, int height, float[] pixels)
     {
         Width = width;
         Height = height;
         Pixels = pixels;
         Dirty = true;
         DirtyTiles.Clear();
+    }
+
+    /// <summary>Replace the buffer from an RGBA8 source (codec / PSD / AI / clipboard), converting
+    /// /255 → linear float. Use when the producer hands back 8-bit straight-alpha bytes.</summary>
+    public void SetBufferFromBytes(int width, int height, byte[] rgba8)
+        => SetBuffer(width, height, BytesToFloat(rgba8));
+
+    /// <summary>Quantise the float buffer to RGBA8 straight-alpha bytes (×255, round, clamp) — for
+    /// 8-bit export / clipboard / eyedropper-display paths. HDR values &gt;1 clamp to 255.</summary>
+    public byte[] ToBytes() => FloatToBytes(Pixels);
+
+    /// <summary>RGBA8 (0..255) → RGBA32F (0..1). Uses true division (not ×(1/255)) so the
+    /// byte→float→byte round-trip is bit-exact and matches n/255f literals elsewhere.</summary>
+    public static float[] BytesToFloat(byte[] src)
+    {
+        var dst = new float[src.Length];
+        for (int i = 0; i < src.Length; i++) dst[i] = src[i] / 255f;
+        return dst;
+    }
+
+    /// <summary>RGBA32F → RGBA8 (×255, round, clamp 0..255).</summary>
+    public static byte[] FloatToBytes(float[] src)
+    {
+        var dst = new byte[src.Length];
+        for (int i = 0; i < src.Length; i++)
+            dst[i] = (byte)Math.Clamp(src[i] * 255f + 0.5f, 0f, 255f);
+        return dst;
     }
 
     /// <summary>
@@ -50,10 +82,10 @@ public sealed class PixelLayer : Layer
         if (nw == Width && nh == Height) return false;   // already covers the doc
 
         int dx = OffsetX - x0, dy = OffsetY - y0;        // where the old buffer lands in the new one
-        var nbuf = new byte[nw * nh * 4];
+        var nbuf = new float[nw * nh * 4];
         for (int y = 0; y < Height; y++)
             Array.Copy(Pixels, y * Width * 4, nbuf, ((y + dy) * nw + dx) * 4, Width * 4);
-        if (Mask is { } m)   // the mask is layer-aligned → grow it the same way
+        if (Mask is { } m)   // the mask is layer-aligned (byte RGBA8) → grow it the same way
         {
             var nmask = new byte[nw * nh * 4];
             for (int y = 0; y < Height; y++)
@@ -81,7 +113,7 @@ public sealed class PixelLayer : Layer
             int row = y * Width * 4;
             for (int x = 0; x < Width; x++)
             {
-                if (Pixels[row + x * 4 + 3] == 0) continue;   // transparent
+                if (Pixels[row + x * 4 + 3] <= 0f) continue;   // transparent
                 if (x < minX) minX = x;
                 if (x > maxX) maxX = x;
                 if (y < minY) minY = y;
@@ -93,7 +125,7 @@ public sealed class PixelLayer : Layer
         {
             if (Width == 1 && Height == 1) return false;
             Width = Height = 1;
-            Pixels = new byte[4];
+            Pixels = new float[4];
             if (Mask is not null) { Mask = new byte[4]; MaskDirty = true; }
             Dirty = true; DirtyTiles.Clear();
             return true;
@@ -102,7 +134,7 @@ public sealed class PixelLayer : Layer
         int nw = maxX - minX + 1, nh = maxY - minY + 1;
         if (nw == Width && nh == Height) return false;   // already tight
 
-        var nbuf = new byte[nw * nh * 4];
+        var nbuf = new float[nw * nh * 4];
         for (int y = 0; y < nh; y++)
             Array.Copy(Pixels, ((minY + y) * Width + minX) * 4, nbuf, y * nw * 4, nw * 4);
         if (Mask is { } m)
@@ -126,7 +158,7 @@ public sealed class PixelLayer : Layer
         return c;
     }
 
-    // 256² tile access (PLAN §4) delegates to RasterTiles (shared with masks).
-    public byte[] GetTile(int tx, int ty) => RasterTiles.GetTile(Pixels, Width, Height, tx, ty);
-    public void SetTile(int tx, int ty, byte[] data) => RasterTiles.SetTile(Pixels, Width, Height, tx, ty, data);
+    // 256² tile access (PLAN §4) delegates to RasterTiles (generic; float pixels here).
+    public float[] GetTile(int tx, int ty) => RasterTiles.GetTile(Pixels, Width, Height, tx, ty);
+    public void SetTile(int tx, int ty, float[] data) => RasterTiles.SetTile(Pixels, Width, Height, tx, ty, data);
 }

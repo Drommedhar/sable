@@ -14,7 +14,7 @@ public static class LiquifyTool
 {
     /// <summary>Apply one dab at (cx,cy). <paramref name="dragX"/>/<paramref name="dragY"/> = pointer
     /// movement since the last dab (used by Push). Strength 0..1, radius in px, hardness 0..1.</summary>
-    public static void Stamp(byte[] px, int w, int h, double cx, double cy,
+    public static void Stamp(float[] px, int w, int h, double cx, double cy,
         double dragX, double dragY, LiquifyMode mode, float strength, float radius, float hardness)
     {
         float r = radius;
@@ -24,7 +24,7 @@ public static class LiquifyTool
 
         // snapshot the dab bbox so sampling is stable (no intra-dab feedback)
         int sw = x1 - x0 + 1, sh = y1 - y0 + 1;
-        var snap = new byte[sw * sh * 4];
+        var snap = new float[sw * sh * 4];
         for (int y = y0; y <= y1; y++)
             Array.Copy(px, (y * w + x0) * 4, snap, (y - y0) * sw * 4, sw * 4);
 
@@ -61,13 +61,13 @@ public static class LiquifyTool
         }
     }
 
-    private static void WriteBilinear(byte[] dst, int w, int h, int dx, int dy,
-        byte[] snap, int sx0, int sy0, int sw, int sh, float sx, float sy)
+    private static void WriteBilinear(float[] dst, int w, int h, int dx, int dy,
+        float[] snap, int sx0, int sy0, int sw, int sh, float sx, float sy)
     {
         // sample from the snapshot where available (covers the warped neighbourhood), else clamp
         int x0 = (int)MathF.Floor(sx), y0 = (int)MathF.Floor(sy);
         float fx = sx - x0, fy = sy - y0;
-        Span<byte> c = stackalloc byte[4];
+        Span<float> c = stackalloc float[4];
         for (int k = 0; k < 4; k++)
         {
             float v00 = Sample(snap, sx0, sy0, sw, sh, dst, w, h, x0, y0, k);
@@ -75,14 +75,14 @@ public static class LiquifyTool
             float v01 = Sample(snap, sx0, sy0, sw, sh, dst, w, h, x0, y0 + 1, k);
             float v11 = Sample(snap, sx0, sy0, sw, sh, dst, w, h, x0 + 1, y0 + 1, k);
             float v = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
-            c[k] = (byte)Math.Clamp(v + 0.5f, 0, 255);
+            c[k] = MathF.Max(v, 0f);   // no upper clamp → HDR preserved
         }
         int di = (dy * w + dx) * 4;
         dst[di] = c[0]; dst[di + 1] = c[1]; dst[di + 2] = c[2]; dst[di + 3] = c[3];
     }
 
-    private static float Sample(byte[] snap, int sx0, int sy0, int sw, int sh,
-        byte[] full, int w, int h, int x, int y, int k)
+    private static float Sample(float[] snap, int sx0, int sy0, int sw, int sh,
+        float[] full, int w, int h, int x, int y, int k)
     {
         if (x >= sx0 && y >= sy0 && x < sx0 + sw && y < sy0 + sh)
             return snap[((y - sy0) * sw + (x - sx0)) * 4 + k];

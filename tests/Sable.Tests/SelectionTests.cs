@@ -174,13 +174,14 @@ public class SelectionTests
     public void Gradient_FadesAlongLine()
     {
         int w = 20, h = 1;
-        var px = new byte[w * h * 4];   // transparent
+        var px = new float[w * h * 4];   // transparent
         int changed = GradientTool.Apply(px, w, h, 0, 0, w, 0, 200, 100, 50);
         Assert.True(changed > 0);
-        int aStart = px[(0) * 4 + 3];
-        int aEnd = px[(w - 1) * 4 + 3];
+        var pb = Sable.Engine.Layers.PixelLayer.FloatToBytes(px);
+        int aStart = pb[(0) * 4 + 3];
+        int aEnd = pb[(w - 1) * 4 + 3];
         Assert.True(aStart > aEnd);        // opaque at start, fading to end
-        Assert.Equal(200, px[0]);          // foreground color at start
+        Assert.Equal(200, pb[0]);          // foreground color at start
         Assert.InRange(aStart, 200, 255);  // near-full alpha at start
     }
 
@@ -200,7 +201,7 @@ public class SelectionTests
     [Fact]
     public void Gradient_ZeroLength_NoOp()
     {
-        var px = new byte[10 * 10 * 4];
+        var px = new float[10 * 10 * 4];
         Assert.Equal(0, GradientTool.Apply(px, 10, 10, 5, 5, 5, 5, 255, 0, 0));
     }
 
@@ -208,12 +209,12 @@ public class SelectionTests
     public void Gradient_HonorsMaskCoverage()
     {
         int w = 10, h = 1;
-        var px = new byte[w * h * 4];
+        var px = new float[w * h * 4];
         var mask = new byte[w * h];        // only x=0 selected
         mask[0] = 255;
         GradientTool.Apply(px, w, h, 0, 0, w, 0, 255, 255, 255, null, mask, w);
         Assert.True(px[0 * 4 + 3] > 0);    // masked pixel painted
-        Assert.Equal(0, px[5 * 4 + 3]);    // outside mask untouched
+        Assert.Equal(0f, px[5 * 4 + 3]);   // outside mask untouched
     }
 
     [Fact]
@@ -284,15 +285,16 @@ public class SelectionTests
         var src = new byte[w * h * 4];
         int s = (3 * w + 3) * 4;
         src[s] = 200; src[s + 1] = 50; src[s + 2] = 0; src[s + 3] = 255;   // orange at (3,3)
-        var dst = new byte[w * h * 4];
+        var dstF = new float[w * h * 4];
 
         var b = new BrushTool
         {
             Radius = 1, Hardness = 1f, Flow = 1f,
-            Clone = true, CloneSrc = src, CloneSrcW = w, CloneSrcH = h,
+            Clone = true, CloneSrc = Sable.Engine.Layers.PixelLayer.BytesToFloat(src), CloneSrcW = w, CloneSrcH = h,
             CloneOffX = 5, CloneOffY = 5   // dest - 5 = source
         };
-        b.Stamp(dst, w, h, 8, 8);          // (8,8) → samples src (3,3) = orange
+        b.Stamp(dstF, w, h, 8, 8);          // (8,8) → samples src (3,3) = orange
+        var dst = Sable.Engine.Layers.PixelLayer.FloatToBytes(dstF);
 
         int d = (8 * w + 8) * 4;
         Assert.True(dst[d + 3] > 0);       // painted
@@ -320,15 +322,16 @@ public class SelectionTests
     public void FillFlood_WithMask_FillsOnlyInsideMask()
     {
         int w = 10, h = 10;
-        var px = new byte[w * h * 4];   // uniform transparent black → one flood region
+        var px = new float[w * h * 4];   // uniform transparent black → one flood region
         var mask = new byte[w * h];
         // mask = left 5 columns
         for (int y = 0; y < h; y++)
         for (int x = 0; x < 5; x++) mask[y * w + x] = 255;
 
         int changed = FillTool.Flood(px, w, h, 0, 0, 9, 9, 9, 255, 0, null, mask, w);
+        var pb = Sable.Engine.Layers.PixelLayer.FloatToBytes(px);
         Assert.Equal(50, changed);                       // only the 5×10 masked half
-        Assert.Equal(255, px[(0 * w + 0) * 4 + 3]);
-        Assert.Equal(0, px[(0 * w + 7) * 4 + 3]);        // outside mask untouched
+        Assert.Equal(255, pb[(0 * w + 0) * 4 + 3]);
+        Assert.Equal(0, pb[(0 * w + 7) * 4 + 3]);        // outside mask untouched
     }
 }

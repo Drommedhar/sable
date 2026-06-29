@@ -2,17 +2,20 @@ namespace Sable.Tools;
 
 /// <summary>
 /// Flood fill (bucket): from a seed pixel, replaces the contiguous region of
-/// similar color with the fill color (scanline 4-connected). Operates on an RGBA8
-/// buffer. Returns the count of pixels changed (0 = no-op).
+/// similar color with the fill color (scanline 4-connected). Operates on an RGBA32F
+/// buffer (bit-depth float pipeline, PLAN §6). Fill colour + tolerance are 0..255 (UI
+/// units), converted internally. Returns the count of pixels changed (0 = no-op).
 /// </summary>
 public static class FillTool
 {
     // originX/originY = document position of the buffer's (0,0); clip + mask are document-space,
     // so a buffer pixel (x,y) maps to doc (x+originX, y+originY). 0 = buffer aligned to the document.
-    public static int Flood(byte[] px, int w, int h, int sx, int sy,
+    public static int Flood(float[] px, int w, int h, int sx, int sy,
         byte r, byte g, byte b, byte a, int tolerance = 32, (int X, int Y, int W, int H)? clip = null,
         byte[]? mask = null, int maskW = 0, int originX = 0, int originY = 0)
     {
+        float fr = r / 255f, fg = g / 255f, fb = b / 255f, fa = a / 255f;
+        float tol = tolerance / 255f;
         // restrict to clip (selection) bounds if given (converted from doc space to buffer space)
         int minX = 0, minY = 0, maxX = w - 1, maxY = h - 1;
         if (clip is { } c)
@@ -23,16 +26,16 @@ public static class FillTool
         if (sx < minX || sy < minY || sx > maxX || sy > maxY) return 0;
         if (maskW == 0) maskW = w;
         int seed = (sy * w + sx) * 4;
-        byte sr = px[seed], sg = px[seed + 1], sb = px[seed + 2], sa = px[seed + 3];
+        float sr = px[seed], sg = px[seed + 1], sb = px[seed + 2], sa = px[seed + 3];
 
         // already the fill color → nothing to do (only safe when not mask-clipped)
-        if (mask is null && sr == r && sg == g && sb == b && sa == a) return 0;
+        if (mask is null && sr == fr && sg == fg && sb == fb && sa == fa) return 0;
 
         bool Match(int i) =>
-            Math.Abs(px[i] - sr) <= tolerance &&
-            Math.Abs(px[i + 1] - sg) <= tolerance &&
-            Math.Abs(px[i + 2] - sb) <= tolerance &&
-            Math.Abs(px[i + 3] - sa) <= tolerance;
+            Math.Abs(px[i] - sr) <= tol &&
+            Math.Abs(px[i + 1] - sg) <= tol &&
+            Math.Abs(px[i + 2] - sb) <= tol &&
+            Math.Abs(px[i + 3] - sa) <= tol;
 
         // visited array decouples traversal from the write (so a selection mask can
         // block the write without re-queuing the same matching pixel forever)
@@ -54,7 +57,7 @@ public static class FillTool
             bool inMask = mask is null || (dmx >= 0 && dmy >= 0 && dmx < maskW && mask[dmy * maskW + dmx] != 0);
             if (inMask)
             {
-                px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a;
+                px[i] = fr; px[i + 1] = fg; px[i + 2] = fb; px[i + 3] = fa;
                 changed++;
             }
             stack.Push((x - 1, y)); stack.Push((x + 1, y));

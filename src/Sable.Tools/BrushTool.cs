@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Sable.Core;
 
 namespace Sable.Tools;
@@ -6,10 +7,13 @@ namespace Sable.Tools;
 public enum BrushMode { Paint, Dodge, Burn, Sponge, Blur, Sharpen, Smudge }
 
 /// <summary>
-/// Destructive round brush that paints into any RGBA8 buffer (straight alpha,
-/// src-over) — a layer's pixels or its mask. Soft circular falloff; strokes
-/// interpolate stamps so fast moves don't gap. Also does retouch modes (dodge/burn/
-/// sponge/blur/sharpen/smudge) that modify the pixels under the dab. Caller marks dirty.
+/// Destructive round brush that paints into any RGBA buffer (straight alpha, src-over) — a layer's
+/// <b>float[] RGBA32F pixels</b> or its <b>byte[] RGBA8 mask</b>. The dab loop is generic over the
+/// channel element type <c>T</c> (byte or float); the JIT specialises per type so the per-channel
+/// load/store (<see cref="Ld{T}"/>/<see cref="St{T}"/>) is branch-free. Working maths is normalised
+/// 0..1 (float pixels may exceed 1 = HDR; bytes clamp on store). Soft circular falloff; strokes
+/// interpolate stamps so fast moves don't gap. Also does retouch modes (dodge/burn/sponge/blur/
+/// sharpen/smudge). Caller marks dirty.
 /// </summary>
 public sealed class BrushTool
 {
@@ -17,7 +21,7 @@ public sealed class BrushTool
     public BrushMode Mode { get; set; } = BrushMode.Paint;
     /// <summary>Effect amount per dab for retouch modes (0..1).</summary>
     public float Strength { get; set; } = 0.5f;
-    private float _smR, _smG, _smB;     // smudge carried colour
+    private float _smR, _smG, _smB;     // smudge carried colour (normalised 0..1)
     private bool _smInit;
 
     /// <summary>Reset per-stroke state (smudge carry, deterministic jitter). Call at the start of each gesture.</summary>
@@ -108,9 +112,9 @@ public sealed class BrushTool
     /// <summary>Row stride of <see cref="ClipMask"/> (doc width).</summary>
     public int ClipMaskW { get; set; }
 
-    // --- clone stamp: sample colour from a source buffer at a locked offset ---
+    // --- clone stamp: sample colour from a source buffer at a locked offset (RGBA32F, 0..1) ---
     public bool Clone { get; set; }
-    public byte[]? CloneSrc { get; set; }
+    public float[]? CloneSrc { get; set; }
     public int CloneSrcW { get; set; }
     public int CloneSrcH { get; set; }
     public int CloneOffX { get; set; }   // source pixel = dest - (CloneOffX, CloneOffY)
@@ -120,8 +124,22 @@ public sealed class BrushTool
     /// neighbourhood (so the patch blends seamlessly). Requires a clone source.</summary>
     public bool Heal { get; set; }
 
-    /// <summary>Stamp a single dab centered at (cx, cy) into an RGBA8 buffer.</summary>
-    public void Stamp(byte[] px, int w, int h, double cx, double cy)
+    // Per-channel load (→ normalised 0..1) / store (← 0..1). typeof(T) is JIT-constant for value
+    // types, so each specialisation (byte vs float) compiles to a branch-free path. Float stores are
+    // un-clamped on the high side (HDR headroom); bytes clamp+quantise to 0..255.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float Ld<T>(T[] a, int i) where T : struct
+        => typeof(T) == typeof(byte) ? Unsafe.As<T, byte>(ref a[i]) * (1f / 255f) : Unsafe.As<T, float>(ref a[i]);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void St<T>(T[] a, int i, float v) where T : struct
+    {
+        if (typeof(T) == typeof(byte)) Unsafe.As<T, byte>(ref a[i]) = (byte)Math.Clamp(v * 255f + 0.5f, 0f, 255f);
+        else Unsafe.As<T, float>(ref a[i]) = v;
+    }
+
+    /// <summary>Stamp a single dab centered at (cx, cy) into an RGBA buffer (byte mask or float pixels).</summary>
+    public void Stamp<T>(T[] px, int w, int h, double cx, double cy) where T : struct
     {
         // pressure dynamics: size tapers with pressure (kept ≥ 10% so light touches still mark)
         float r = Radius * (PressureSize ? 0.1f + 0.9f * Math.Clamp(_pressure, 0f, 1f) : 1f);
@@ -167,10 +185,10 @@ public sealed class BrushTool
         {
             int scx = Math.Clamp((int)cx, 0, w - 1), scy = Math.Clamp((int)cy, 0, h - 1);
             int sc = (scy * w + scx) * 4;
-            if (!_smInit) { _smR = px[sc]; _smG = px[sc + 1]; _smB = px[sc + 2]; _smInit = true; }
+            if (!_smInit) { _smR = Ld(px, sc); _smG = Ld(px, sc + 1); _smB = Ld(px, sc + 2); _smInit = true; }
         }
 
-        // healing: precompute the dab's tone shift = mean(dest) - mean(source) over the disc
+        // healing: precompute the dab's tone shift = mean(dest) - mean(source) over the disc (0..1)
         float healOffR = 0, healOffG = 0, healOffB = 0;
         if (Heal && Clone && CloneSrc is { } hc)
         {
@@ -183,15 +201,15 @@ public sealed class BrushTool
                 int sx = x - CloneOffX, sy = y - CloneOffY;
                 if (sx < 0 || sy < 0 || sx >= CloneSrcW || sy >= CloneSrcH) continue;
                 int di = (y * w + x) * 4, sj = (sy * CloneSrcW + sx) * 4;
-                if (hc[sj + 3] == 0) continue;
-                sdr += px[di]; sdg += px[di + 1]; sdb += px[di + 2];
+                if (hc[sj + 3] <= 0f) continue;
+                sdr += Ld(px, di); sdg += Ld(px, di + 1); sdb += Ld(px, di + 2);
                 ssr += hc[sj]; ssg += hc[sj + 1]; ssb += hc[sj + 2]; cnt++;
             }
             if (cnt > 0)
             {
-                healOffR = (float)((sdr - ssr) / cnt) / 255f;
-                healOffG = (float)((sdg - ssg) / cnt) / 255f;
-                healOffB = (float)((sdb - ssb) / cnt) / 255f;
+                healOffR = (float)((sdr - ssr) / cnt);
+                healOffG = (float)((sdg - ssg) / cnt);
+                healOffB = (float)((sdb - ssb) / cnt);
             }
         }
 
@@ -259,14 +277,14 @@ public sealed class BrushTool
                 int srcx = x - CloneOffX, srcy = y - CloneOffY;
                 if (srcx < 0 || srcy < 0 || srcx >= CloneSrcW || srcy >= CloneSrcH) continue;
                 int sj = (srcy * CloneSrcW + srcx) * 4;
-                csr = cs[sj] / 255f; csg = cs[sj + 1] / 255f; csb = cs[sj + 2] / 255f;
-                if (Heal) { csr = Math.Clamp(csr + healOffR, 0f, 1f); csg = Math.Clamp(csg + healOffG, 0f, 1f); csb = Math.Clamp(csb + healOffB, 0f, 1f); }
-                sa *= cs[sj + 3] / 255f;
+                csr = cs[sj]; csg = cs[sj + 1]; csb = cs[sj + 2];
+                if (Heal) { csr += healOffR; csg += healOffG; csb += healOffB; }
+                sa *= cs[sj + 3];
                 if (sa <= 0f) continue;
             }
 
             int i = (y * w + x) * 4;
-            float dr = px[i] / 255f, dg = px[i + 1] / 255f, db = px[i + 2] / 255f, da = px[i + 3] / 255f;
+            float dr = Ld(px, i), dg = Ld(px, i + 1), db = Ld(px, i + 2), da = Ld(px, i + 3);
 
             // paint blend mode: blend brush colour with the backdrop, weighted by backdrop
             // alpha (same `mix(s, B(d,s), da)` the compositor uses) — Normal = plain src-over
@@ -282,9 +300,9 @@ public sealed class BrushTool
             {
                 // transparency lock: tint colour toward the brush, keep alpha (no paint on empty pixels)
                 if (da <= 0f) continue;
-                px[i]     = (byte)(Math.Clamp(dr + (csr - dr) * sa, 0f, 1f) * 255f + 0.5f);
-                px[i + 1] = (byte)(Math.Clamp(dg + (csg - dg) * sa, 0f, 1f) * 255f + 0.5f);
-                px[i + 2] = (byte)(Math.Clamp(db + (csb - db) * sa, 0f, 1f) * 255f + 0.5f);
+                St(px, i,     dr + (csr - dr) * sa);
+                St(px, i + 1, dg + (csg - dg) * sa);
+                St(px, i + 2, db + (csb - db) * sa);
                 continue;
             }
 
@@ -292,31 +310,31 @@ public sealed class BrushTool
             {
                 // destination-out: reduce alpha by coverage, keep color
                 float ea = da * (1f - sa);
-                px[i + 3] = (byte)(Math.Clamp(ea, 0f, 1f) * 255f + 0.5f);
+                St(px, i + 3, Math.Clamp(ea, 0f, 1f));
                 continue;
             }
 
             float outA = sa + da * (1f - sa);
-            if (outA <= 0f) { px[i] = px[i + 1] = px[i + 2] = px[i + 3] = 0; continue; }
+            if (outA <= 0f) { St(px, i, 0f); St(px, i + 1, 0f); St(px, i + 2, 0f); St(px, i + 3, 0f); continue; }
             float outR = (csr * sa + dr * da * (1f - sa)) / outA;
             float outG = (csg * sa + dg * da * (1f - sa)) / outA;
             float outB = (csb * sa + db * da * (1f - sa)) / outA;
-            px[i] = (byte)(Math.Clamp(outR, 0f, 1f) * 255f + 0.5f);
-            px[i + 1] = (byte)(Math.Clamp(outG, 0f, 1f) * 255f + 0.5f);
-            px[i + 2] = (byte)(Math.Clamp(outB, 0f, 1f) * 255f + 0.5f);
-            px[i + 3] = (byte)(Math.Clamp(outA, 0f, 1f) * 255f + 0.5f);
+            St(px, i, outR);
+            St(px, i + 1, outG);
+            St(px, i + 2, outB);
+            St(px, i + 3, Math.Clamp(outA, 0f, 1f));
         }
     }
 
-    private void Retouch(byte[] px, int w, int h, int x, int y, float amt)
+    private void Retouch<T>(T[] px, int w, int h, int x, int y, float amt) where T : struct
     {
         int i = (y * w + x) * 4;
-        float dr = px[i], dg = px[i + 1], db = px[i + 2];
+        float dr = Ld(px, i), dg = Ld(px, i + 1), db = Ld(px, i + 2);
         float nr = dr, ng = dg, nb = db;
         switch (Mode)
         {
             case BrushMode.Dodge:
-                nr = dr + (255f - dr) * amt; ng = dg + (255f - dg) * amt; nb = db + (255f - db) * amt; break;
+                nr = dr + (1f - dr) * amt; ng = dg + (1f - dg) * amt; nb = db + (1f - db) * amt; break;
             case BrushMode.Burn:
                 nr = dr * (1f - amt); ng = dg * (1f - amt); nb = db * (1f - amt); break;
             case BrushMode.Sponge:   // desaturate toward luminance
@@ -339,9 +357,9 @@ public sealed class BrushTool
                 _smR += (dr - _smR) * amt * 0.5f; _smG += (dg - _smG) * amt * 0.5f; _smB += (db - _smB) * amt * 0.5f;
                 break;
         }
-        px[i] = (byte)Math.Clamp(nr + 0.5f, 0f, 255f);
-        px[i + 1] = (byte)Math.Clamp(ng + 0.5f, 0f, 255f);
-        px[i + 2] = (byte)Math.Clamp(nb + 0.5f, 0f, 255f);
+        St(px, i, nr);
+        St(px, i + 1, ng);
+        St(px, i + 2, nb);
     }
 
     /// <summary>Bilinear sample of the greyscale tip (u/v in [0, TipW-1]/[0, TipH-1]).</summary>
@@ -356,7 +374,7 @@ public sealed class BrushTool
         return a * (1f - fy) + b * fy;
     }
 
-    private static (float r, float g, float b) Avg3(byte[] px, int w, int h, int cx, int cy)
+    private static (float r, float g, float b) Avg3<T>(T[] px, int w, int h, int cx, int cy) where T : struct
     {
         float r = 0, g = 0, b = 0; int n = 0;
         for (int yy = cy - 1; yy <= cy + 1; yy++)
@@ -364,17 +382,17 @@ public sealed class BrushTool
         {
             int sx = Math.Clamp(xx, 0, w - 1), sy = Math.Clamp(yy, 0, h - 1);
             int i = (sy * w + sx) * 4;
-            r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+            r += Ld(px, i); g += Ld(px, i + 1); b += Ld(px, i + 2); n++;
         }
         return (r / n, g / n, b / n);
     }
 
-    /// <summary>Paint a stroke from (x0,y0) to (x1,y1) into an RGBA8 buffer, interpolating stamps.</summary>
-    public void Stroke(byte[] px, int w, int h, double x0, double y0, double x1, double y1)
+    /// <summary>Paint a stroke from (x0,y0) to (x1,y1) into an RGBA buffer, interpolating stamps.</summary>
+    public void Stroke<T>(T[] px, int w, int h, double x0, double y0, double x1, double y1) where T : struct
         => Stroke(px, w, h, x0, y0, x1, y1, 1f, 1f);
 
     /// <summary>Stroke with per-end stylus pressure (interpolated across the stamps).</summary>
-    public void Stroke(byte[] px, int w, int h, double x0, double y0, double x1, double y1, float p0, float p1)
+    public void Stroke<T>(T[] px, int w, int h, double x0, double y0, double x1, double y1, float p0, float p1) where T : struct
     {
         double dx = x1 - x0, dy = y1 - y0;
         double dist = Math.Sqrt(dx * dx + dy * dy);

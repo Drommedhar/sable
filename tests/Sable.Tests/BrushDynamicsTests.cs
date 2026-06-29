@@ -56,18 +56,18 @@ public class BrushDynamicsTests
     public void GradientShapes_RadialIsRotationSymmetric_ConicalWraps()
     {
         // radial: equal distance from the start → equal colour, regardless of direction
-        var px = Buf(64, 64);
+        var px = new float[64 * 64 * 4];
         var def = GradientDef.ForegroundToTransparent(255, 0, 0);
         GradientTool.Apply(px, 64, 64, 32, 32, 32, 12, def, shape: GradientShape.Radial);
-        int A(int x, int y) => px[(y * 64 + x) * 4 + 3];
+        float A(int x, int y) => px[(y * 64 + x) * 4 + 3];
         Assert.Equal(A(32 + 10, 32), A(32, 32 + 10));
         Assert.True(A(32 + 5, 32) > A(32 + 15, 32));   // closer = more opaque
 
         // reflected: symmetric about the start point along the drag axis
         // (pixel CENTRES sample the ramp: x=40 → +8.5, x=23 → -8.5 from the start)
-        var rx = Buf(64, 64);
+        var rx = new float[64 * 64 * 4];
         GradientTool.Apply(rx, 64, 64, 32, 32, 52, 32, def, shape: GradientShape.Reflected);
-        int RA(int x, int y) => rx[(y * 64 + x) * 4 + 3];
+        float RA(int x, int y) => rx[(y * 64 + x) * 4 + 3];
         Assert.Equal(RA(40, 32), RA(23, 32));
     }
 

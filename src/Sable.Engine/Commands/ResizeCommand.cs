@@ -16,7 +16,7 @@ public sealed class ResizeCommand : IUndoableCommand
     private readonly bool _bilinear;
     private int _oldW, _oldH;
     private double _oldDpi;
-    private readonly List<(PixelLayer layer, byte[] px, int w, int h, int offX, int offY)> _pixSnap = new();
+    private readonly List<(PixelLayer layer, float[] px, int w, int h, int offX, int offY)> _pixSnap = new();
     private readonly List<(Layer layer, byte[]? mask)> _maskSnap = new();
     private bool _captured;
 
@@ -57,7 +57,7 @@ public sealed class ResizeCommand : IUndoableCommand
                 // a sub-doc/offset layer must keep its bounds, not stretch to fill the canvas.
                 int olw = px.Width, olh = px.Height;
                 int nlw = Math.Max(1, (int)Math.Round(olw * rx)), nlh = Math.Max(1, (int)Math.Round(olh * ry));
-                px.SetBuffer(nlw, nlh, RasterTiles.Resample(px.Pixels, olw, olh, nlw, nlh, _bilinear));
+                px.SetBuffer(nlw, nlh, RasterTiles.ResampleF(px.Pixels, olw, olh, nlw, nlh, _bilinear));
                 px.OffsetX = (int)Math.Round(px.OffsetX * rx);
                 px.OffsetY = (int)Math.Round(px.OffsetY * ry);
                 if (px.Mask is { } pm)   // mask is layer-aligned → scale to the new layer size

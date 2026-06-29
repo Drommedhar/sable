@@ -10,13 +10,18 @@ namespace Sable.Engine.IO;
 /// </summary>
 public static class DocumentIO
 {
-    /// <summary>Open an image as a new single-layer document sized to the image.</summary>
+    /// <summary>Open an image as a new single-layer document sized to the image. Decodes to RGBA32F and
+    /// records the source bit depth on the document (8-bit images stay 8-bit; 16-bit PNG/TIFF import as
+    /// 16-bit, keeping their precision — bit-depth pipeline, PLAN §6).</summary>
     public static Document OpenImage(string path)
     {
-        var (w, h, rgba) = ImageCodec.DecodeRgba(path);
-        var doc = new Document(w, h);
+        var (w, h, rgba, srcBits) = ImageCodec.DecodeFloat(path);
+        var doc = new Document(w, h)
+        {
+            Depth = srcBits switch { 32 => Sable.Core.BitDepth.ThirtyTwo, 16 => Sable.Core.BitDepth.Sixteen, _ => Sable.Core.BitDepth.Eight },
+        };
         var layer = new PixelLayer(w, h, Path.GetFileNameWithoutExtension(path));
-        Array.Copy(rgba, layer.Pixels, Math.Min(rgba.Length, layer.Pixels.Length));
+        layer.SetBuffer(w, h, rgba);
         doc.Layers.Add(layer);
         return doc;
     }
@@ -31,4 +36,12 @@ public static class DocumentIO
         double dpi = 0, byte[]? icc = null, string? iccName = null)
         => System.IO.File.WriteAllBytes(path,
             ImageMeta.ApplyDpi(ImageCodec.EncodeScaled(fmt, srcW, srcH, rgba, outW, outH, quality, icc, iccName), fmt, dpi));
+
+    /// <summary>Export the flattened RGBA32F composite at the document's bit depth — PNG/TIFF write a true
+    /// 16-bit file when <paramref name="depthBits"/> ≥ 16; everything else quantises to 8-bit (bit-depth
+    /// pipeline, PLAN §6).</summary>
+    public static void ExportFloat(string path, ImageCodec.ImageFormat fmt, int srcW, int srcH, float[] rgba, int outW, int outH,
+        int quality, int depthBits, double dpi = 0, byte[]? icc = null, string? iccName = null)
+        => System.IO.File.WriteAllBytes(path,
+            ImageMeta.ApplyDpi(ImageCodec.EncodeScaledFloat(fmt, srcW, srcH, rgba, outW, outH, quality, depthBits, icc, iccName), fmt, dpi));
 }

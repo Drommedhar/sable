@@ -88,6 +88,46 @@ public class PsdFixtureTests
         Assert.Contains(warnings, w => w.Contains("editable shape"));
     }
 
+    // §14 Smart Object — rasterised, but placement transform + identity captured (Tier 1)
+    [Fact]
+    public void SmartObject_RasterisedButCapturesPlacementAndIdentity()
+    {
+        var doc = PsdReader.Load(PsdFixtures.SmartObjectRasterised(), "so", out var warnings);
+        var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
+        Assert.NotNull(l.SmartObject);
+        Assert.Equal("uid-fixture", l.SmartObject!.Identity);
+        Assert.NotNull(l.SmartObject.Placement);
+        Assert.Equal(8, l.SmartObject.Placement!.Length);
+        Assert.Equal(16f, l.SmartObject.Placement[2]);   // 2nd placement corner X
+        Assert.Equal(32, l.SmartObject.SourceWidth);
+        Assert.Equal(24, l.SmartObject.SourceHeight);
+        Assert.Equal(2, l.SmartObject.SourceType);
+        Assert.Contains(warnings, w => w.Contains("smart object") && w.Contains("uid-fixture"));
+    }
+
+    // PSB (large document format) — version 2 + 64-bit lengths imports like PSD (Tier 1)
+    [Fact]
+    public void Psb_VersionTwo_ImportsLayersLikePsd()
+    {
+        var doc = PsdReader.Load(PsdFixtures.PsbTwoLayers(), "big", out var warnings);
+        Assert.Equal(4, doc.Width);
+        Assert.Equal(2, doc.Layers.Count);
+        var back = Assert.IsType<PixelLayer>(doc.Layers[0]);
+        var front = Assert.IsType<PixelLayer>(doc.Layers[1]);
+        Assert.Equal("Front", front.Name);
+        Assert.InRange(front.Opacity, 0.49f, 0.51f);   // op 128/255
+        Assert.Equal(10, back.ToBytes()[0]);           // back layer R channel
+        Assert.Equal(200, front.ToBytes()[0]);         // front layer R channel
+    }
+
+    [Fact]
+    public void Psb_OversizeCanvas_RejectedWithHonestMessage()
+    {
+        var ex = Assert.Throws<System.IO.InvalidDataException>(
+            () => PsdReader.Load(PsdFixtures.PsbOversize(), "huge", out _));
+        Assert.Contains("too large", ex.Message, System.StringComparison.OrdinalIgnoreCase);
+    }
+
     // §10 SoCo + multi-contour vmsk → editable PathLayer with ExtraContours (holes)
     [Fact]
     public void SolidFillMultiContour_BridgesToPathLayerWithExtraContours()
@@ -146,7 +186,7 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.SixteenBitFlattened(), "deep", out var warnings);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(0xAB, l.Pixels[0]);
+        Assert.Equal(0xAB, l.ToBytes()[0]);
         Assert.Contains(warnings, w => w.Contains("16-bit"));
     }
 
@@ -162,7 +202,7 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.SmartObjectRasterised(), "so", out var warnings);
         Assert.Single(doc.Layers);   // the layer still imports (rasterised), not skipped
-        Assert.Contains(warnings, w => w.Contains("smart object rasterised"));
+        Assert.Contains(warnings, w => w.Contains("smart object") && w.Contains("rasterised"));
     }
 
     // §11 adjustment layer skipped + warning
@@ -264,9 +304,9 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.Grayscale8Bit(), "gray", out _);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(128, l.Pixels[0]);
-        Assert.Equal(128, l.Pixels[1]);
-        Assert.Equal(128, l.Pixels[2]);
+        Assert.Equal(128, l.ToBytes()[0]);
+        Assert.Equal(128, l.ToBytes()[1]);
+        Assert.Equal(128, l.ToBytes()[2]);
     }
 
     // §2 grayscale 16-bit → 8-bit + warning
@@ -275,7 +315,7 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.Grayscale16Bit(), "g16", out var warnings);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(0xCD, l.Pixels[0]);
+        Assert.Equal(0xCD, l.ToBytes()[0]);
         Assert.Contains(warnings, w => w.Contains("16-bit"));
     }
 
@@ -285,9 +325,9 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.ZipCompression(), "zip", out _);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(100, l.Pixels[0]);
-        Assert.Equal(150, l.Pixels[1]);
-        Assert.Equal(200, l.Pixels[2]);
+        Assert.Equal(100, l.ToBytes()[0]);
+        Assert.Equal(150, l.ToBytes()[1]);
+        Assert.Equal(200, l.ToBytes()[2]);
     }
 
     // §3 ZIP with prediction
@@ -296,9 +336,9 @@ public class PsdFixtureTests
     {
         var doc = PsdReader.Load(PsdFixtures.ZipPredictionCompression(), "zip3", out _);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(100, l.Pixels[0]);
-        Assert.Equal(150, l.Pixels[1]);
-        Assert.Equal(200, l.Pixels[2]);
+        Assert.Equal(100, l.ToBytes()[0]);
+        Assert.Equal(150, l.ToBytes()[1]);
+        Assert.Equal(200, l.ToBytes()[2]);
     }
 
     // §4 fill opacity (iOpa)

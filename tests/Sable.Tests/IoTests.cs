@@ -99,7 +99,7 @@ public class SableFileTests
         var doc = new Document(100, 80);
         doc.Layers.Add(new PixelLayer(100, 80, "bg"));
         var sub = new PixelLayer(20, 10, "pasted") { OffsetX = -5, OffsetY = 70 };
-        for (int i = 0; i < sub.Pixels.Length; i++) sub.Pixels[i] = (byte)(i * 7 % 251);
+        for (int i = 0; i < sub.Pixels.Length; i++) sub.Pixels[i] = (byte)(i * 7 % 251) / 255f;
         doc.Layers.Add(sub);
 
         var path = Path.Combine(Path.GetTempPath(), $"sable_test_{Guid.NewGuid():N}.sable");

@@ -293,6 +293,14 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         return _compositor.CompositeToBytes(_doc);
     }
 
+    /// <summary>Flatten to RGBA32F (working units) and read back — for 16/32-bit export, no 8-bit round-trip.</summary>
+    public float[]? ReadCompositeFloats()
+    {
+        if (_compositor is null || _doc is null) return null;
+        _compositor.Preview = null;
+        return _compositor.CompositeToFloats(_doc);
+    }
+
     /// <summary>Composite an arbitrary set of layers (doc-sized) to RGBA8 — for merge/flatten/rasterise.</summary>
     public byte[]? RenderLayersToPixels(System.Collections.Generic.List<Sable.Engine.Layers.Layer> layers)
     {

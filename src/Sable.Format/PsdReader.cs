@@ -27,6 +27,14 @@ public static class PsdReader
     public static Document Load(byte[] bytes, string docName, out List<string> warnings)
         => Load(bytes, docName, out warnings, out _);
 
+    /// <summary>Total-pixel import budget — layers are monolithic CPU float buffers, so a huge canvas would
+    /// OOM. ~80 MP ≈ 1.3 GB per RGBA32F layer. Lifted once tiled CPU storage lands (PSB_FEASIBILITY.md).</summary>
+    private const long MaxImportPixels = 80_000_000;
+
+    /// <summary>Additional-layer-info keys whose length field is 8 bytes in PSB (large document format).</summary>
+    private static bool Psb8ByteKey(string key) => key is "LMsk" or "Lr16" or "Lr32" or "Layr" or "Mt16"
+        or "Mt32" or "Mtrn" or "Alph" or "FMsk" or "lnk2" or "FEid" or "FXid" or "PxSD" or "cinf";
+
     public static Document Load(byte[] bytes, string docName, out List<string> warnings, out List<string> fonts)
     {
         warnings = new List<string>();
@@ -38,8 +46,9 @@ public static class PsdReader
         if (bytes.Length < 26 || r.ReadAscii(4) != "8BPS")
             throw new InvalidDataException("Not a PSD file (missing 8BPS signature).");
         int version = r.U16();
-        if (version != 1)
-            throw new InvalidDataException("PSB (large document format) is not supported — re-save as PSD.");
+        if (version != 1 && version != 2)
+            throw new InvalidDataException($"Unsupported PSD/PSB version {version}.");
+        bool psb = version == 2;   // PSB = large document format: 64-bit section/channel lengths (PSB_FEASIBILITY.md)
         r.Skip(6);
         int headerChannels = r.U16();
         int height = (int)r.U32();
@@ -47,8 +56,15 @@ public static class PsdReader
         int depth = r.U16();
         int colorMode = r.U16();
 
-        if (width <= 0 || height <= 0 || width > 65535 || height > 65535)
+        int maxDim = psb ? 300_000 : 65_535;
+        if (width <= 0 || height <= 0 || width > maxDim || height > maxDim)
             throw new InvalidDataException($"Unsupported canvas size {width}x{height}.");
+        // Memory guard: layers are monolithic CPU float buffers (W·H·16 B), so cap total pixels until
+        // tiled CPU storage lands (PSB_FEASIBILITY.md Tier 2). Protects against OOM on huge PSBs.
+        if ((long)width * height > MaxImportPixels)
+            throw new InvalidDataException(
+                $"Document too large to import ({width}×{height} = {(long)width * height / 1_000_000} MP). " +
+                $"Sable's in-memory limit is {MaxImportPixels / 1_000_000} MP — large-document support needs tiled CPU storage.");
         if (colorMode != 3 && colorMode != 1)
             throw new InvalidDataException($"Unsupported colour mode {ModeName(colorMode)} — only RGB and Grayscale PSDs import.");
         if (depth != 8 && depth != 16)
@@ -61,34 +77,34 @@ public static class PsdReader
         // ---- image resources: scan for the embedded ICC profile (resource 1039), skip the rest ----
         byte[]? icc = ParseImageResources(ref r, warnings);
 
-        // ---- layer and mask info ----
-        long lmiLen = r.U32();
+        // ---- layer and mask info ---- (PSB: section + layer-info lengths are 8-byte)
+        long lmiLen = r.Len(psb);
         long lmiEnd = r.Pos + lmiLen;
         List<LayerRecord> records = new();
         if (lmiLen > 0)
         {
-            long liLen = r.U32();
+            long liLen = r.Len(psb);
             long liEnd = r.Pos + liLen;
             if (liLen > 0)
-                records = ParseLayerInfo(ref r, depth, colorMode, warnings, fontSet, width, height);
+                records = ParseLayerInfo(ref r, depth, colorMode, warnings, fontSet, width, height, psb);
             r.Pos = liEnd;
 
             // 16-bit files keep their layers in the Lr16 global tagged block instead.
             if (records.Count == 0 && r.Pos < lmiEnd)
             {
-                if (r.Pos + 4 <= lmiEnd) r.Skip((int)r.U32());   // global layer mask info
+                if (r.Pos + 4 <= lmiEnd) r.Skip((int)r.U32());   // global layer mask info (always 4-byte)
                 while (r.Pos + 12 <= lmiEnd)
                 {
                     string sig = r.ReadAscii(4);
                     if (sig != "8BIM" && sig != "8B64") break;
                     string key = r.ReadAscii(4);
-                    long len = r.U32();
+                    long len = psb && Psb8ByteKey(key) ? (long)r.U64() : r.U32();
                     long next = r.Pos + len + ((len & 3) != 0 ? 4 - (len & 3) : 0);   // global blocks pad to 4
                     if (key is "Lr16" or "Lr32")
                     {
                         if (key == "Lr32")
                             throw new InvalidDataException("32-bit PSD layers are not supported — only 8- and 16-bit.");
-                        records = ParseLayerInfo(ref r, depth, colorMode, warnings, fontSet, width, height);
+                        records = ParseLayerInfo(ref r, depth, colorMode, warnings, fontSet, width, height, psb);
                     }
                     if (next > lmiEnd) break;
                     r.Pos = next;
@@ -115,7 +131,7 @@ public static class PsdReader
             // flattened file (or no layer info): import the merged composite as one layer
             var px = ReadComposite(ref r, width, height, depth, headerChannels, colorMode);
             var layer = new PixelLayer(width, height, docName);
-            Array.Copy(px, layer.Pixels, px.Length);
+            layer.SetBufferFromBytes(width, height, px);   // RGBA8 → RGBA32F (bit-depth pipeline)
             doc.Layers.Add(layer);
         }
 
@@ -224,12 +240,13 @@ public static class PsdReader
         public List<VectorContour>? VectorKnots;                       // vmsk/vsms bezier knots (handles preserved) for the ShapeLayer bridge
         public (byte r, byte g, byte b)? SoCoColor;                   // solid-colour fill layer
         public PsdTextInfo? TextInfo;                                 // TySh → editable TextLayer
+        public Sable.Engine.Layers.SmartObjectInfo? SmartObject;      // SoLd/SoLE → captured placement + identity (Tier 1)
         public bool HasLrFx, HasLfx2;
         public int W => Math.Max(0, Right - Left);
         public int H => Math.Max(0, Bottom - Top);
     }
 
-    private static List<LayerRecord> ParseLayerInfo(ref Reader r, int depth, int colorMode, List<string> warnings, SortedSet<string> fonts, int docW, int docH)
+    private static List<LayerRecord> ParseLayerInfo(ref Reader r, int depth, int colorMode, List<string> warnings, SortedSet<string> fonts, int docW, int docH, bool psb = false)
     {
         int count = (short)r.U16();
         if (count < 0) count = -count;        // negative = composite has transparency; layer parsing identical
@@ -243,7 +260,7 @@ public static class PsdReader
             };
             int chCount = r.U16();
             for (int c = 0; c < chCount; c++)
-                rec.Channels.Add(new ChannelData { Id = (short)r.U16(), RawLength = r.U32() });
+                rec.Channels.Add(new ChannelData { Id = (short)r.U16(), RawLength = r.Len(psb) });   // PSB: 8-byte channel length
 
             if (r.ReadAscii(4) != "8BIM") throw new InvalidDataException("Corrupt PSD: bad blend-mode signature.");
             rec.BlendKey = r.ReadAscii(4);
@@ -283,7 +300,7 @@ public static class PsdReader
                 string sig = r.ReadAscii(4);
                 if (sig != "8BIM" && sig != "8B64") break;
                 string key = r.ReadAscii(4);
-                long len = r.U32();
+                long len = psb && Psb8ByteKey(key) ? (long)r.U64() : r.U32();   // PSB: 8-byte length for the large-doc key set
                 long next = r.Pos + len + (len & 1);
                 if (next > extraEnd) { break; }
 
@@ -318,8 +335,19 @@ public static class PsdReader
                             rec.Notes.Add("text layer rasterised (style data unreadable)");
                         }
                         break;
-                    case "SoLd" or "PlLd" or "SoLE":
-                        rec.Notes.Add("smart object rasterised");
+                    case "SoLd" or "SoLE":
+                        try
+                        {
+                            rec.SmartObject = ParseSmartObject(ref r);
+                            string id = rec.SmartObject.Identity;
+                            rec.Notes.Add(string.IsNullOrEmpty(id)
+                                ? "smart object rasterised (placement preserved; embedded-source editing pending)"
+                                : $"smart object '{id}' rasterised (placement + identity preserved; embedded-source editing pending)");
+                        }
+                        catch { rec.Notes.Add("smart object rasterised"); }
+                        break;
+                    case "PlLd":
+                        rec.Notes.Add("smart object rasterised");   // legacy placed-layer format (non-descriptor) — Tier 1 metadata pending
                         break;
                     case "vmsk" or "vsms":
                         try
@@ -1143,6 +1171,37 @@ public static class PsdReader
         }
     }
 
+    /// <summary>SoLd/SoLE: <c>soLD</c> sig + version + descriptor version, then the smart-object
+    /// descriptor. Captures identity (<c>Idnt</c>), placement quad (<c>Trnf</c>, 8 doubles), source
+    /// size (<c>Sz</c>), and type for staged Smart Object import (Tier 1, plans/SMART_OBJECTS.md).
+    /// Pixels stay rasterised — this only preserves the metadata.</summary>
+    private static Sable.Engine.Layers.SmartObjectInfo ParseSmartObject(ref Reader r)
+    {
+        // Layout varies: some writers prefix the descriptor with a 'soLD'/'soLE' signature (4) + version (4);
+        // others start at the descriptor version. Read the first 4 bytes and branch — if they spell the
+        // signature, skip the version too; otherwise they WERE the descriptor version (already consumed).
+        string sig = r.ReadAscii(4);
+        if (sig is "soLD" or "soLE") { r.Skip(4); r.Skip(4); }   // version + descriptor version
+        var d = PsDesc.Parse(ref r);
+        var so = new Sable.Engine.Layers.SmartObjectInfo
+        {
+            Identity = d.EnumVal("Idnt") ?? "",
+            SourceType = (int)d.Num("Type"),
+        };
+        if (d.Items("Trnf") is { Count: 8 } t)
+        {
+            var q = new float[8];
+            for (int i = 0; i < 8; i++) q[i] = (float)System.Convert.ToDouble(t[i]);
+            so.Placement = q;
+        }
+        if (d.Obj("Sz  ") is { } sz)
+        {
+            so.SourceWidth = (int)sz.Num("Wdth");
+            so.SourceHeight = (int)sz.Num("Hght");
+        }
+        return so;
+    }
+
     private static PixelLayer BuildPixelLayer(LayerRecord rec, int colorMode)
     {
         int w = Math.Max(1, rec.W), h = Math.Max(1, rec.H);
@@ -1154,11 +1213,12 @@ public static class PsdReader
             ClipToBelow = rec.Clipping,
             OffsetX = rec.Left,
             OffsetY = rec.Top,
+            SmartObject = rec.SmartObject,   // captured Smart Object placement/identity (Tier 1)
         };
         if (rec.W == 0 || rec.H == 0) return layer;   // empty raster (e.g. brand-new layer)
 
-        var px = layer.Pixels;
-        for (int i = 3; i < px.Length; i += 4) px[i] = 255;
+        var px = layer.Pixels;   // RGBA32F: 8-bit PSD planes (0..255) map to 0..1
+        for (int i = 3; i < px.Length; i += 4) px[i] = 1f;
 
         foreach (var ch in rec.Channels)
         {
@@ -1174,11 +1234,11 @@ public static class PsdReader
             if (off < 0) continue;
             if (colorMode == 1 && ch.Id == 0)
             {
-                for (int i = 0; i < w * h; i++) { px[i * 4] = plane[i]; px[i * 4 + 1] = plane[i]; px[i * 4 + 2] = plane[i]; }
+                for (int i = 0; i < w * h; i++) { px[i * 4] = plane[i] / 255f; px[i * 4 + 1] = plane[i] / 255f; px[i * 4 + 2] = plane[i] / 255f; }
             }
             else
             {
-                for (int i = 0; i < w * h; i++) px[i * 4 + off] = plane[i];
+                for (int i = 0; i < w * h; i++) px[i * 4 + off] = plane[i] / 255f;
             }
         }
         return layer;
@@ -1299,8 +1359,8 @@ public static class PsdReader
             var px = shape.Pixels;
             for (int i = 0; i < cov.Length; i++)
             {
-                px[i * 4] = c.r; px[i * 4 + 1] = c.g; px[i * 4 + 2] = c.b;
-                px[i * 4 + 3] = cov[i];
+                px[i * 4] = c.r / 255f; px[i * 4 + 1] = c.g / 255f; px[i * 4 + 2] = c.b / 255f;
+                px[i * 4 + 3] = cov[i] / 255f;
             }
             return shape;
         }
@@ -1316,7 +1376,7 @@ public static class PsdReader
         var sp = solid.Pixels;
         for (int i = 0; i < sp.Length; i += 4)
         {
-            sp[i] = c.r; sp[i + 1] = c.g; sp[i + 2] = c.b; sp[i + 3] = 255;
+            sp[i] = c.r / 255f; sp[i + 1] = c.g / 255f; sp[i + 2] = c.b / 255f; sp[i + 3] = 1f;
         }
         return solid;
     }
@@ -1840,6 +1900,9 @@ public static class PsdReader
         public byte U8() => Bytes[Pos++];
         public ushort U16() { var v = BinaryPrimitives.ReadUInt16BigEndian(Bytes.AsSpan((int)Pos)); Pos += 2; return v; }
         public uint U32() { var v = BinaryPrimitives.ReadUInt32BigEndian(Bytes.AsSpan((int)Pos)); Pos += 4; return v; }
+        public ulong U64() { var v = BinaryPrimitives.ReadUInt64BigEndian(Bytes.AsSpan((int)Pos)); Pos += 8; return v; }
+        /// <summary>Read a length field: 8 bytes for PSB (large document format), 4 for PSD.</summary>
+        public long Len(bool psb) => psb ? (long)U64() : U32();
         public double F64() { var v = BinaryPrimitives.ReadDoubleBigEndian(Bytes.AsSpan((int)Pos)); Pos += 8; return v; }
         public void Skip(int n) => Pos += n;
 

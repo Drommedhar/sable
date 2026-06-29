@@ -88,6 +88,10 @@ public abstract class Layer
 
     public bool MaskDirty { get; set; }
 
+    /// <summary>Captured Smart Object metadata when this layer was imported from a PSD Smart Object
+    /// (rasterised; roadmap §14 Tier 1). Null for normal layers. See plans/SMART_OBJECTS.md.</summary>
+    public SmartObjectInfo? SmartObject { get; set; }
+
     public bool HasMask => Mask is not null;
 
     /// <summary>Non-destructive layer effects (drop shadow, glow, stroke, overlay) — PLAN §5/§16.6.</summary>
@@ -143,6 +147,7 @@ public abstract class Layer
         c.Perspective = Perspective;
         if (PerspCorners is not null) c.PerspCorners = (float[])PerspCorners.Clone();
         if (Mask is not null) { c.Mask = (byte[])Mask.Clone(); c.MaskDirty = true; }
+        if (SmartObject is not null) c.SmartObject = SmartObject.Clone();
         foreach (var fx in Effects) c.Effects.Add(fx.Clone());
         foreach (var ch in Children) c.Children.Add(ch.Clone());
         c.Dirty = true;

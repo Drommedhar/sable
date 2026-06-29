@@ -152,9 +152,9 @@ public class PsdReaderTests
 
         var bg = Assert.IsType<PixelLayer>(doc.Layers[0]);
         Assert.Equal("Background", bg.Name);
-        Assert.Equal(255, bg.Pixels[0]);          // red
-        Assert.Equal(0, bg.Pixels[1]);
-        Assert.Equal(255, bg.Pixels[3]);
+        Assert.Equal(255, bg.ToBytes()[0]);          // red
+        Assert.Equal(0, bg.ToBytes()[1]);
+        Assert.Equal(255, bg.ToBytes()[3]);
 
         var top = Assert.IsType<PixelLayer>(doc.Layers[1]);
         Assert.Equal("Top", top.Name);
@@ -166,7 +166,7 @@ public class PsdReaderTests
         Assert.Equal(1, top.OffsetY);
         Assert.Equal(2, top.Width);
         Assert.Equal(2, top.Height);
-        Assert.Equal(255, top.Pixels[1]);         // green
+        Assert.Equal(255, top.ToBytes()[1]);         // green
         Assert.NotNull(top.Mask);
         Assert.Equal(10, top.Mask![0]);           // mask plane mapped to layer-aligned R channel
         Assert.Equal(40, top.Mask![3 * 4]);
@@ -229,12 +229,12 @@ public class PsdReaderTests
         var doc = PsdReader.Load(psd, "flat", out _);
 
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(10, l.Pixels[0]);
-        Assert.Equal(50, l.Pixels[1]);
-        Assert.Equal(90, l.Pixels[2]);
-        Assert.Equal(255, l.Pixels[3]);
-        Assert.Equal(40, l.Pixels[3 * 4 + 0]);
-        Assert.Equal(93, l.Pixels[3 * 4 + 2]);
+        Assert.Equal(10, l.ToBytes()[0]);
+        Assert.Equal(50, l.ToBytes()[1]);
+        Assert.Equal(90, l.ToBytes()[2]);
+        Assert.Equal(255, l.ToBytes()[3]);
+        Assert.Equal(40, l.ToBytes()[3 * 4 + 0]);
+        Assert.Equal(93, l.ToBytes()[3 * 4 + 2]);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class PsdReaderTests
 
         var doc = PsdReader.Load(psd, "deep", out var warnings);
         var l = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.Equal(0xAB, l.Pixels[0]);
+        Assert.Equal(0xAB, l.ToBytes()[0]);
         Assert.Contains(warnings, w => w.Contains("16-bit"));
     }
 

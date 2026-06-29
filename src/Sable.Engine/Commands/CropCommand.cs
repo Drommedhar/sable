@@ -14,7 +14,7 @@ public sealed class CropCommand : IUndoableCommand
     private readonly Document _doc;
     private readonly int _x, _y, _w, _h;
     private int _oldW, _oldH;
-    private readonly List<(PixelLayer layer, byte[] px, int w, int h, int offX, int offY)> _pixSnap = new();
+    private readonly List<(PixelLayer layer, float[] px, int w, int h, int offX, int offY)> _pixSnap = new();
     private readonly List<(Layer layer, byte[]? mask)> _maskSnap = new();
     private bool _captured;
 

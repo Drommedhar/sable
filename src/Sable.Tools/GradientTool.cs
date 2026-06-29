@@ -20,13 +20,13 @@ public enum GradientShape
 public static class GradientTool
 {
     /// <summary>Two-stop convenience: foreground colour → transparent.</summary>
-    public static int Apply(byte[] px, int w, int h, double x0, double y0, double x1, double y1,
+    public static int Apply(float[] px, int w, int h, double x0, double y0, double x1, double y1,
         byte r, byte g, byte b, (int X, int Y, int W, int H)? clip = null,
         byte[]? mask = null, int maskW = 0)
         => Apply(px, w, h, x0, y0, x1, y1, GradientDef.ForegroundToTransparent(r, g, b), clip, mask, maskW);
 
-    /// <summary>Paint a multi-stop gradient (<paramref name="def"/>) across the drag line.</summary>
-    public static int Apply(byte[] px, int w, int h, double x0, double y0, double x1, double y1,
+    /// <summary>Paint a multi-stop gradient (<paramref name="def"/>) across the drag line (RGBA32F, PLAN §6).</summary>
+    public static int Apply(float[] px, int w, int h, double x0, double y0, double x1, double y1,
         GradientDef def, (int X, int Y, int W, int H)? clip = null,
         byte[]? mask = null, int maskW = 0, GradientShape shape = GradientShape.Linear)
     {
@@ -87,16 +87,13 @@ public static class GradientTool
             if (sa <= 0f) continue;
 
             int i = (y * w + x) * 4;
-            float dr = px[i] / 255f, dg = px[i + 1] / 255f, db = px[i + 2] / 255f, da = px[i + 3] / 255f;
+            float dr = px[i], dg = px[i + 1], db = px[i + 2], da = px[i + 3];
             float outA = sa + da * (1f - sa);
-            if (outA <= 0f) { px[i] = px[i + 1] = px[i + 2] = px[i + 3] = 0; changed++; continue; }
-            float outR = (sr * sa + dr * da * (1f - sa)) / outA;
-            float outG = (sg * sa + dg * da * (1f - sa)) / outA;
-            float outB = (sb * sa + db * da * (1f - sa)) / outA;
-            px[i] = (byte)(Math.Clamp(outR, 0f, 1f) * 255f + 0.5f);
-            px[i + 1] = (byte)(Math.Clamp(outG, 0f, 1f) * 255f + 0.5f);
-            px[i + 2] = (byte)(Math.Clamp(outB, 0f, 1f) * 255f + 0.5f);
-            px[i + 3] = (byte)(Math.Clamp(outA, 0f, 1f) * 255f + 0.5f);
+            if (outA <= 0f) { px[i] = px[i + 1] = px[i + 2] = px[i + 3] = 0f; changed++; continue; }
+            px[i]     = (sr * sa + dr * da * (1f - sa)) / outA;
+            px[i + 1] = (sg * sa + dg * da * (1f - sa)) / outA;
+            px[i + 2] = (sb * sa + db * da * (1f - sa)) / outA;
+            px[i + 3] = Math.Clamp(outA, 0f, 1f);
             changed++;
         }
         return changed;

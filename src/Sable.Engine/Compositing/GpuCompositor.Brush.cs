@@ -220,8 +220,8 @@ public sealed unsafe partial class GpuCompositor
         _dabClipX0 = clipX0; _dabClipY0 = clipY0; _dabClipX1 = clipX1; _dabClipY1 = clipY1;
     }
 
-    /// <summary>Finish the GPU stroke: read the layer buffer back into <c>px.Pixels</c>
-    /// (rgba8) so the CPU copy is authoritative again. Caller marks tiles/undo.</summary>
+    /// <summary>Finish the GPU stroke: read the f32 layer buffer back into <c>px.Pixels</c>
+    /// (RGBA32F) so the CPU copy is authoritative again. Caller marks tiles/undo.</summary>
     public void EndBrushStroke()
     {
         if (StrokeLayer is not { } px) return;
@@ -255,9 +255,8 @@ public sealed unsafe partial class GpuCompositor
         while (!mapped) _gpu.Poll(wait: true);
 
         var srcF = (float*)api.BufferGetMappedRange(_strokeReadback, 0, (nuint)bytes);
-        var dst = px.Pixels;
-        for (int i = 0; i < dst.Length; i++)
-            dst[i] = (byte)System.Math.Clamp(srcF[i] * 255f + 0.5f, 0f, 255f);
+        var dst = px.Pixels;   // GPU buffer is already RGBA32F working units → straight copy
+        new ReadOnlySpan<float>(srcF, dst.Length).CopyTo(dst);
         api.BufferUnmap(_strokeReadback);
 
         StrokeLayer = null;

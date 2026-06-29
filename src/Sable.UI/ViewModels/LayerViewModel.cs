@@ -90,7 +90,7 @@ public sealed partial class LayerViewModel : ObservableObject
                 if (sy1 <= sy0) sy1 = sy0 + 1;
                 int stepx = Math.Max(1, (sx1 - sx0) / 4), stepy = Math.Max(1, (sy1 - sy0) / 4);
 
-                long r = 0, g = 0, b = 0, a = 0; int n = 0;
+                float r = 0, g = 0, b = 0, a = 0; int n = 0;   // src is RGBA32F (0..1)
                 for (int yy = sy0; yy < sy1; yy += stepy)
                     for (int xx = sx0; xx < sx1; xx += stepx)
                     {
@@ -98,7 +98,8 @@ public sealed partial class LayerViewModel : ObservableObject
                         r += src[so]; g += src[so + 1]; b += src[so + 2]; a += src[so + 3]; n++;
                     }
                 if (n == 0) n = 1;
-                byte ar = (byte)(r / n), ag = (byte)(g / n), ab = (byte)(b / n), aa = (byte)(a / n);
+                byte ar = (byte)Math.Clamp(r / n * 255f + 0.5f, 0f, 255f), ag = (byte)Math.Clamp(g / n * 255f + 0.5f, 0f, 255f),
+                     ab = (byte)Math.Clamp(b / n * 255f + 0.5f, 0f, 255f), aa = (byte)Math.Clamp(a / n * 255f + 0.5f, 0f, 255f);
 
                 int o = ((offy + y) * ThumbW + (offx + x)) * 4;
                 float af = aa / 255f;

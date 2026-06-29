@@ -119,4 +119,61 @@ public class ExportFormatTests
         int stripOffset = 8 + 2 + 12 * 12 + 4 + 8 + 8 + 16;
         Assert.Equal(8 * 8 * 4, tiff.Length - stripOffset);
     }
+
+    // ---- 16-bit export (bit-depth pipeline, PLAN §6) ----
+
+    [Fact]
+    public void EncodeScaledFloat_Png16_PreservesSubBytePrecision()
+    {
+        // a value strictly BETWEEN two 8-bit steps (100.6/255) can only survive at >8-bit precision.
+        int w = 4, h = 2;
+        float val = 100.6f / 255f;
+        var rgba = new float[w * h * 4];
+        for (int i = 0; i < w * h; i++) { rgba[i * 4] = val; rgba[i * 4 + 1] = val; rgba[i * 4 + 2] = val; rgba[i * 4 + 3] = 1f; }
+
+        var png = ImageCodec.EncodeScaledFloat(ImageCodec.ImageFormat.Png, w, h, rgba, w, h, 100, depthBits: 16);
+        var path = Path.Combine(Path.GetTempPath(), $"sable16_{System.Guid.NewGuid():N}.png");
+        File.WriteAllBytes(path, png);
+        try
+        {
+            var (dw, dh, dec, bits) = ImageCodec.DecodeFloat(path);
+            Assert.Equal(w, dw);
+            Assert.Equal(h, dh);
+            float err = System.Math.Abs(dec[0] - val);
+            // 8-bit would snap to 100/255 or 101/255 → err ≈ 0.6/255; 16-bit keeps it far tighter.
+            Assert.True(err < 0.5f / 255f,
+                $"precision lost: val={val * 65535f:F1}/65535 decoded={dec[0] * 65535f:F1}/65535 (={dec[0] * 255f:F2}/255) srcBits={bits} pngBitDepth={png[24]} err={err * 255f:F3} steps");
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void EncodeScaledFloat_Tiff16_WritesBitsPerSample16AndDoubleStrip()
+    {
+        int w = 3, h = 3;
+        var rgba = new float[w * h * 4];
+        for (int i = 0; i < rgba.Length; i++) rgba[i] = 0.5f;
+        var tiff = ImageCodec.EncodeScaledFloat(ImageCodec.ImageFormat.Tiff, w, h, rgba, w, h, 100, depthBits: 16);
+
+        // BitsPerSample out-of-line array sits at headerLen + ifdLen = 8 + (2 + 12*12 + 4) = 158.
+        int bpsOffset = 8 + (2 + 12 * 12 + 4);
+        Assert.Equal(16, System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(tiff.AsSpan(bpsOffset)));
+        // 16-bit strip is 2 bytes/channel.
+        int stripOffset = bpsOffset + 8 + 8 + 16;
+        Assert.Equal(w * h * 4 * 2, tiff.Length - stripOffset);
+    }
+
+    [Fact]
+    public void EncodeScaledFloat_8Bit_QuantisesToOrdinaryFile()
+    {
+        // depthBits 8 → the 8-bit path: a normal RGBA8 PNG that decodes back.
+        int w = 4, h = 4;
+        var rgba = new float[w * h * 4];
+        for (int i = 0; i < w * h; i++) { rgba[i * 4] = 200 / 255f; rgba[i * 4 + 3] = 1f; }
+        var png = ImageCodec.EncodeScaledFloat(ImageCodec.ImageFormat.Png, w, h, rgba, w, h, 100, depthBits: 8);
+        var dec = ImageCodec.DecodeRgbaBytes(png);
+        Assert.NotNull(dec);
+        Assert.Equal(w, dec!.Value.width);
+        Assert.InRange(dec.Value.rgba[0], 198, 202);
+    }
 }

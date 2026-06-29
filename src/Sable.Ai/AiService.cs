@@ -97,7 +97,7 @@ public sealed class AiService
             ?? throw new AiNotReadyException("No ONNX backend available.");
         var model = backend.CreateMaskModel(ready.Model);
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var img = new AiImage(target.ToBytes(), target.Width, target.Height);
         var mask = await model.SegmentAsync(img, System.Array.Empty<AiPrompt>(), ct).ConfigureAwait(false);
         var rgbaMask = ImageOps.CoverageToRgbaMask(mask.Coverage, mask.Width, mask.Height);
         return new SetMaskCommand(target, rgbaMask);
@@ -118,7 +118,7 @@ public sealed class AiService
             ?? throw new AiNotReadyException("No ONNX backend available.");
         var model = backend.CreateMaskModel(ready.Model);
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var img = new AiImage(target.ToBytes(), target.Width, target.Height);
         return await model.SegmentAsync(img, prompts ?? System.Array.Empty<AiPrompt>(), ct).ConfigureAwait(false);
     }
 
@@ -135,7 +135,7 @@ public sealed class AiService
             ?? throw new AiNotReadyException("No ONNX backend available.");
         var model = backend.CreateRasterModel(ready.Model);
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var img = new AiImage(target.ToBytes(), target.Width, target.Height);
         var outImg = await model.ApplyAsync(img, mask, new AiParams(), ct).ConfigureAwait(false);
         return outImg.Rgba;
     }
@@ -157,7 +157,7 @@ public sealed class AiService
             throw new AiNotReadyException("Smart-select needs a SAM2 model (encoder + decoder).");
         sam.ForceCpu = forceCpu;   // a prior run found this GPU can't run SAM2 → skip the GPU entirely
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var img = new AiImage(target.ToBytes(), target.Width, target.Height);
         var result = await sam.SegmentEverythingAsync(img, grid, 384, progress, ct).ConfigureAwait(false);
         if (sam.FellBackToCpu && !forceCpu) onCpuFallback?.Invoke();   // GPU hung this run → persist CPU choice
         return result;
@@ -183,14 +183,14 @@ public sealed class AiService
         int tile = 256;
         if (model is Adapters.EsrganAdapter esr && esr.PreferredInputTile() is > 0 and int f) tile = f;
 
-        var img = new AiImage((byte[])target.Pixels.Clone(), target.Width, target.Height);
+        var img = new AiImage(target.ToBytes(), target.Width, target.Height);
         var up = await Tiling.TileInference.RunAsync(
             model, img, new AiParams(), tile: tile, overlap: System.Math.Max(8, tile / 8),
             progress: progress, ct: ct).ConfigureAwait(false);
 
         var layer = new PixelLayer(up.Width, up.Height, target.Name + " (upscaled)")
         { OffsetX = target.OffsetX, OffsetY = target.OffsetY };
-        layer.SetBuffer(up.Width, up.Height, up.Rgba);
+        layer.SetBufferFromBytes(up.Width, up.Height, up.Rgba);
 
         var parent = doc.FindParent(target) ?? doc.Layers;
         int idx = parent.IndexOf(target) + 1;
@@ -251,7 +251,7 @@ public sealed class AiService
 
         // send exactly what the user selected: crop to the selection's bounding box (whole layer if whole-selected)
         var (bx, by, bw, bh) = Bounds(region.Coverage, region.Width, region.Height);
-        var cropRgba = CropRgba(target.Pixels, target.Width, target.Height, bx, by, bw, bh);
+        var cropRgba = CropRgba(target.ToBytes(), target.Width, target.Height, bx, by, bw, bh);
         var cropMask = CropChannel(region.Coverage, region.Width, region.Height, bx, by, bw, bh);
 
         var req = spec with
@@ -270,7 +270,7 @@ public sealed class AiService
         // deposit the result as a NEW layer positioned at the selection bbox (in doc space)
         var layer = new PixelLayer(bw, bh, target.Name + " (gen)")
         { OffsetX = target.OffsetX + bx, OffsetY = target.OffsetY + by };
-        layer.SetBuffer(bw, bh, outRgba);
+        layer.SetBufferFromBytes(bw, bh, outRgba);
 
         // always clip to the selection shape — only the pixels the user selected change (works for ellipse /
         // polygon / lasso; a rectangular selection makes this a no-op).

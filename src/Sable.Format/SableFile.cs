@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Sable.Core;
 using Sable.Engine;
@@ -221,14 +222,14 @@ public static class SableFile
             ps.Write(previewPng, 0, previewPng.Length);
         }
         foreach (var layer in doc.Layers)
-            dto.Layers.Add(SaveLayer(zip, layer, doc.Width, doc.Height, ref next));
+            dto.Layers.Add(SaveLayer(zip, layer, doc.Width, doc.Height, doc.Depth, ref next));
 
         var manifest = zip.CreateEntry(ManifestEntry, CompressionLevel.Optimal);
         using var ms = manifest.Open();
         JsonSerializer.Serialize(ms, dto, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static LayerDto SaveLayer(ZipArchive zip, Layer layer, int docW, int docH, ref int next)
+    private static LayerDto SaveLayer(ZipArchive zip, Layer layer, int docW, int docH, Sable.Core.BitDepth depth, ref int next)
     {
         int id = next++;
         var ld = new LayerDto
@@ -269,7 +270,8 @@ public static class SableFile
                 ld.Type = "pixel";
                 ld.LayerW = px.Width; ld.LayerH = px.Height;
                 ld.Pixels = $"layers/{id}.raw";
-                WriteEntry(zip, ld.Pixels, px.Pixels);
+                // TODO Phase E: store at doc.Depth (8→byte, 16→ushort, 32→float). Interim: 8-bit raw.
+                WriteEntry(zip, ld.Pixels, PackPixels(px.Pixels, depth));   // raw stored at the document depth
                 break;
             case AdjustmentLayer adj:
                 ld.Type = "adjustment";
@@ -337,7 +339,7 @@ public static class SableFile
         }
         // children: a group's contained layers OR a content layer's nested effect layers
         // (live filters / adjustments). Saved uniformly for every layer type.
-        foreach (var c in layer.Children) ld.Children.Add(SaveLayer(zip, c, docW, docH, ref next));
+        foreach (var c in layer.Children) ld.Children.Add(SaveLayer(zip, c, docW, docH, depth, ref next));
         if (layer.Mask is { } mask)
         {
             ld.Mask = $"masks/{id}.raw";
@@ -382,15 +384,15 @@ public static class SableFile
             doc.IccProfileName = dto.IccName;
         }
         foreach (var ld in dto.Layers)
-            if (BuildLayer(ld, zip, dto.Width, dto.Height) is { } l) doc.Layers.Add(l);
+            if (BuildLayer(ld, zip, dto.Width, dto.Height, doc.Depth) is { } l) doc.Layers.Add(l);
         return doc;
     }
 
-    private static Layer? BuildLayer(LayerDto ld, ZipArchive zip, int w, int h)
+    private static Layer? BuildLayer(LayerDto ld, ZipArchive zip, int w, int h, Sable.Core.BitDepth depth)
     {
         Layer? created = ld.Type switch
         {
-            "pixel" => LoadPixel(ld, zip, w, h),
+            "pixel" => LoadPixel(ld, zip, w, h, depth),
             "adjustment" => BuildAdjustment(ld),
             "filter" => new FilterLayer((FilterKind)ld.FilterKind) { Radius = ld.Radius, Amount = ld.FilterAmount, Angle = ld.FilterAngle },
             "shape" => new ShapeLayer((ShapeKind)ld.ShapeKind, ld.ShX, ld.ShY, ld.ShW, ld.ShH, ld.ShR, ld.ShG, ld.ShB)
@@ -460,7 +462,7 @@ public static class SableFile
         }
         // children: group content OR nested effect layers — loaded uniformly for every type.
         foreach (var c in ld.Children)
-            if (BuildLayer(c, zip, w, h) is { } cl) created.Children.Add(cl);
+            if (BuildLayer(c, zip, w, h, depth) is { } cl) created.Children.Add(cl);
         return created;
     }
 
@@ -548,7 +550,7 @@ public static class SableFile
             });
     }
 
-    private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h)
+    private static PixelLayer LoadPixel(LayerDto ld, ZipArchive zip, int w, int h, Sable.Core.BitDepth depth)
     {
         // LayerW/H == 0 → legacy file where every layer was document-sized
         int lw = ld.LayerW > 0 ? ld.LayerW : w;
@@ -558,9 +560,58 @@ public static class SableFile
         if (ld.Pixels is not null && zip.GetEntry(ld.Pixels) is { } pe)
         {
             using var es = pe.Open();
-            ReadFully(es, px.Pixels);
+            int bpc = (int)depth / 8;   // bytes per channel at the doc depth (8→1, 16→2, 32→4)
+            var raw = new byte[lw * lh * 4 * bpc];
+            ReadFully(es, raw);
+            px.SetBuffer(lw, lh, UnpackPixels(raw, lw * lh * 4, depth));
         }
         return px;
+    }
+
+    /// <summary>Quantise RGBA32F pixels to the document depth for on-disk storage: 8-bit byte, 16-bit
+    /// little-endian ushort, or 32-bit little-endian float. Keeps 8-bit <c>.sable</c> files the same
+    /// size as before while preserving full precision for 16/32-bit documents (bit-depth pipeline).</summary>
+    private static byte[] PackPixels(float[] px, Sable.Core.BitDepth depth)
+    {
+        switch (depth)
+        {
+            case Sable.Core.BitDepth.Sixteen:
+            {
+                var outp = new byte[px.Length * 2];
+                for (int i = 0; i < px.Length; i++)
+                {
+                    ushort v = (ushort)Math.Clamp(px[i] * 65535f + 0.5f, 0f, 65535f);
+                    outp[i * 2] = (byte)(v & 0xFF); outp[i * 2 + 1] = (byte)(v >> 8);
+                }
+                return outp;
+            }
+            case Sable.Core.BitDepth.ThirtyTwo:
+                return MemoryMarshal.AsBytes(px.AsSpan()).ToArray();
+            default:
+                return PixelLayer.FloatToBytes(px);
+        }
+    }
+
+    /// <summary>Inverse of <see cref="PackPixels"/>: decode <paramref name="n"/> channels from the raw
+    /// depth-specific bytes back to RGBA32F (0..1). Legacy files (depth defaulting to 8) read as bytes.</summary>
+    private static float[] UnpackPixels(byte[] raw, int n, Sable.Core.BitDepth depth)
+    {
+        switch (depth)
+        {
+            case Sable.Core.BitDepth.Sixteen:
+            {
+                var dst = new float[n];
+                for (int i = 0; i < n; i++) dst[i] = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8)) / 65535f;
+                return dst;
+            }
+            case Sable.Core.BitDepth.ThirtyTwo:
+                return MemoryMarshal.Cast<byte, float>(raw).ToArray();
+            default:
+            {
+                var b = raw.Length == n ? raw : raw[..n];
+                return PixelLayer.BytesToFloat(b);
+            }
+        }
     }
 
     // Children are loaded generically by BuildLayer (any layer can hold them), so this

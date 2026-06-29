@@ -16,7 +16,7 @@ namespace Sable.Tools;
 /// </summary>
 public static class PatchTool
 {
-    public static void Apply(byte[] target, byte[] src, int lw, int lh, int ox, int oy,
+    public static void Apply(float[] target, float[] src, int lw, int lh, int ox, int oy,
         (int x, int y, int w, int h)? rect, byte[]? mask, int docW, int offX, int offY)
     {
         if (mask is null && rect is null) return;
@@ -69,12 +69,12 @@ public static class PatchTool
             int lsx = x + offX - ox, lsy = y + offY - oy;
             if (lsx < 0 || lsy < 0 || lsx >= lw || lsy >= lh) continue;
             int di = ((y - oy) * lw + (x - ox)) * 4, sj = (lsy * lw + lsx) * 4;
-            float hr = System.Math.Clamp(src[sj] + tor, 0, 255);
-            float hg = System.Math.Clamp(src[sj + 1] + tog, 0, 255);
-            float hb = System.Math.Clamp(src[sj + 2] + tob, 0, 255);
-            target[di] = (byte)(src[di] + (hr - src[di]) * cov + 0.5f);
-            target[di + 1] = (byte)(src[di + 1] + (hg - src[di + 1]) * cov + 0.5f);
-            target[di + 2] = (byte)(src[di + 2] + (hb - src[di + 2]) * cov + 0.5f);
+            float hr = System.Math.Clamp(src[sj] + tor, 0f, 1f);
+            float hg = System.Math.Clamp(src[sj + 1] + tog, 0f, 1f);
+            float hb = System.Math.Clamp(src[sj + 2] + tob, 0f, 1f);
+            target[di] = src[di] + (hr - src[di]) * cov;
+            target[di + 1] = src[di + 1] + (hg - src[di + 1]) * cov;
+            target[di + 2] = src[di + 2] + (hb - src[di + 2]) * cov;
         }
     }
 }

@@ -800,6 +800,13 @@ public partial class MainWindow : Window
         return true;
     }
 
+    /// <summary>True when an RGBA32F buffer is fully transparent (every alpha channel 0).</summary>
+    private static bool IsBufferEmpty(float[] rgba)
+    {
+        for (int i = 3; i < rgba.Length; i += 4) if (rgba[i] != 0f) return false;
+        return true;
+    }
+
     /// <summary>Precompute the active layer's objects (SAM2 AMG, 32×32) for hover-to-select.</summary>
     private async System.Threading.Tasks.Task StartSmartSelect()
     {
@@ -844,7 +851,7 @@ public partial class MainWindow : Window
                 if (rendered is null || IsBufferEmpty(rendered))
                 { busy.Done(); Canvas.SetSmartObjects(null); _smartLayer = px; return; }   // off-canvas / blank → nothing
                 samTarget = new Sable.Engine.Layers.PixelLayer(docM.Width, docM.Height, px.Name);
-                samTarget.SetBuffer(docM.Width, docM.Height, rendered);
+                samTarget.SetBufferFromBytes(docM.Width, docM.Height, rendered);
                 docSpace = true;
             }
 
@@ -927,7 +934,7 @@ public partial class MainWindow : Window
         if (error is not null) { await ConfirmWindow.Ask(this, title, Loc.T("ai.failed", error.Message)); return; }
 
         var before = Sable.Tools.RasterState.Capture(px);
-        px.SetBuffer(px.Width, px.Height, result!);
+        px.SetBufferFromBytes(px.Width, px.Height, result!);
         px.Dirty = true;
         var cmd = new Sable.Tools.RasterStateCommand(px, before, Sable.Tools.RasterState.Capture(px), () => px.Dirty = true);
         Doc!.Undo.Execute(cmd);
@@ -1103,7 +1110,7 @@ public partial class MainWindow : Window
 
             var doc = new Sable.Engine.Document(img.Width, img.Height);
             var layer = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, Loc.T("mainWindow.layerGenerated"));
-            layer.SetBuffer(img.Width, img.Height, img.Rgba);
+            layer.SetBufferFromBytes(img.Width, img.Height, img.Rgba);
             doc.Layers.Add(layer);
             OpenInNewTab(doc, null, Loc.T("mainWindow.layerGenerated"));
         }
@@ -1438,7 +1445,8 @@ public partial class MainWindow : Window
                 if (lx >= 0 && ly >= 0 && lx < al.Width && ly < al.Height)
                 {
                     int j = (ly * al.Width + lx) * 4;
-                    byte r = al.Pixels[j], g = al.Pixels[j + 1], b = al.Pixels[j + 2], a = al.Pixels[j + 3];
+                    byte r = (byte)Math.Clamp(al.Pixels[j] * 255f + 0.5f, 0f, 255f), g = (byte)Math.Clamp(al.Pixels[j + 1] * 255f + 0.5f, 0f, 255f),
+                         b = (byte)Math.Clamp(al.Pixels[j + 2] * 255f + 0.5f, 0f, 255f), a = (byte)Math.Clamp(al.Pixels[j + 3] * 255f + 0.5f, 0f, 255f);
                     InfoLabel.Text = $"R{r} G{g} B{b} A{a}";
                     InfoSwatch.Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(r, g, b));
                 }
@@ -2868,7 +2876,7 @@ public partial class MainWindow : Window
         var b = px.Pixels;
         int h = 17 ^ b.Length;
         int step = System.Math.Max(1, b.Length / 4096);
-        for (int i = 0; i < b.Length; i += step) h = h * 31 + b[i];
+        for (int i = 0; i < b.Length; i += step) h = h * 31 + b[i].GetHashCode();
         h = h * 31 + px.OffsetX; h = h * 31 + px.OffsetY;
         h = h * 31 + px.ScaleX.GetHashCode(); h = h * 31 + px.ScaleY.GetHashCode();
         h = h * 31 + px.Rotation.GetHashCode();
@@ -3742,7 +3750,7 @@ public partial class MainWindow : Window
         {
             if (DocumentIO.OpenImage(path).Layers is [Sable.Engine.Layers.PixelLayer src2, ..])
             {
-                var layer = LayerFromRegion(src2.Pixels, src2.Width, src2.Height, null);
+                var layer = LayerFromRegion(src2.ToBytes(), src2.Width, src2.Height, null);
                 layer.Name = System.IO.Path.GetFileNameWithoutExtension(path);
                 Doc.PasteLayer(layer);   // undoable add to the current document
             }
@@ -3791,7 +3799,7 @@ public partial class MainWindow : Window
                 }
                 else if (overCanvas && DocumentIO.OpenImage(path).Layers is [Sable.Engine.Layers.PixelLayer src, ..])
                 {
-                    var layer = LayerFromRegion(src.Pixels, src.Width, src.Height, null);   // centred, region-sized
+                    var layer = LayerFromRegion(src.ToBytes(), src.Width, src.Height, null);   // centred, region-sized
                     layer.Name = System.IO.Path.GetFileNameWithoutExtension(path);
                     Doc!.PasteLayer(layer);   // undoable add to the current document
                 }
@@ -3825,7 +3833,7 @@ public partial class MainWindow : Window
         if (await ReadOsImage() is not { } img) return;
         var doc = new Document(img.width, img.height);
         var layer = new PixelLayer(img.width, img.height, Loc.T("mainWindow.layerClipboard"));
-        img.rgba.CopyTo(layer.Pixels.AsSpan());
+        layer.SetBufferFromBytes(img.width, img.height, img.rgba);
         layer.Dirty = true;
         doc.Layers.Add(layer);
         OpenInNewTab(doc, null, Loc.T("mainWindow.layerClipboardN", _untitledCounter++));
@@ -3838,7 +3846,7 @@ public partial class MainWindow : Window
     {
         if (Canvas.Document is not { } doc || Canvas.RenderLayersToPixels(layers) is not { } bytes) return null;
         var pl = new PixelLayer(doc.Width, doc.Height, name);
-        pl.SetBuffer(doc.Width, doc.Height, bytes);
+        pl.SetBufferFromBytes(doc.Width, doc.Height, bytes);
         return pl;
     }
 
@@ -4048,7 +4056,7 @@ public partial class MainWindow : Window
         {
             // region-sized layer, centred (or at the selection), keeps everything incl. off-canvas
             var layer = new PixelLayer(w, h, Loc.T("mainWindow.layerPasted"));
-            px.CopyTo(layer.Pixels.AsSpan());
+            layer.SetBufferFromBytes(w, h, px);
             layer.OffsetX = doc.Selection is { } s ? s.X : (doc.Width - w) / 2;
             layer.OffsetY = doc.Selection is { } s2 ? s2.Y : (doc.Height - h) / 2;
             layer.Dirty = true;
@@ -4318,8 +4326,14 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi,
-                doc.IccProfile, doc.IccProfileName);
+            int depthBits = (int)doc.Depth;
+            if (depthBits >= 16 && dlg.Format is ImageCodec.ImageFormat.Png or ImageCodec.ImageFormat.Tiff
+                && Canvas.ReadCompositeFloats() is { } rgbaF)
+                DocumentIO.ExportFloat(path, dlg.Format, doc.Width, doc.Height, rgbaF, dlg.OutW, dlg.OutH, dlg.Quality, depthBits, doc.Dpi,
+                    doc.IccProfile, doc.IccProfileName);
+            else
+                DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi,
+                    doc.IccProfile, doc.IccProfileName);
         }
         catch (System.Exception ex)
         {

@@ -23,7 +23,7 @@ It is the single source of truth referenced by the import compatibility report U
 | Construct | Visual | Structural | Save | Fixture | Status |
 |---|---|---|---|---|---|
 | PSD v1 (8BPS, version 1) | yes | yes | `.sable` | yes | **SUPPORTED** |
-| PSB (version 2, large document) | — | — | — | yes | **UNSUPPORTED** — rejected with `"PSB (large document format) is not supported — re-save as PSD."` |
+| PSB (version 2, large document) | yes (≤ 80 MP) | yes | `.sable` | yes | **PARTIAL** — version 2 + 64-bit section/channel lengths parsed; imports like PSD up to the 80 MP in-memory budget. Larger canvases rejected honestly (needs tiled CPU storage — `plans/PSB_FEASIBILITY.md` Tier 2). |
 | Corrupt / non-PSD | — | — | — | yes | **UNSUPPORTED** — rejected with `"Not a PSD file (missing 8BPS signature)."` |
 
 ## 2. Colour mode & bit depth
@@ -177,7 +177,8 @@ Mapped adjustments remain editable (sliders in `AdjustmentPanel`); round-trip in
 
 | Construct | Status |
 |---|---|
-| Smart Object (`SoLd`/`PlLd`/`SoLE`) | **IMPORTED_AS_RASTER** — warning `"smart object rasterised"`; embedded source data not preserved; no relink/edit. (Roadmap §14 Tier 1.) |
+| Smart Object (`SoLd`/`SoLE`) | **IMPORTED_AS_RASTER (+ metadata)** — pixels rasterised, but the placement quad (`Trnf`), identity (`Idnt`), and source size (`Sz`) are now captured into `Layer.SmartObject` (`SmartObjectInfo`); warning names the id. Embedded source bytes / relink/edit still pending (Tier 2). (Roadmap §14 Tier 1 — DONE; `plans/SMART_OBJECTS.md`.) |
+| Smart Object (`PlLd`, legacy placed) | **IMPORTED_AS_RASTER** — bare `"smart object rasterised"` note; non-descriptor format, metadata capture pending. |
 
 ## 14. Artboards, slices, annotations
 
@@ -347,20 +348,21 @@ Mapped adjustments remain editable (sliders in `AdjustmentPanel`); round-trip in
 ## Feature: Smart Objects
 
 ### Current status
-**IMPORTED_AS_RASTER**
+**IMPORTED_AS_RASTER (+ metadata)** — Tier 1 done.
 
 ### Current implementation
-- importer: `SoLd`/`PlLd`/`SoLE` → `Notes.Add("smart object rasterised")`; embedded source discarded.
+- importer: `SoLd`/`SoLE` → `ParseSmartObject` reads the descriptor (`Idnt`/`Trnf`/`Sz`/`Type`, robust to the optional `soLD` signature) → `Layer.SmartObject` (`SmartObjectInfo`: identity, placement quad, source size, type); richer warning naming the id. `PlLd` (legacy) → bare note. Pixels still rasterised.
 
 ### User-visible problems
-- No edit/relink; embedded data lost.
+- Embedded source bytes still discarded → no "open embedded object" / relink yet (Tier 2). `.sable` does not persist `SmartObjectInfo` yet.
 
 ### Proposed implementation (roadmap §14)
-- Tier 1 (now): keep raster fallback, preserve original source bytes in a sidecar `.sable` resource so future Tier 2 can re-open them.
-- Tier 2/3: deferred.
+- Tier 1 (DONE): raster fallback + capture placement/identity/size into `Layer.SmartObject`.
+- Tier 2: parse the `lnk2`/`lnkD` global block → extract embedded source bytes keyed by `Idnt`; persist in `.sable`; "open embedded object" → re-render the placed layer through `Trnf` (placed-document layer). See `plans/SMART_OBJECTS.md`.
+- Tier 3: linked (`lnkE`) relink/refresh.
 
 ### Required tests
-- fixture: `psd/smart_object.psd` (asserts rasterisation warning)
+- `PsdFixtures.SmartObjectRasterised` + `PsdFixtureTests.SmartObject_RasterisedButCapturesPlacementAndIdentity` (asserts captured identity/placement/size) + `SmartObjectRasterised_WarningEmitted`.
 
 ---
 

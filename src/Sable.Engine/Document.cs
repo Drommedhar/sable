@@ -172,29 +172,29 @@ public sealed class Document
         {
             int i = (y * w + x) * 4;
 
-            // backdrop: blue->green diagonal gradient, opaque
-            bg.Pixels[i + 0] = 40;
-            bg.Pixels[i + 1] = (byte)(255 * x / (double)w);
-            bg.Pixels[i + 2] = (byte)(255 * y / (double)h);
-            bg.Pixels[i + 3] = 255;
+            // backdrop: blue->green diagonal gradient, opaque (RGBA32F: 0..1, quantised to n/255)
+            bg.Pixels[i + 0] = 40 / 255f;
+            bg.Pixels[i + 1] = (byte)(255 * x / (double)w) / 255f;
+            bg.Pixels[i + 2] = (byte)(255 * y / (double)h) / 255f;
+            bg.Pixels[i + 3] = 1f;
 
             // red disc, ~60% alpha inside
             double dx = x - cx, dy = y - cy;
             bool inDisc = dx * dx + dy * dy <= r * r;
-            disc.Pixels[i + 0] = 230;
-            disc.Pixels[i + 1] = 30;
-            disc.Pixels[i + 2] = 30;
-            disc.Pixels[i + 3] = inDisc ? (byte)153 : (byte)0;
+            disc.Pixels[i + 0] = 230 / 255f;
+            disc.Pixels[i + 1] = 30 / 255f;
+            disc.Pixels[i + 2] = 30 / 255f;
+            disc.Pixels[i + 3] = inDisc ? 153 / 255f : 0f;
 
             // soft bright spot (Screen) — radial falloff
             double ex = x - sx, ey = y - sy;
             double dist = Math.Sqrt(ex * ex + ey * ey);
             double a = Math.Clamp(1.0 - dist / sr, 0, 1);
             byte av = (byte)(a * 255);
-            spot.Pixels[i + 0] = 250;
-            spot.Pixels[i + 1] = 240;
-            spot.Pixels[i + 2] = 210;
-            spot.Pixels[i + 3] = av;
+            spot.Pixels[i + 0] = 250 / 255f;
+            spot.Pixels[i + 1] = 240 / 255f;
+            spot.Pixels[i + 2] = 210 / 255f;
+            spot.Pixels[i + 3] = av / 255f;
         }
 
         // mask the disc with a vertical gradient: top fully revealed, bottom hidden

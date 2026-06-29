@@ -67,7 +67,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
     private double _maskMoveStartX, _maskMoveStartY;
     private bool _patching;                       // patch tool: dragging the selection to a source
     private double _patchStartX, _patchStartY;
-    private byte[]? _patchSrc;                     // immutable pixel snapshot at gesture start (stable preview)
+    private float[]? _patchSrc;                    // immutable pixel snapshot at gesture start (stable preview)
     private RasterState _patchBefore;             // pre-gesture raster state (whole-raster undo)
     private SelRect? _patchRect;                   // selection region captured at gesture start (heal target)
     private byte[]? _patchMask;
@@ -594,7 +594,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             Brush.Clip = null; Brush.ClipMask = null;
             bool remove = ActiveTool == ToolKind.Eraser;
             Brush.R = Brush.G = Brush.B = (byte)(remove ? 0 : 255);   // black removes, white adds (src-over on R)
-            return new StrokeSession(_qmask, _doc.Width, _doc.Height, Brush, _ => SyncQuickMask());
+            return StrokeSession.Create(_qmask, _doc.Width, _doc.Height, Brush, _ => SyncQuickMask());
         }
 
         if (ActiveLayer is not { } layer) return null;
@@ -636,14 +636,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             Brush.LockAlpha = false;
             if (!layer.HasMask) layer.AddWhiteMask(layer.Width, layer.Height);
             // mask upload is full-buffer for now (partial mask upload later)
-            return new StrokeSession(layer.Mask!, layer.Width, layer.Height, Brush,
+            return StrokeSession.Create(layer.Mask!, layer.Width, layer.Height, Brush,
                 _ => { layer.MaskDirty = true; layer.Dirty = true; }, layer.OffsetX, layer.OffsetY,
                 () => layer.Mask);
         }
         Brush.Erase = ActiveTool == ToolKind.Eraser;
         Brush.Pencil = ActiveTool == ToolKind.Pencil;   // hard aliased edge
         Brush.LockAlpha = layer.LockAlpha;   // preserve existing alpha (transparency lock)
-        return new StrokeSession(layer.Pixels, layer.Width, layer.Height, Brush,
+        return StrokeSession.Create(layer.Pixels, layer.Width, layer.Height, Brush,
             tiles => layer.MarkTilesDirty(tiles), layer.OffsetX, layer.OffsetY,
             () => layer.Pixels);
     }
@@ -875,7 +875,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 {
                     _patching = true; _input?.Capture();
                     _patchStartX = dx; _patchStartY = dy;
-                    _patchSrc = (byte[])patchLayer.Pixels.Clone();   // immutable source for a stable live preview
+                    _patchSrc = (float[])patchLayer.Pixels.Clone();   // immutable source for a stable live preview
                     _patchBefore = RasterState.Capture(patchLayer);
                     _patchRect = _doc.Selection;                     // the hole to heal (fixed for the gesture)
                     _patchMask = _doc.SelectionMask is { } pm0 ? (byte[])pm0.Clone() : null;
@@ -958,7 +958,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 if (_doc is not null && ActiveLayer is { } wl)
                 {
                     CaptureSelMode(mods);
-                    var m = Selections.Wand(wl.Pixels, wl.Width, wl.Height, (int)dx, (int)dy, 32);
+                    var m = Selections.Wand(wl.ToBytes(), wl.Width, wl.Height, (int)dx, (int)dy, 32);
                     ApplyMask(m);
                 }
                 break;
@@ -1048,7 +1048,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                     {
                         Brush.Clone = true;
                         Brush.Heal = ActiveTool is ToolKind.Heal or ToolKind.SpotHeal;
-                        Brush.CloneSrc = (byte[])cl.Pixels.Clone();   // snapshot avoids feedback during the stroke
+                        Brush.CloneSrc = (float[])cl.Pixels.Clone();   // snapshot avoids feedback during the stroke
                         Brush.CloneSrcW = cl.Width; Brush.CloneSrcH = cl.Height;
                         if (ActiveTool == ToolKind.SpotHeal)
                         {
@@ -1154,7 +1154,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             {
                 var after = SnapshotAllTiles(target, w, h);
                 gl.MarkTilesDirty(after.Keys);
-                CommandProduced?.Invoke(new PaintRasterCommand(() => gl.Pixels, w, h, before, after, t => gl.MarkTilesDirty(t)));
+                CommandProduced?.Invoke(new PaintRasterCommand<float>(() => gl.Pixels, w, h, before, after, t => gl.MarkTilesDirty(t)));
             }
         }
         else if (_lassoing)
@@ -1392,12 +1392,12 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             int cov = mask is null ? 255 : mask[dy * mw + dx];
             if (cov == 0) continue;
             int i = (by * w + bx) * 4;
-            if (cov >= 255) { target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0; }
-            else target[i + 3] = (byte)(target[i + 3] * (255 - cov) / 255);   // feathered: erase alpha ∝ coverage
+            if (cov >= 255) { target[i] = target[i + 1] = target[i + 2] = target[i + 3] = 0f; }
+            else target[i + 3] *= (255 - cov) / 255f;   // feathered: erase alpha ∝ coverage
         }
         var after = SnapshotAllTiles(target, w, h);
         layer.MarkTilesDirty(after.Keys);
-        CommandProduced?.Invoke(new PaintRasterCommand(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
+        CommandProduced?.Invoke(new PaintRasterCommand<float>(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
     }
 
     /// <summary>Fill the selection (or the whole layer when none) with a solid colour, src-over,
@@ -1423,17 +1423,17 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
             if (cov == 0) continue;
             int i = (by * w + bx) * 4;
             float sa = cov / 255f;
-            float da = target[i + 3] / 255f;
+            float da = target[i + 3];
             float outA = sa + da * (1f - sa);
             if (outA <= 0f) continue;
-            target[i]     = (byte)((r / 255f * sa + target[i] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
-            target[i + 1] = (byte)((g / 255f * sa + target[i + 1] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
-            target[i + 2] = (byte)((b / 255f * sa + target[i + 2] / 255f * da * (1f - sa)) / outA * 255f + 0.5f);
-            target[i + 3] = (byte)(outA * 255f + 0.5f);
+            target[i]     = (r / 255f * sa + target[i] * da * (1f - sa)) / outA;
+            target[i + 1] = (g / 255f * sa + target[i + 1] * da * (1f - sa)) / outA;
+            target[i + 2] = (b / 255f * sa + target[i + 2] * da * (1f - sa)) / outA;
+            target[i + 3] = outA;
         }
         var after = SnapshotAllTiles(target, w, h);
         layer.MarkTilesDirty(after.Keys);
-        CommandProduced?.Invoke(new PaintRasterCommand(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
+        CommandProduced?.Invoke(new PaintRasterCommand<float>(() => layer.Pixels, w, h, before, after, t => layer.MarkTilesDirty(t)));
     }
 
     /// <summary>Copy the selected region of the active layer (or the whole layer if no selection) → RGBA8 region.</summary>
@@ -1460,12 +1460,14 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
                 if ((uint)bx >= (uint)lw || (uint)by >= (uint)lh) continue;   // outside layer → transparent
                 int si = (by * lw + bx) * 4;
                 if (mask is not null && mask[dy * mw + dx] < 128) continue;   // not selected
-                outp[di] = src[si]; outp[di + 1] = src[si + 1]; outp[di + 2] = src[si + 2];
-                outp[di + 3] = src[si + 3];
+                outp[di]     = (byte)Math.Clamp(src[si] * 255f + 0.5f, 0f, 255f);
+                outp[di + 1] = (byte)Math.Clamp(src[si + 1] * 255f + 0.5f, 0f, 255f);
+                outp[di + 2] = (byte)Math.Clamp(src[si + 2] * 255f + 0.5f, 0f, 255f);
+                outp[di + 3] = (byte)Math.Clamp(src[si + 3] * 255f + 0.5f, 0f, 255f);
             }
             return (outp, w, h);
         }
-        return ((byte[])layer.Pixels.Clone(), layer.Width, layer.Height);
+        return (layer.ToBytes(), layer.Width, layer.Height);
     }
 
     /// <summary>Copy-merged: the flattened composite, cropped to the selection (or whole doc) → RGBA8 region.</summary>
@@ -1791,9 +1793,9 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         CommandProduced?.Invoke(new RasterStateCommand(layer, beforeState, RasterState.Capture(layer), () => layer.Dirty = true));
     }
 
-    private static Dictionary<(int, int), byte[]> SnapshotAllTiles(byte[] px, int w, int h)
+    private static Dictionary<(int, int), T[]> SnapshotAllTiles<T>(T[] px, int w, int h) where T : struct
     {
-        var snap = new Dictionary<(int, int), byte[]>();
+        var snap = new Dictionary<(int, int), T[]>();
         for (int ty = 0; ty < RasterTiles.TilesY(h); ty++)
         for (int tx = 0; tx < RasterTiles.TilesX(w); tx++)
             snap[(tx, ty)] = RasterTiles.GetTile(px, w, h, tx, ty);
@@ -1820,7 +1822,7 @@ public sealed unsafe partial class GpuSurfaceControl : ICanvasInputSink
         if (EyedropperAllLayers && ReadComposite() is { } comp && _doc is not null)
         { src = comp; sw = _doc.Width; sh = _doc.Height; }
         else if (ActiveLayer is { } layer)
-        { src = layer.Pixels; sw = layer.Width; sh = layer.Height; ox = layer.OffsetX; oy = layer.OffsetY; }
+        { src = layer.ToBytes(); sw = layer.Width; sh = layer.Height; ox = layer.OffsetX; oy = layer.OffsetY; }
         else return null;
 
         // sample in buffer space (doc cursor minus the layer's origin)

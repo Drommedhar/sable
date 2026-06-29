@@ -256,7 +256,7 @@ unsafe
         bdoc.Layers.Add(new Sable.Engine.Layers.PixelLayer(64, 64, "bg"));   // transparent bg
         var small = new Sable.Engine.Layers.PixelLayer(16, 16, "red") { OffsetX = 24, OffsetY = 24 };
         for (int i = 0; i < small.Pixels.Length; i += 4)
-        { small.Pixels[i] = 255; small.Pixels[i + 1] = 0; small.Pixels[i + 2] = 0; small.Pixels[i + 3] = 255; }
+        { small.Pixels[i] = 1f; small.Pixels[i + 1] = 0f; small.Pixels[i + 2] = 0f; small.Pixels[i + 3] = 1f; }
         // layer-aligned mask: hide the left half of the 16x16 square
         small.AddWhiteMask(16, 16);
         for (int y = 0; y < 16; y++)
@@ -290,7 +290,7 @@ unsafe
         ndoc.Layers.Add(new Sable.Engine.Layers.PixelLayer(64, 64, "bg"));   // transparent backdrop
         var host = new Sable.Engine.Layers.PixelLayer(64, 64, "host");
         for (int y = 24; y < 40; y++)                                        // opaque white square [24,40)
-        for (int x = 24; x < 40; x++) { int i = (y * 64 + x) * 4; host.Pixels[i] = 255; host.Pixels[i + 1] = 255; host.Pixels[i + 2] = 255; host.Pixels[i + 3] = 255; }
+        for (int x = 24; x < 40; x++) { int i = (y * 64 + x) * 4; host.Pixels[i] = 1f; host.Pixels[i + 1] = 1f; host.Pixels[i + 2] = 1f; host.Pixels[i + 3] = 1f; }
         host.Children.Add(new Sable.Engine.Layers.FilterLayer(Sable.Engine.Layers.FilterKind.GaussianBlur) { Radius = 6f });
         ndoc.Layers.Add(host);
         using var ncomp = new Sable.Engine.Compositing.GpuCompositor(gpu);
@@ -322,7 +322,7 @@ unsafe
         {
             for (int y = y0; y < y0 + s; y++)
                 for (int x = x0; x < x0 + s; x++)
-                { int i = (y * 300 + x) * 4; lay.Pixels[i] = r; lay.Pixels[i+1] = g; lay.Pixels[i+2] = b; lay.Pixels[i+3] = 255; }
+                { int i = (y * 300 + x) * 4; lay.Pixels[i] = r/255f; lay.Pixels[i+1] = g/255f; lay.Pixels[i+2] = b/255f; lay.Pixels[i+3] = 1f; }
         }
         Paint(8, 8, 16, 0, 0, 255);        // tile (0,0)
         Paint(264, 264, 16, 0, 255, 0);    // tile (1,1)
@@ -344,7 +344,7 @@ unsafe
         Sable.Engine.Layers.PixelLayer Mk(string n, byte r, byte g, byte b, byte a)
         {
             var l = new Sable.Engine.Layers.PixelLayer(64, 64, n);
-            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r; l.Pixels[i+1] = g; l.Pixels[i+2] = b; l.Pixels[i+3] = a; }
+            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r/255f; l.Pixels[i+1] = g/255f; l.Pixels[i+2] = b/255f; l.Pixels[i+3] = a/255f; }
             return l;
         }
         var L0 = Mk("bg", 200, 30, 30, 255);
@@ -381,7 +381,7 @@ unsafe
                 {
                     int i = (y * 64 + x) * 4;
                     byte a = (byte)(leftOnly && x >= 32 ? 0 : 255);
-                    l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a;
+                    l.Pixels[i] = r/255f; l.Pixels[i + 1] = g/255f; l.Pixels[i + 2] = b/255f; l.Pixels[i + 3] = a/255f;
                 }
             return l;
         }
@@ -414,7 +414,7 @@ unsafe
                 {
                     int i = (y * 64 + x) * 4;
                     byte a = (byte)(leftOnly && x >= 32 ? 0 : 255);
-                    l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a;
+                    l.Pixels[i] = r/255f; l.Pixels[i + 1] = g/255f; l.Pixels[i + 2] = b/255f; l.Pixels[i + 3] = a/255f;
                 }
             return l;
         }
@@ -438,7 +438,7 @@ unsafe
         Sable.Engine.Layers.PixelLayer MkLayer(byte r, byte g, byte b, byte a)
         {
             var l = new Sable.Engine.Layers.PixelLayer(96, 96, "paint");
-            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a; }
+            for (int i = 0; i < l.Pixels.Length; i += 4) { l.Pixels[i] = r/255f; l.Pixels[i + 1] = g/255f; l.Pixels[i + 2] = b/255f; l.Pixels[i + 3] = a/255f; }
             return l;
         }
 
@@ -476,7 +476,7 @@ unsafe
             };
         }
 
-        int MaxDiff(byte[] a, byte[] b) { int m = 0; for (int i = 0; i < a.Length; i++) m = Math.Max(m, Math.Abs(a[i] - b[i])); return m; }
+        int MaxDiff(float[] a, float[] b) { int m = 0; for (int i = 0; i < a.Length; i++) m = Math.Max(m, (int)(MathF.Abs(a[i] - b[i]) * 255f + 0.5f)); return m; }
 
         using var bcmp = new Sable.Engine.Compositing.GpuCompositor(gpu);
         var bdoc = new Sable.Engine.Document(96, 96);
@@ -529,12 +529,25 @@ unsafe
         bcmp.StampBrushDab(MkDab(br, 76, 48, gl3.Width, gl3.Height));
         br.Clone = false; br.Heal = false;
         bcmp.EndBrushStroke();
-        int dodged = gl3.Pixels[(48 * 96 + 20) * 4];
-        int healed = gl3.Pixels[(48 * 96 + 76) * 4];
+        int dodged = (int)(gl3.Pixels[(48 * 96 + 20) * 4] * 255f + 0.5f);
+        int healed = (int)(gl3.Pixels[(48 * 96 + 76) * 4] * 255f + 0.5f);
 
         bool ok1 = d1 <= 4, ok2 = d2 <= 4, ok3 = dodged > 140 && Math.Abs(healed - 100) <= 4;
         Console.WriteLine($"gpu brush: paint/blend/ellipse/erase maxDiff={d1} tip maxDiff={d2} " +
             $"dodge={dodged} heal={healed} ok={ok1 && ok2 && ok3}");
+    }
+
+    // --- bit-depth (PLAN §6): the float pipeline keeps sub-8-bit precision through the GPU compositor ---
+    {
+        var fdoc = new Sable.Engine.Document(8, 8);
+        var fl = new Sable.Engine.Layers.PixelLayer(8, 8, "subbyte");
+        float fv = 100.6f / 255f;   // strictly between two 8-bit steps — only survives at >8-bit precision
+        for (int i = 0; i < fl.Pixels.Length; i += 4) { fl.Pixels[i] = fv; fl.Pixels[i + 1] = fv; fl.Pixels[i + 2] = fv; fl.Pixels[i + 3] = 1f; }
+        fdoc.Layers.Add(fl);
+        using var fcmp = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var ff = fcmp.CompositeToFloats(fdoc);
+        bool precise = MathF.Abs(ff[0] - fv) < 0.5f / 255f;   // rgba8 storage would snap to 100/255 or 101/255
+        Console.WriteLine($"bit-depth float: in={fv * 255f:F2}/255 out={ff[0] * 255f:F2}/255 preciseFloat={precise}");
     }
 
     // --- M1 verification: .sable save/load round-trip ---------------------------
