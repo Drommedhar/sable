@@ -401,6 +401,38 @@ unsafe
             $"ok={leftBlue && rightBg} (leftBlue={leftBlue} rightNoLeak={rightBg})");
     }
 
+    // --- clipped ADJUSTMENT layer: clips to base alpha too (ROADMAP §7 follow-up) ---
+    // bg (opaque red) · base (blue, left opaque / right transparent) · Invert adjustment (ClipToBelow).
+    // Correct: invert applies only over the base (left → yellow); the right keeps the red backdrop.
+    // The old backdrop-alpha clip inverted the whole canvas (right went cyan).
+    {
+        Sable.Engine.Layers.PixelLayer MkHalf2(string n, byte r, byte g, byte b, bool leftOnly)
+        {
+            var l = new Sable.Engine.Layers.PixelLayer(64, 64, n);
+            for (int y = 0; y < 64; y++)
+                for (int x = 0; x < 64; x++)
+                {
+                    int i = (y * 64 + x) * 4;
+                    byte a = (byte)(leftOnly && x >= 32 ? 0 : 255);
+                    l.Pixels[i] = r; l.Pixels[i + 1] = g; l.Pixels[i + 2] = b; l.Pixels[i + 3] = a;
+                }
+            return l;
+        }
+        var adoc = new Sable.Engine.Document(64, 64);
+        adoc.Layers.Add(MkHalf2("bg", 200, 30, 30, false));
+        adoc.Layers.Add(MkHalf2("base", 30, 30, 200, true));
+        var inv = new Sable.Engine.Layers.AdjustmentLayer(Sable.Engine.Layers.AdjustmentKind.Invert) { ClipToBelow = true };
+        adoc.Layers.Add(inv);
+        using var aclc = new Sable.Engine.Compositing.GpuCompositor(gpu);
+        var ab = aclc.CompositeToBytes(adoc);
+        int ali = (32 * 64 + 16) * 4;   // left — over base, inverted
+        int ari = (32 * 64 + 48) * 4;   // right — base transparent, must stay red
+        bool leftInv = ab[ali + 1] > 150;                         // inverted blue → green high
+        bool rightKept = ab[ari] > 150 && ab[ari + 1] < 90;       // backdrop red kept (adj not leaked)
+        Console.WriteLine($"clip-adjust: left=({ab[ali]},{ab[ali+1]},{ab[ali+2]}) right=({ab[ari]},{ab[ari+1]},{ab[ari+2]}) " +
+            $"ok={leftInv && rightKept} (leftInverted={leftInv} rightNoLeak={rightKept})");
+    }
+
     // --- GPU brush engine (plan §2): GPU stroke ≈ CPU stroke + retouch sanity ----
     {
         Sable.Engine.Layers.PixelLayer MkLayer(byte r, byte g, byte b, byte a)

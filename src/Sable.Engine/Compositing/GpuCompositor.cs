@@ -319,14 +319,15 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     private void BuildAdjustPipeline()
     {
         var api = _gpu.Api;
-        var entries = stackalloc BindGroupLayoutEntry[6];
+        var entries = stackalloc BindGroupLayoutEntry[7];
         entries[0] = Entry(0, BufferBindingType.Uniform);          // dims
         entries[1] = Entry(1, BufferBindingType.Uniform);          // adj params
         entries[2] = Entry(2, BufferBindingType.ReadOnlyStorage);  // src (backdrop)
         entries[3] = Entry(3, BufferBindingType.Storage);          // out
         entries[4] = Entry(4, BufferBindingType.ReadOnlyStorage);  // mask
         entries[5] = Entry(5, BufferBindingType.ReadOnlyStorage);  // curve LUT
-        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 6, Entries = entries };
+        entries[6] = Entry(6, BufferBindingType.ReadOnlyStorage);  // clip-base alpha (clip mode 2)
+        var bglDesc = new BindGroupLayoutDescriptor { EntryCount = 7, Entries = entries };
         _adjBgl = api.DeviceCreateBindGroupLayout(_gpu.Device, in bglDesc);
 
         var bglLocal = _adjBgl;
@@ -787,7 +788,7 @@ public sealed unsafe partial class GpuCompositor : IDisposable
                 var p = new Span<float>((float*)(prm + 2), 12);
                 adj.PackParams(p);
                 *(float*)(prm + 14) = adj.FillOpacity;
-                *(float*)(prm + 15) = adj.ClipToBelow ? 1f : 0f;   // backdrop-alpha clip (approx of per-layer clip)
+                *(float*)(prm + 15) = CurrentClip;   // 0 off / 1 backdrop (nested) / 2 base-layer alpha (PS)
                 api.QueueWriteBuffer(_gpu.Queue, _adjParamsBuf, 0, prm, 64);
                 if (adj.Kind is AdjustmentKind.Curves or AdjustmentKind.GradientMap)
                 {
@@ -1093,14 +1094,15 @@ public sealed unsafe partial class GpuCompositor : IDisposable
     private void DispatchAdjust(Buffer* src, Buffer* outp, Buffer* mask)
     {
         var api = _gpu.Api;
-        var bg = stackalloc BindGroupEntry[6];
+        var bg = stackalloc BindGroupEntry[7];
         bg[0] = new BindGroupEntry { Binding = 0, Buffer = _dimsBuf, Size = 16 };
         bg[1] = new BindGroupEntry { Binding = 1, Buffer = _adjParamsBuf, Size = 64 };
         bg[2] = new BindGroupEntry { Binding = 2, Buffer = src, Size = (ulong)_imgBytes };
         bg[3] = new BindGroupEntry { Binding = 3, Buffer = outp, Size = (ulong)_imgBytes };
         bg[4] = new BindGroupEntry { Binding = 4, Buffer = mask, Size = (ulong)_imgBytes };
         bg[5] = new BindGroupEntry { Binding = 5, Buffer = _curveLutBuf, Size = 4 * 256 * 4 };
-        var bgDesc = new BindGroupDescriptor { Layout = _adjBgl, EntryCount = 6, Entries = bg };
+        bg[6] = new BindGroupEntry { Binding = 6, Buffer = _clipBase, Size = (ulong)_imgBytes };
+        var bgDesc = new BindGroupDescriptor { Layout = _adjBgl, EntryCount = 7, Entries = bg };
         var bindGroup = api.DeviceCreateBindGroup(_gpu.Device, in bgDesc);
 
         var encDesc = new CommandEncoderDescriptor();

@@ -19,7 +19,7 @@ struct Adj {
     kind: u32, opacity: f32,
     p0: f32, p1: f32, p2: f32, p3: f32, p4: f32, p5: f32,
     p6: f32, p7: f32, p8: f32, p9: f32, p10: f32, p11: f32,
-    fillOpacity: f32, clip: f32,   // fill scales strength; clip=1 → only where backdrop is opaque
+    fillOpacity: f32, clip: f32,   // clip: 0 off / 1 backdrop alpha (nested) / 2 base-layer alpha (PS)
 };
 
 @group(0) @binding(0) var<uniform> dims: Dims;
@@ -28,6 +28,7 @@ struct Adj {
 @group(0) @binding(3) var<storage, read_write>   outp: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read>       mask: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read>       lut:  array<f32>;   // 4*256 curve LUT
+@group(0) @binding(6) var<storage, read>       clipBase: array<vec4<f32>>;   // base-layer standalone alpha (clip mode 2)
 
 fn unpack(c: vec4<f32>) -> vec4<f32> { return c; }
 fn pack(c: vec4<f32>) -> vec4<f32> { return c; }
@@ -167,7 +168,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    let strength = adj.opacity * adj.fillOpacity * m * mix(1.0, c.w, adj.clip);
+    // clip: 0 off, 1 = backdrop alpha (nested), 2 = base-layer standalone alpha (PS clipping mask)
+    var clipMul = 1.0;
+    if (adj.clip > 1.5) { clipMul = clipBase[idx].w; }
+    else if (adj.clip > 0.5) { clipMul = c.w; }
+    let strength = adj.opacity * adj.fillOpacity * m * clipMul;
     let outRGB = mix(c.xyz, rgb, strength);
     outp[idx] = pack(vec4<f32>(outRGB, c.w));
 }

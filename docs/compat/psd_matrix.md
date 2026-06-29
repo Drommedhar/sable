@@ -214,10 +214,10 @@ Mapped adjustments remain editable (sliders in `AdjustmentPanel`); round-trip in
 - **Fix:** clip mode 2 binds `_clipBase` (binding 8) = the base layer's standalone coverage (own content + mask + transform, rendered over a permanently-zero backdrop, FX/opacity excluded — matching PS, which clips to raw layer transparency). `BlendLayerSequence` finds the base (nearest non-clipped layer below the run), stamps it once per run, and every clipped layer in the chain clips to it. Nested effect children keep mode 1 (backdrop = parent content, correct there). Verified by the `clip-mask` GPU smoke (Sable.Gpu.Spike): background no longer leaks; clip shows only over the base.
 
 ### Known remaining gaps
-- **Clipped adjustment layers** still use backdrop-alpha clip (`adjust.wgsl` has no `clipBase` binding) — a clipped Curves/Levels over an opaque background still leaks. Follow-up: thread `_clipBase` into the adjustment pass.
+- None for clip-to-base. Clipped **adjustment** layers were brought onto the same base-alpha clip (2026-06-29): `adjust.wgsl` gained binding 6 `clipBase`, the adjustment path feeds `CurrentClip` (3-state) instead of `ClipToBelow`, verified by the `clip-adjust` GPU smoke (clipped Invert over an opaque background no longer leaks past the base).
 
 ### Required tests
-- GPU smoke: `clip-mask` (Sable.Gpu.Spike) — base/clip/background, asserts no leak. DONE.
+- GPU smoke: `clip-mask` + `clip-adjust` (Sable.Gpu.Spike) — base/clip/background, assert no leak. DONE.
 - fixture: `psd/clipping_chain.psd` (3 clipped layers) — TODO
 - fixture: `psd/clipping_with_mask.psd` — TODO
 
