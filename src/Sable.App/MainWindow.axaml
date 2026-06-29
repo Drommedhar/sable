@@ -199,6 +199,7 @@
                 <MenuItem x:Name="EffectsMenuItem" Header="{loc:Loc mainWindow.layerEffects}" Click="OnToggleEffects" />
                 <MenuItem Header="{loc:Loc mainWindow.transform}" Click="OnToggleTransform" />
                 <MenuItem Header="{loc:Loc mainWindow.history}" Click="OnToggleHistory" />
+                <MenuItem Header="{loc:Loc mainWindow.compatibilityReport}" Click="OnToggleCompatibilityReport" />
                 <MenuItem Header="{loc:Loc mainWindow.commandPalette}" InputGesture="Ctrl+K" Click="OnCommandPalette" Tag="window.palette" />
                 <Separator />
                 <MenuItem x:Name="PanelToolsItem" Header="{loc:Loc mainWindow.panelTools}" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePanelTools" />

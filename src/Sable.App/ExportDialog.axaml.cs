@@ -46,6 +46,7 @@ public partial class ExportDialog : Window
     {
         1 => ImageCodec.ImageFormat.Jpeg,
         2 => ImageCodec.ImageFormat.Webp,
+        3 => ImageCodec.ImageFormat.Tiff,
         _ => ImageCodec.ImageFormat.Png,
     };
 

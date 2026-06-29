@@ -295,6 +295,7 @@
     "adjustments": "Adjustments",
     "layerEffects": "Layer Effects",
     "history": "History",
+    "compatibilityReport": "Compatibility Report",
     "commandPalette": "Command Palette",
     "revertBody": "Discard all changes and reload the file from disk?",
     "panelTools": "Tools Panel",
@@ -825,5 +826,16 @@
   "psd": {
     "importTitle": "PSD import notes",
     "moreWarnings": "…and {0} more"
+  },
+  "compatReport": {
+    "title": "Compatibility Report",
+    "close": "Close",
+    "viewReport": "View report",
+    "missingFonts": "Missing fonts",
+    "rasterised": "Imported as raster (not editable)",
+    "partial": "Partial fidelity",
+    "skipped": "Skipped (not supported)",
+    "structural": "Structural issues",
+    "clean": "No compatibility issues — all features imported with full fidelity."
   }
 }

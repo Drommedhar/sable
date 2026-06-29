@@ -295,6 +295,7 @@
     "adjustments": "Anpassungen",
     "layerEffects": "Ebeneneffekte",
     "history": "Verlauf",
+    "compatibilityReport": "Kompatibilitätsbericht",
     "commandPalette": "Befehlspalette",
     "revertBody": "Alle Änderungen verwerfen und die Datei neu von der Festplatte laden?",
     "panelTools": "Werkzeugleiste",
@@ -825,5 +826,16 @@
   "psd": {
     "importTitle": "PSD-Import-Hinweise",
     "moreWarnings": "…und {0} weitere"
+  },
+  "compatReport": {
+    "title": "Kompatibilitätsbericht",
+    "close": "Schließen",
+    "viewReport": "Bericht anzeigen",
+    "missingFonts": "Fehlende Schriften",
+    "rasterised": "Als Raster importiert (nicht editierbar)",
+    "partial": "Teilweise originalgetreu",
+    "skipped": "Übersprungen (nicht unterstützt)",
+    "structural": "Strukturelle Probleme",
+    "clean": "Keine Kompatibilitätsprobleme — alle Funktionen wurden vollständig originalgetreu importiert."
   }
 }

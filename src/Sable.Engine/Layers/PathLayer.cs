@@ -20,6 +20,15 @@ public struct PathNode
         Ax = ax; Ay = ay; InX = ax; InY = ay; OutX = ax; OutY = ay; Smooth = false;
     }
 
+    /// <summary>Full node with explicit handles (e.g. from a PSD vector-mask knot). Smooth when
+    /// the in/out handles are not both coincident with the anchor.</summary>
+    public PathNode(float ax, float ay, float inX, float inY, float outX, float outY)
+    {
+        Ax = ax; Ay = ay; InX = inX; InY = inY; OutX = outX; OutY = outY;
+        Smooth = Math.Abs(InX - Ax) > 0.01f || Math.Abs(InY - Ay) > 0.01f
+              || Math.Abs(OutX - Ax) > 0.01f || Math.Abs(OutY - Ay) > 0.01f;
+    }
+
     /// <summary>Move the whole node (anchor + both handles) by a delta.</summary>
     public void Translate(float dx, float dy)
     {

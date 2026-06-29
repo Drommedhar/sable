@@ -24,6 +24,7 @@
                         <ComboBoxItem>PNG</ComboBoxItem>
                         <ComboBoxItem>JPEG</ComboBoxItem>
                         <ComboBoxItem>WebP</ComboBoxItem>
+                        <ComboBoxItem>TIFF</ComboBoxItem>
                     </ComboBox>
                 </StackPanel>
 

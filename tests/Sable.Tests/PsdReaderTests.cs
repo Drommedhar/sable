@@ -449,15 +449,13 @@ public class PsdReaderTests
         var psd = new PsdBuilder { Width = 16, Height = 16 }.Build(li.Build());
 
         var doc = PsdReader.Load(psd, "shape", out _);
-        var layer = Assert.IsType<PixelLayer>(Assert.Single(doc.Layers));
-        Assert.True(layer.Width is >= 8 and <= 10);
-        Assert.Equal(4, layer.OffsetX);
-        // centre of the shape = filled with the SoCo colour, full coverage
-        int cx = layer.Width / 2, cy = layer.Height / 2;
-        int i = (cy * layer.Width + cx) * 4;
-        Assert.Equal(10, layer.Pixels[i]);
-        Assert.Equal(220, layer.Pixels[i + 1]);
-        Assert.Equal(255, layer.Pixels[i + 3]);
+        var layer = Assert.IsType<PathLayer>(Assert.Single(doc.Layers));
+        Assert.True(layer.Closed);
+        Assert.True(layer.Filled);
+        Assert.Equal(10, layer.FillR);
+        Assert.Equal(220, layer.FillG);
+        Assert.Equal(30, layer.FillB);
+        Assert.True(layer.Nodes.Count >= 4, "rectangle vector mask → ≥4 path nodes");
     }
 
     private static byte[] VText(string s)

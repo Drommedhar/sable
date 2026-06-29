@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private EffectsWindow? _fxWindow;
     private TransformWindow? _transformWindow;
     private HistoryWindow? _historyWindow;
+    private CompatibilityReportWindow? _compatWindow;
     private readonly System.Collections.ObjectModel.ObservableCollection<DocumentTab> _tabs = new();
     private DocumentTab? _activeTab;
     private int _untitledCounter = 1;
@@ -592,21 +593,27 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Import a .psd as a new (untitled) tab. Missing fonts and lossy-mapping
-    /// notes are shown as Affinity-style notification toasts, not a modal.</summary>
+    /// notes are shown as Affinity-style notification toasts, not a modal. A "View report"
+    /// action on the toast opens the persistent <see cref="CompatibilityReportWindow"/>.</summary>
     private DocumentTab OpenPsdTab(string path)
     {
         var doc = PsdReader.Load(path, out var warnings, out var fonts);
         var tab = OpenInNewTab(doc, null, System.IO.Path.GetFileName(path), path);
 
         var missing = fonts.Where(f => !FontInstalled(f)).ToList();
+        var report = CompatibilityReport.Build(System.IO.Path.GetFileName(path), warnings, fonts);
+        report.MissingFonts.AddRange(missing);
+        tab.CompatibilityReport = report;
+
         if (missing.Count > 0)
             ShowToast(Loc.T("toast.missingFontsTitle"), string.Join("\n", missing));
 
-        if (warnings.Count > 0)
+        if (warnings.Count > 0 || missing.Count > 0)
         {
             var list = string.Join("\n", warnings.Take(12));
             if (warnings.Count > 12) list += "\n" + Loc.T("psd.moreWarnings", warnings.Count - 12);
-            ShowToast(Loc.T("psd.importTitle"), list);
+            ShowToast(Loc.T("psd.importTitle"), list,
+                Loc.T("compatReport.viewReport"), () => ShowCompatibilityReport(tab));
         }
         return tab;
     }
@@ -3510,6 +3517,25 @@ public partial class MainWindow : Window
         win.Closed += (_, _) => _historyWindow = null;
         _historyWindow = win;
         win.Show(this);
+    }
+
+    /// <summary>Open (or focus) the PSD import compatibility report for the active tab.
+    /// Non-PSD tabs with no report show the clean state.</summary>
+    private void OnToggleCompatibilityReport(object? sender, RoutedEventArgs e)
+    {
+        var tab = _tabs.FirstOrDefault(t => t.IsActive);
+        if (tab is null) return;
+        ShowCompatibilityReport(tab);
+    }
+
+    private void ShowCompatibilityReport(DocumentTab tab)
+    {
+        var report = tab.CompatibilityReport ?? new CompatibilityReport { DocumentName = tab.Title };
+        if (_compatWindow is not null) { _compatWindow.Update(report); _compatWindow.Activate(); return; }
+        var win = new CompatibilityReportWindow();
+        win.Closed += (_, _) => _compatWindow = null;
+        _compatWindow = win;
+        win.Show(report, this);
     }
 
     // ===== clipboard (PLAN §16.2 / Phase 1 #5) =====

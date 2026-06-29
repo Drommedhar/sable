@@ -1,0 +1,58 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.CompatibilityReportWindow"
+        Width="460" Height="520"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True" ShowInTaskbar="False"
+        Title="{loc:Loc compatReport.title}">
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeHeaderBg}" Padding="12,8">
+            <StackPanel Spacing="2">
+                <TextBlock Text="{loc:Loc compatReport.title}" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" />
+                <TextBlock x:Name="DocNameLabel" Foreground="{DynamicResource ChromeTextFaint}" FontSize="11" />
+            </StackPanel>
+        </Border>
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ChromeFooter}" Padding="10,7">
+            <Button Content="{loc:Loc compatReport.close}" HorizontalAlignment="Right" Classes="opt" Padding="14,0" Click="OnClose" />
+        </Border>
+        <ScrollViewer Padding="12" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="14">
+                <!-- missing fonts -->
+                <StackPanel x:Name="FontsSection" Spacing="4" IsVisible="False">
+                    <TextBlock Text="{loc:Loc compatReport.missingFonts}" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" FontSize="12" />
+                    <ItemsControl x:Name="FontsList" FontSize="11">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Foreground="{DynamicResource ChromeTextFaint}" Padding="8,0,0,0" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- severity sections -->
+                <StackPanel x:Name="RasterisedSection" Spacing="4" IsVisible="False">
+                    <TextBlock x:Name="RasterisedHeader" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" FontSize="12" />
+                    <ItemsControl x:Name="RasterisedList" FontSize="11" />
+                </StackPanel>
+                <StackPanel x:Name="PartialSection" Spacing="4" IsVisible="False">
+                    <TextBlock x:Name="PartialHeader" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" FontSize="12" />
+                    <ItemsControl x:Name="PartialList" FontSize="11" />
+                </StackPanel>
+                <StackPanel x:Name="SkippedSection" Spacing="4" IsVisible="False">
+                    <TextBlock x:Name="SkippedHeader" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" FontSize="12" />
+                    <ItemsControl x:Name="SkippedList" FontSize="11" />
+                </StackPanel>
+                <StackPanel x:Name="StructuralSection" Spacing="4" IsVisible="False">
+                    <TextBlock x:Name="StructuralHeader" Foreground="{DynamicResource ChromeText}" FontWeight="SemiBold" FontSize="12" />
+                    <ItemsControl x:Name="StructuralList" FontSize="11" />
+                </StackPanel>
+
+                <!-- clean state -->
+                <TextBlock x:Name="CleanLabel" IsVisible="True"
+                           Text="{loc:Loc compatReport.clean}"
+                           Foreground="{DynamicResource ChromeTextFaint}" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

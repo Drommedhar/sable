@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Sable.Engine;
+using Sable.Format;
 using Sable.UI.ViewModels;
 
 namespace Sable.App;
@@ -30,6 +31,10 @@ public sealed partial class DocumentTab : ObservableObject
 
     /// <summary>Stable id for the autosave/recovery file of this tab (PLAN §2.6).</summary>
     public string RecoveryId { get; } = System.Guid.NewGuid().ToString("N");
+
+    /// <summary>PSD import compatibility report (null for non-PSD tabs). Kept on the tab so the
+    /// <see cref="CompatibilityReportWindow"/> can re-open it after the transient toast dismisses.</summary>
+    public CompatibilityReport? CompatibilityReport { get; set; }
 
     public DocumentTab(Document doc, string? path, string title)
     {

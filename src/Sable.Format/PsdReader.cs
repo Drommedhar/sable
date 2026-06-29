@@ -141,9 +141,11 @@ public static class PsdReader
         public int MaskTop, MaskLeft, MaskBottom, MaskRight;
         public byte MaskDefault = 255;
         public string? UnmappableKey;         // adjustment / fill-layer key when the layer has no raster content
+        public PsDesc? AdjustmentDesc;        // parsed descriptor for a mapped adjustment key (brit/levl/…)
         public List<string> Notes = new();    // per-layer rasterisation notes
         public List<LayerEffect> Effects = new();                     // mapped lfx2 layer effects
-        public List<List<(double X, double Y)>>? VectorContours;      // vmsk/vsms bezier path, doc px
+        public List<List<(double X, double Y)>>? VectorContours;      // vmsk/vsms bezier path, doc px (flattened polyline)
+        public List<VectorContour>? VectorKnots;                       // vmsk/vsms bezier knots (handles preserved) for the ShapeLayer bridge
         public (byte r, byte g, byte b)? SoCoColor;                   // solid-colour fill layer
         public PsdTextInfo? TextInfo;                                 // TySh → editable TextLayer
         public bool HasLrFx, HasLfx2;
@@ -232,6 +234,7 @@ public static class PsdReader
                         {
                             rec.TextInfo = ParseTySh(ref r);
                             rec.Notes.Add("text layer converted to editable text");
+                            foreach (var n in rec.TextInfo.Notes) rec.Notes.Add(n);
                         }
                         catch
                         {
@@ -245,7 +248,8 @@ public static class PsdReader
                     case "vmsk" or "vsms":
                         try
                         {
-                            rec.VectorContours = ParseVectorMask(ref r, next - (len & 1), docW, docH);
+                            rec.VectorKnots = ParseVectorMaskKnots(ref r, next - (len & 1), docW, docH);
+                            rec.VectorContours = rec.VectorKnots is not null ? KnotsToPolylines(rec.VectorKnots) : null;
                             if (rec.VectorContours is not null) rec.Notes.Add("vector mask rasterised");
                         }
                         catch { rec.Notes.Add("vector mask unreadable"); }
@@ -256,7 +260,7 @@ public static class PsdReader
                     case "lfx2":
                         try
                         {
-                            rec.Effects = ParseLfx2(ref r);
+                            rec.Effects = ParseLfx2(ref r, rec);
                             rec.HasLfx2 = true;
                         }
                         catch { rec.Notes.Add("layer effects unreadable"); }
@@ -271,7 +275,17 @@ public static class PsdReader
                         catch { rec.UnmappableKey = key; }   // unparseable → skip-with-note path
                         break;
                     default:
-                        if (AdjustmentKeys.Contains(key)) rec.UnmappableKey = key;
+                        if (MappableAdjustmentKeys.Contains(key))
+                        {
+                            try
+                            {
+                                r.Skip(4);   // descriptor version
+                                rec.AdjustmentDesc = PsDesc.Parse(ref r);
+                                rec.UnmappableKey = key;   // marks the layer as an adjustment (not skipped now)
+                            }
+                            catch { rec.Notes.Add("adjustment layer unreadable"); }
+                        }
+                        else if (AdjustmentKeys.Contains(key)) rec.UnmappableKey = key;
                         break;
                 }
                 r.Pos = next;
@@ -378,6 +392,7 @@ public static class PsdReader
         public double BoxW;                              // 0 = point text
         public double ScaleX = 1, ScaleY = 1;            // baked text transform (PS scales text via the matrix)
         public double RotationDeg;                       // baked text rotation (from the same matrix)
+        public List<string> Notes = new();              // fidelity warnings (multi-style, warp, …)
     }
 
     /// <summary>TySh: version, 6×f64 transform, text version, descriptor version, then the text
@@ -443,6 +458,10 @@ public static class PsdReader
         if (Walk(root, "EngineDict", "ParagraphRun", "RunArray", 0, "ParagraphSheet", "Properties", "Justification") is double j)
             info.Justification = (int)j;
 
+        // multi-style runs: Sable TextLayer is single-style → flatten to the first run + warn
+        if (Walk(root, "EngineDict", "StyleRun", "RunArray") is List<object> { Count: > 1 } runs)
+            info.Notes.Add($"text layer has {runs.Count} style runs — flattened to first style.");
+
         // box (paragraph) text: ShapeType 1 carries BoxBounds [x y w h]
         var shape = Walk(root, "EngineDict", "Rendered", "Shapes", "Children", 0) as Dictionary<string, object>;
         if (shape is not null
@@ -450,6 +469,33 @@ public static class PsdReader
             && Walk(shape, "Cookie", "Photoshop", "BoxBounds") is List<object> { Count: >= 4 } bb
             && bb[2] is double bw)
             info.BoxW = bw;
+
+        // warp: PS stores a warp descriptor in the TySh block after EngineData (we skip the bytes,
+        // but the EngineData Rendered.Shapes also carries a warp flag). Detect + warn.
+        if (Walk(root, "EngineDict", "Rendered", "Shapes", "WarpData") is not null
+            || Walk(root, "EngineDict", "Warp") is not null)
+            info.Notes.Add("text warp not imported (flattened to un-warped text).");
+
+        // vertical text (orientation flag in EngineDict)
+        if (Walk(root, "EngineDict", "Orientation") is double ori && (int)ori == 2)
+            info.Notes.Add("vertical text not imported (flattened to horizontal).");
+
+        // OpenType features / baseline shift / super-sub / caps — inspect the first style run.
+        if (style is not null)
+        {
+            if (style.TryGetValue("Baseline", out var bs) && bs is double bsv && Math.Abs(bsv) > 1e-6)
+                info.Notes.Add("baseline shift not imported.");
+            if (style.TryGetValue("Superscript", out var sup) && sup is bool supb && supb)
+                info.Notes.Add("superscript not imported.");
+            if (style.TryGetValue("Subscript", out var sub) && sub is bool subb && subb)
+                info.Notes.Add("subscript not imported.");
+            if (style.TryGetValue("AllCaps", out var ac) && ac is bool acb && acb)
+                info.Notes.Add("all-caps not imported.");
+            if (style.TryGetValue("SmallCaps", out var sc) && sc is bool scb && scb)
+                info.Notes.Add("small-caps not imported.");
+            if (style.TryGetValue("OpenType", out var ot) && ot is Dictionary<string, object> { Count: > 0 })
+                info.Notes.Add("OpenType features not imported.");
+        }
     }
 
     /// <summary>Path walk over the EngineData object model (string key → dict, int → list index).</summary>
@@ -609,7 +655,7 @@ public static class PsdReader
     /// <summary>Map the lfx2 effects descriptor onto Sable's <see cref="LayerEffect"/> set —
     /// drop shadow / inner shadow / outer+inner glow / colour overlay / stroke / gradient
     /// overlay / bevel. PS-only params (contour curves, noise, textures) are dropped.</summary>
-    private static List<LayerEffect> ParseLfx2(ref Reader r)
+    private static List<LayerEffect> ParseLfx2(ref Reader r, LayerRecord rec)
     {
         var fx = new List<LayerEffect>();
         r.Skip(4);   // object version (0)
@@ -690,6 +736,8 @@ public static class PsdReader
             // first/last gradient stop → start/end colour (the engine renders a 2-colour ramp)
             if (gf.Obj("Grad")?.Items("Clrs") is { Count: > 0 } stops)
             {
+                if (stops.Count > 2)
+                    rec.Notes.Add($"gradient overlay has {stops.Count} stops — flattened to first/last.");
                 if ((stops[0] as PsDesc)?.Obj("Clr ") is { } c0 && DescColor(c0) is { } s0)
                 { e.R = s0.r / 255f; e.G = s0.g / 255f; e.B = s0.b / 255f; }
                 if ((stops[^1] as PsDesc)?.Obj("Clr ") is { } c1 && DescColor(c1) is { } s1)
@@ -707,6 +755,10 @@ public static class PsdReader
             e.Angle = (float)bv.Num("lagl", 135);
             e.Size = (float)Math.Max(0.5, bv.Num("blur", 4) * scale);
             e.Depth = (float)Math.Clamp(bv.Num("srgR", 100) / 100.0, 0.1, 4.0);
+            if (bv.Obj("TrnS") is not null || bv.Get("TrnS") is not null)
+                rec.Notes.Add("bevel/emboss contour curve not imported.");
+            if (bv.Get("texture") is not null || bv.Obj("TxtC") is not null)
+                rec.Notes.Add("bevel/emboss texture not imported.");
             fx.Add(e);
         }
         return fx;
@@ -757,49 +809,34 @@ public static class PsdReader
     /// <summary>Parse the bezier path records of a vector mask and flatten to doc-px contours.
     /// Knot coordinates are 8.24 fixed-point fractions of the canvas (vertical first).</summary>
     private static List<List<(double X, double Y)>>? ParseVectorMask(ref Reader r, long end, int docW, int docH)
+        => ParseVectorMaskKnots(ref r, end, docW, docH) is { } ks ? KnotsToPolylines(ks) : null;
+
+    /// <summary>A parsed vector-mask sub-path: its bezier knots (in/anchor/out handles, doc px) + closed flag.</summary>
+    public sealed class VectorContour
+    {
+        public List<(double Ix, double Iy, double Ax, double Ay, double Ox, double Oy)> Knots = new();
+        public bool Closed = true;
+    }
+
+    /// <summary>Parse the vector mask into per-contour bezier knots (preserving handles), so a
+    /// single closed contour can be rebuilt as an editable <see cref="PathLayer"/>.</summary>
+    private static List<VectorContour>? ParseVectorMaskKnots(ref Reader r, long end, int docW, int docH)
     {
         r.Skip(4);   // version
         r.Skip(4);   // flags
-        var contours = new List<List<(double X, double Y)>>();
-        List<(double ix, double iy, double ax, double ay, double ox, double oy)>? knots = null;
-        bool closed = true;
-
-        void Flush()
-        {
-            if (knots is { Count: >= 2 })
-            {
-                var pts = new List<(double X, double Y)>();
-                int n = knots.Count;
-                int segs = closed ? n : n - 1;
-                for (int i = 0; i < segs; i++)
-                {
-                    var a = knots[i];
-                    var b = knots[(i + 1) % n];
-                    for (int t = 0; t < 16; t++)
-                    {
-                        double f = t / 16.0, g = 1 - f;
-                        double x = g * g * g * a.ax + 3 * g * g * f * a.ox + 3 * g * f * f * b.ix + f * f * f * b.ax;
-                        double y = g * g * g * a.ay + 3 * g * g * f * a.oy + 3 * g * f * f * b.iy + f * f * f * b.ay;
-                        pts.Add((x, y));
-                    }
-                }
-                if (!closed) pts.Add((knots[^1].ax, knots[^1].ay));
-                if (pts.Count >= 3) contours.Add(pts);
-            }
-            knots = null;
-        }
+        var contours = new List<VectorContour>();
+        VectorContour? cur = null;
 
         while (r.Pos + 26 <= end)
         {
             int sel = r.U16();
             if (sel is 0 or 3)        // subpath length record (0 = closed, 3 = open)
             {
-                Flush();
-                knots = new();
-                closed = sel == 0;
+                cur = new VectorContour { Closed = sel == 0 };
+                contours.Add(cur);
                 r.Skip(24);
             }
-            else if (sel is 1 or 2 or 4 or 5 && knots is not null)   // knot: in-ctl, anchor, out-ctl
+            else if (sel is 1 or 2 or 4 or 5 && cur is not null)   // knot: in-ctl, anchor, out-ctl
             {
                 // 8.24 fixed-point fractions of the canvas, VERTICAL first
                 double iy = (int)r.U32() / 16777216.0 * docH;
@@ -808,12 +845,40 @@ public static class PsdReader
                 double ax = (int)r.U32() / 16777216.0 * docW;
                 double oy = (int)r.U32() / 16777216.0 * docH;
                 double ox = (int)r.U32() / 16777216.0 * docW;
-                knots.Add((ix, iy, ax, ay, ox, oy));
+                cur.Knots.Add((ix, iy, ax, ay, ox, oy));
             }
-            else r.Skip(24);          // fill rule / clipboard / initial fill — ignored
+            else r.Skip(24);
         }
-        Flush();
+        // drop contours with <2 knots (can't form a segment)
+        contours.RemoveAll(c => c.Knots.Count < 2);
         return contours.Count > 0 ? contours : null;
+    }
+
+    /// <summary>Flatten bezier knots to doc-px polylines (16 steps per segment) — the rasterisation path.</summary>
+    private static List<List<(double X, double Y)>> KnotsToPolylines(List<VectorContour> contours)
+    {
+        var result = new List<List<(double X, double Y)>>();
+        foreach (var c in contours)
+        {
+            var pts = new List<(double X, double Y)>();
+            int n = c.Knots.Count;
+            int segs = c.Closed ? n : n - 1;
+            for (int i = 0; i < segs; i++)
+            {
+                var a = c.Knots[i];
+                var b = c.Knots[(i + 1) % n];
+                for (int t = 0; t < 16; t++)
+                {
+                    double f = t / 16.0, g = 1 - f;
+                    double x = g * g * g * a.Ax + 3 * g * g * f * a.Ox + 3 * g * f * f * b.Ix + f * f * f * b.Ax;
+                    double y = g * g * g * a.Ay + 3 * g * g * f * a.Oy + 3 * g * f * f * b.Iy + f * f * f * b.Ay;
+                    pts.Add((x, y));
+                }
+            }
+            if (!c.Closed) pts.Add((c.Knots[^1].Ax, c.Knots[^1].Ay));
+            if (pts.Count >= 3) result.Add(pts);
+        }
+        return result;
     }
 
     /// <summary>Rasterise doc-px contours into a buffer-aligned coverage plane (0..255).</summary>
@@ -839,6 +904,17 @@ public static class PsdReader
         "brit", "levl", "curv", "expA", "vibA", "hue2", "hue ",   // adjustments
         "blnc", "blwh", "phfl", "mixr", "clrL", "nvrt", "post",
         "thrs", "grdm", "selc",
+    };
+
+    /// <summary>Adjustment keys Sable can map to an editable <see cref="AdjustmentLayer"/>.
+    /// The rest (<c>selc</c> selective color, <c>GdFl</c>/<c>PtFl</c> fill layers) stay in
+    /// <see cref="AdjustmentKeys"/> and are skipped with a warning. <c>phfl</c> photo filter maps
+    /// approximately to White Balance (temperature/tint); <c>clrL</c> legacy channel mixer maps to
+    /// Channel Mixer like <c>mixr</c>.</summary>
+    private static readonly HashSet<string> MappableAdjustmentKeys = new()
+    {
+        "brit", "levl", "curv", "expA", "vibA", "hue2", "hue ",
+        "blnc", "blwh", "mixr", "clrL", "nvrt", "post", "thrs", "grdm", "phfl",
     };
 
     /// <summary>Decode one channel's data (compression code + payload) to an 8-bit plane.</summary>
@@ -957,9 +1033,11 @@ public static class PsdReader
                 var g = new GroupLayer(rec.Name)
                 {
                     Opacity = rec.Opacity / 255f,
+                    FillOpacity = rec.FillOpacity / 255f,
                     Visible = rec.Visible,
                     BlendMode = MapBlend(rec.BlendKey, rec.Name, warnings),
                     PassThrough = rec.BlendKey == "pass",
+                    ClipToBelow = rec.Clipping,
                 };
                 ApplyMask(g, rec, docW, docH, warnings);
                 g.Effects.AddRange(rec.Effects);
@@ -981,6 +1059,12 @@ public static class PsdReader
                 // solid-colour fill layer: a shape when it carries a vector mask, else canvas-wide
                 layer = BuildSoCoLayer(rec, fillCol, docW, docH);
                 rec.VectorContours = null;   // coverage already baked into the layer alpha
+            }
+            else if (rec.AdjustmentDesc is { } adjDesc && rec.UnmappableKey is { } adjKey && (rec.W == 0 || rec.H == 0))
+            {
+                var adj = BuildAdjustmentLayer(rec, adjKey, adjDesc, warnings);
+                if (adj is null) continue;   // mapping failed → already warned, skip the layer
+                layer = adj;
             }
             else if (rec.UnmappableKey is not null && (rec.W == 0 || rec.H == 0))
             {
@@ -1084,10 +1168,58 @@ public static class PsdReader
         return t;
     }
 
-    /// <summary>A solid-colour fill layer: with a vector mask = a shape layer (colour × path
-    /// coverage, sized to the path bbox); without = a canvas-covering solid.</summary>
-    private static PixelLayer BuildSoCoLayer(LayerRecord rec, (byte r, byte g, byte b) c, int docW, int docH)
+    /// <summary>A solid-colour fill layer: with a single closed vector-mask contour = an editable
+    /// <see cref="PathLayer"/> (fill colour × bezier path); with multiple/open contours or no
+    /// preserved knots = a rasterised <see cref="PixelLayer"/> shaped to the path bbox; without
+    /// any vector mask = a canvas-covering solid.</summary>
+    private static Layer BuildSoCoLayer(LayerRecord rec, (byte r, byte g, byte b) c, int docW, int docH)
     {
+        // Bridge to an editable PathLayer when the vector mask is a single closed contour.
+        if (rec.VectorKnots is { Count: 1 } knots && knots[0].Closed && knots[0].Knots.Count >= 2)
+        {
+            var path = new PathLayer(knots[0].Knots.Select(k => new PathNode(
+                (float)k.Ax, (float)k.Ay,
+                (float)k.Ix, (float)k.Iy,
+                (float)k.Ox, (float)k.Oy)), true, c.r, c.g, c.b)
+            {
+                Name = rec.Name,
+                Opacity = rec.Opacity / 255f,
+                FillOpacity = rec.FillOpacity / 255f,
+                Visible = rec.Visible,
+                ClipToBelow = rec.Clipping,
+            };
+            rec.Notes.Clear();
+            rec.Notes.Add("solid-colour fill layer imported as editable shape");
+            return path;
+        }
+
+        // Multi-contour: when every contour is closed, bridge to a PathLayer whose primary
+        // sub-path is the first contour and the rest become ExtraContours (even-odd fill → holes).
+        if (rec.VectorKnots is { Count: > 1 } all && all.All(k => k.Closed) && all[0].Knots.Count >= 2)
+        {
+            var path = new PathLayer(all[0].Knots.Select(k => new PathNode(
+                (float)k.Ax, (float)k.Ay,
+                (float)k.Ix, (float)k.Iy,
+                (float)k.Ox, (float)k.Oy)), true, c.r, c.g, c.b)
+            {
+                Name = rec.Name,
+                Opacity = rec.Opacity / 255f,
+                FillOpacity = rec.FillOpacity / 255f,
+                Visible = rec.Visible,
+                ClipToBelow = rec.Clipping,
+            };
+            for (int i = 1; i < all.Count; i++)
+            {
+                path.ExtraContours.Add((all[i].Knots.Select(k => new PathNode(
+                    (float)k.Ax, (float)k.Ay,
+                    (float)k.Ix, (float)k.Iy,
+                    (float)k.Ox, (float)k.Oy)).ToList(), true));
+            }
+            rec.Notes.Clear();
+            rec.Notes.Add("solid-colour fill layer imported as editable shape (multi-contour)");
+            return path;
+        }
+
         if (rec.VectorContours is { } vc)
         {
             double minx = double.MaxValue, miny = double.MaxValue, maxx = double.MinValue, maxy = double.MinValue;
@@ -1139,6 +1271,259 @@ public static class PsdReader
             sp[i] = c.r; sp[i + 1] = c.g; sp[i + 2] = c.b; sp[i + 3] = 255;
         }
         return solid;
+    }
+
+    /// <summary>Map a PSD adjustment-layer descriptor onto an editable Sable
+    /// <see cref="AdjustmentLayer"/>. Returns null (with a warning) when the mapping fails or the
+    /// kind is not in <see cref="MappableAdjustmentKeys"/>. The layer keeps the PSD opacity /
+    /// visibility / clipping / mask like any other layer.</summary>
+    private static Layer? BuildAdjustmentLayer(LayerRecord rec, string key, PsDesc d, List<string> warnings)
+    {
+        AdjustmentLayer adj;
+        try
+        {
+            adj = key switch
+            {
+                "brit" => BuildBrightnessContrast(d),
+                "levl" => BuildLevels(d),
+                "curv" => BuildCurves(d),
+                "expA" => BuildExposure(d),
+                "vibA" => BuildVibrance(d),
+                "hue2" or "hue " => BuildHsl(d),
+                "blnc" => BuildColorBalance(d),
+                "blwh" => BuildBlackWhite(d),
+                "mixr" or "clrL" => BuildChannelMixer(d),
+                "nvrt" => new AdjustmentLayer(AdjustmentKind.Invert),
+                "post" => BuildPosterize(d),
+                "thrs" => BuildThreshold(d),
+                "grdm" => BuildGradientMap(d),
+                "phfl" => BuildPhotoFilter(d),
+                _ => null!,
+            };
+        }
+        catch
+        {
+            warnings.Add($"\"{rec.Name}\": {DescribeKey(key)} unreadable — skipped.");
+            return null;
+        }
+        if (adj is null)
+        {
+            warnings.Add($"\"{rec.Name}\": {DescribeKey(key)} skipped (no mapping).");
+            return null;
+        }
+
+        adj.Name = rec.Name;
+        adj.Opacity = rec.Opacity / 255f;
+        adj.FillOpacity = rec.FillOpacity / 255f;
+        adj.Visible = rec.Visible;
+        adj.ClipToBelow = rec.Clipping;
+        rec.Notes.Add("adjustment layer imported as editable");
+        return adj;
+    }
+
+    // ---- per-kind adjustment mappers (PS descriptor → Sable AdjustmentLayer params) ----
+
+    private static AdjustmentLayer BuildBrightnessContrast(PsDesc d)
+    {
+        // PS 'brit': Brightness (-100..100), Contrast (-100..100), useLegacy flag (we ignore legacy).
+        var a = new AdjustmentLayer(AdjustmentKind.BrightnessContrast)
+        {
+            Brightness = (float)d.Num("Brgh") / 100f,
+            Contrast = 1f + (float)d.Num("Cntr") / 100f,
+        };
+        return a;
+    }
+
+    private static AdjustmentLayer BuildLevels(PsDesc d)
+    {
+        // PS 'levl': Adjs list of channel descriptors; channel 0 = composite. InputBlack/White/Gamma.
+        var a = new AdjustmentLayer(AdjustmentKind.Levels);
+        var adjs = d.Items("Adjs");
+        var comp = adjs?.FirstOrDefault(o => o is PsDesc) as PsDesc;
+        if (comp is not null)
+        {
+            a.InBlack = (float)(comp.Num("Inpt") / 255.0);
+            a.InWhite = (float)(comp.Num("Whtp") / 255.0);
+            a.Gamma = (float)comp.Num("Gmm ", 1.0);
+        }
+        return a;
+    }
+
+    private static AdjustmentLayer BuildCurves(PsDesc d)
+    {
+        // PS 'curv': Adjs list, each with a channel id + a curve point list. Sable has 4 channels
+        // (0=RGB, 1=R, 2=G, 3=B); PS channel ids: 0=composite, 1=R, 2=G, 3=B.
+        var a = new AdjustmentLayer(AdjustmentKind.Curves);
+        var adjs = d.Items("Adjs");
+        if (adjs is null) return a;
+        foreach (var o in adjs)
+        {
+            if (o is not PsDesc ch) continue;
+            int id = (int)ch.Num("Chnl");
+            if (id is < 0 or > 3) continue;
+            if (ch.Items("Crv ") is not { } pts || pts.Count == 0) continue;
+            var curve = a.Curves[id];
+            curve.Clear();
+            foreach (var p in pts)
+            {
+                if (p is not PsDesc pt) continue;
+                // PS curve points: Hrz (0..255 input), Vrtc (0..255 output) → 0..1
+                curve.Add(((float)(pt.Num("Hrz") / 255.0), (float)(pt.Num("Vrtc") / 255.0)));
+            }
+            curve.Sort((x, y) => x.Item1.CompareTo(y.Item1));
+        }
+        return a;
+    }
+
+    private static AdjustmentLayer BuildExposure(PsDesc d)
+    {
+        // PS 'expA': exposure (stops), offset (small), gammaCorrection. Sable uses stops only.
+        return new AdjustmentLayer(AdjustmentKind.Exposure)
+        {
+            Exposure = (float)d.Num("Exps"),
+        };
+    }
+
+    private static AdjustmentLayer BuildVibrance(PsDesc d)
+    {
+        // PS 'vibA': Vibrance (-100..100), Saturation (-100..100).
+        return new AdjustmentLayer(AdjustmentKind.Vibrance)
+        {
+            Vibrance = (float)d.Num("Vibr") / 100f,
+        };
+    }
+
+    private static AdjustmentLayer BuildHsl(PsDesc d)
+    {
+        // PS 'hue2' (newer) / 'hue ' (legacy): Colorization + adjustment values. Hue is in degrees,
+        // Sat/Lightness in -100..100. Sable: HueShift in turns, Saturation 0..2, Lightness -1..1.
+        var a = new AdjustmentLayer(AdjustmentKind.Hsl);
+        // 'hue2' stores adjustments in an "Adjs" VlLs of channel descriptors; the composite (ch 0)
+        // carries H/S/L. 'hue ' stores them directly.
+        double h = 0, s = 0, l = 0;
+        if (d.Items("Adjs") is { } adjs)
+        {
+            var comp = adjs.FirstOrDefault(o => o is PsDesc) as PsDesc;
+            if (comp is not null) { h = comp.Num("H   "); s = comp.Num("Strt"); l = comp.Num("Lght"); }
+        }
+        else { h = d.Num("H   "); s = d.Num("Strt"); l = d.Num("Lght"); }
+        a.HueShift = (float)(h / 360.0);
+        a.Saturation = 1f + (float)(s / 100.0);
+        a.Lightness = (float)(l / 100.0);
+        return a;
+    }
+
+    private static AdjustmentLayer BuildColorBalance(PsDesc d)
+    {
+        // PS 'blnc': shadow/midtone/highlight R/G/B shifts (-100..100). Sable stores 9 floats
+        // (shadow R,G,B, mid R,G,B, highlight R,G,B) in -1..1.
+        var a = new AdjustmentLayer(AdjustmentKind.ColorBalance);
+        void Fill(int offset, PsDesc? range)
+        {
+            if (range is null) return;
+            a.ColorBalance[offset + 0] = (float)(range.Num("Rd  ") / 100.0);
+            a.ColorBalance[offset + 1] = (float)(range.Num("Grn ") / 100.0);
+            a.ColorBalance[offset + 2] = (float)(range.Num("Bl  ") / 100.0);
+        }
+        Fill(0, d.Obj("Sdw "));
+        Fill(3, d.Obj("Mdt "));
+        Fill(6, d.Obj("Hgh "));
+        return a;
+    }
+
+    private static AdjustmentLayer BuildBlackWhite(PsDesc d)
+    {
+        // PS 'blwh': per-channel weights (RdYlw, Grn, Cyn, Bl, Mgnt) + useTint/tint color.
+        // Sable uses R/G/B luminance weights; map the RGB ones directly.
+        return new AdjustmentLayer(AdjustmentKind.BlackWhite)
+        {
+            BwR = (float)(d.Num("Rd  ", 0.3) / 100.0),
+            BwG = (float)(d.Num("Grn ", 0.59) / 100.0),
+            BwB = (float)(d.Num("Bl  ", 0.11) / 100.0),
+        };
+    }
+
+    private static AdjustmentLayer BuildChannelMixer(PsDesc d)
+    {
+        // PS 'mixr': per-output-channel descriptors (R, G, B) each with R/G/B source percentages.
+        // Sable stores a 3×3 row-major matrix (outR = row0·rgb).
+        var a = new AdjustmentLayer(AdjustmentKind.ChannelMixer);
+        void Row(int row, string key)
+        {
+            if (d.Obj(key) is not { } ch) return;
+            a.ChannelMix[row * 3 + 0] = (float)(ch.Num("Rd  ") / 100.0);
+            a.ChannelMix[row * 3 + 1] = (float)(ch.Num("Grn ") / 100.0);
+            a.ChannelMix[row * 3 + 2] = (float)(ch.Num("Bl  ") / 100.0);
+        }
+        Row(0, "Rd  "); Row(1, "Grn "); Row(2, "Bl  ");
+        return a;
+    }
+
+    private static AdjustmentLayer BuildPosterize(PsDesc d)
+    {
+        // PS 'post': Levels (2..255).
+        return new AdjustmentLayer(AdjustmentKind.Posterize)
+        {
+            Posterize = (float)Math.Clamp(d.Num("Lvls", 6), 2, 255),
+        };
+    }
+
+    private static AdjustmentLayer BuildThreshold(PsDesc d)
+    {
+        // PS 'thrs': Level (1..255). Sable: 0..1 luminance cut.
+        return new AdjustmentLayer(AdjustmentKind.Threshold)
+        {
+            Threshold = (float)Math.Clamp(d.Num("Lvl ", 128), 0, 255) / 255f,
+        };
+    }
+
+    private static AdjustmentLayer BuildGradientMap(PsDesc d)
+    {
+        // PS 'grdm': a gradient descriptor with 'Clrs' stops (Color + Lctn 0..4096).
+        // Sable: GradientStops (Pos 0..1, R/G/B bytes).
+        var a = new AdjustmentLayer(AdjustmentKind.GradientMap);
+        if (d.Obj("Grad")?.Items("Clrs") is { } stops && stops.Count > 0)
+        {
+            a.GradientStops.Clear();
+            foreach (var s in stops)
+            {
+                if (s is not PsDesc st) continue;
+                if (st.Obj("Clr ") is not { } clr || DescColor(clr) is not { } rgb) continue;
+                double pos = st.Num("Lctn") / 4096.0;
+                a.GradientStops.Add(((float)pos, rgb.r, rgb.g, rgb.b));
+            }
+            a.GradientStops.Sort((x, y) => x.Pos.CompareTo(y.Pos));
+        }
+        return a;
+    }
+
+    /// <summary>PS 'phfl' (Photo Filter): a warming/cooling colour cast with a density. Sable has
+    /// no direct photo-filter kind, so it maps approximately to White Balance — the filter colour
+    /// hue drives temperature (warm=+temp, cool=−temp) and density scales the strength. Preserved
+    /// as an editable <see cref="AdjustmentKind.WhiteBalance"/> node.</summary>
+    private static AdjustmentLayer BuildPhotoFilter(PsDesc d)
+    {
+        // density 0..1, preserveLuminosity ignored (Sable WB has no Luma option).
+        double density = d.Num("Dens ", 0.25);
+        bool warm = true;
+        if (d.Obj("Clr ") is { } clr && DescColor(clr) is { } rgb)
+        {
+            // warm filters (R>B) → +temp; cool (B>R) → −temp. Tint from green bias.
+            warm = rgb.r >= rgb.b;
+        }
+        else if (d.EnumVal("FrgC") is { } preset)
+        {
+            warm = !preset.Contains("Cool") && !preset.Contains("cool");
+        }
+        float temp = (float)(warm ? density : -density);   // -1..1 (cool..warm)
+        float tint = 0f;
+        if (d.Obj("Clr ") is { } c2 && DescColor(c2) is { } rgb2)
+            tint = (float)Math.Clamp((rgb2.g - (rgb2.r + rgb2.b) / 2.0) / 128.0, -1, 1);
+        return new AdjustmentLayer(AdjustmentKind.WhiteBalance)
+        {
+            Temperature = temp,
+            Tint = tint,
+        };
     }
 
     /// <summary>Multiply the rasterised vector-mask coverage into the layer's mask (creating one
