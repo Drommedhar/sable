@@ -4318,7 +4318,8 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi);
+            DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi,
+                doc.IccProfile, doc.IccProfileName);
         }
         catch (System.Exception ex)
         {

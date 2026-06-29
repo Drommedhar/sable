@@ -93,8 +93,10 @@ public static class ImageCodec
     }
 
     /// <summary>Encode RGBA8 to bytes in the given format, optionally resized. quality 1..100 (PNG ignores it).
-    /// JPEG has no alpha → flattened over white.</summary>
-    public static byte[] EncodeScaled(ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality)
+    /// JPEG has no alpha → flattened over white. <paramref name="icc"/> = embedded ICC profile to write
+    /// (PNG iCCP / TIFF tag 34675); JPEG/WebP ICC embedding is a follow-up.</summary>
+    public static byte[] EncodeScaled(ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality,
+        byte[]? icc = null, string? iccName = null)
     {
         var info = new SKImageInfo(srcW, srcH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using var srcBmp = new SKBitmap(info);
@@ -120,7 +122,7 @@ public static class ImageCodec
         // TIFF: Skia has no TIFF writer — use the self-contained baseline encoder (uncompressed RGBA8).
         if (fmt == ImageFormat.Tiff)
         {
-            var tiffBytes = EncodeTiff(work.Width, work.Height, GetPixels(work));
+            var tiffBytes = EncodeTiff(work.Width, work.Height, GetPixels(work), icc);
             resized?.Dispose();
             flat?.Dispose();
             return tiffBytes;
@@ -137,6 +139,8 @@ public static class ImageCodec
         var bytes = data.ToArray();
         resized?.Dispose();
         flat?.Dispose();
+        if (fmt == ImageFormat.Png && icc is { Length: > 0 })
+            bytes = InjectPngIccp(bytes, icc, iccName ?? "ICC profile");
         return bytes;
     }
 
@@ -152,17 +156,20 @@ public static class ImageCodec
     /// <summary>Encode RGBA8 pixels as a baseline uncompressed TIFF (little-endian, RGBA, no compression).
     /// Widely readable by Photoshop/Affinity/GIMP/ImageMagick. No external dependency — pure byte
     /// assembly of the TIFF IFD + strip data (roadmap Workstream 6: TIFF export).</summary>
-    public static byte[] EncodeTiff(int width, int height, byte[] rgba)
+    public static byte[] EncodeTiff(int width, int height, byte[] rgba, byte[]? icc = null)
     {
-        // Layout: 8-byte header + IFD (12 entries) + out-of-line arrays + strip pixel data.
+        // Layout: 8-byte header + IFD + out-of-line arrays + (optional) ICC + strip pixel data.
         // Out-of-line: BitsPerSample (4 shorts), SampleFormat (4 shorts), XRes + YRes (2 rationals).
-        const int ifdEntries = 12;
+        bool hasIcc = icc is { Length: > 0 };
+        int ifdEntries = hasIcc ? 13 : 12;
         int headerLen = 8;
         int ifdLen = 2 + ifdEntries * 12 + 4;          // entry-count + entries + next-IFD (0)
         int bpsOffset = headerLen + ifdLen;             // 4 shorts (8 bytes)
         int sfOffset = bpsOffset + 8;                   // 4 shorts (8 bytes)
         int resOffset = sfOffset + 8;                   // 2 rationals = 4 longs (16 bytes)
-        int stripOffset = resOffset + 16;
+        int iccOffset = resOffset + 16;                 // ICC profile blob (when present)
+        int iccLen = hasIcc ? icc!.Length : 0;
+        int stripOffset = iccOffset + iccLen + (iccLen & 1);   // keep the strip on an even offset
         int stripBytes = width * height * 4;
 
         var ms = new System.IO.MemoryStream(stripOffset + stripBytes);
@@ -177,7 +184,7 @@ public static class ImageCodec
         W32(8);             // offset to first IFD
 
         // ---- IFD (entries must be sorted by tag) ----
-        W16(ifdEntries);
+        W16((ushort)ifdEntries);
         Entry(256, 3, 1, (uint)width);                 // ImageWidth (SHORT)
         Entry(257, 3, 1, (uint)height);                // ImageLength (SHORT)
         Entry(258, 3, 4, (uint)bpsOffset);             // BitsPerSample → 8,8,8,8
@@ -190,17 +197,82 @@ public static class ImageCodec
         Entry(282, 5, 1, (uint)resOffset);             // XResolution (RATIONAL → 72/1)
         Entry(283, 5, 1, (uint)(resOffset + 8));       // YResolution (RATIONAL → 72/1)
         Entry(339, 3, 4, (uint)sfOffset);              // SampleFormat → 1,1,1,2 (uint,uint,uint,alpha)
+        if (hasIcc) Entry(34675, 7, (uint)iccLen, (uint)iccOffset);   // ICCProfile (UNDEFINED) — sorts last
         W32(0);                                         // next IFD = 0
 
         // ---- out-of-line arrays ----
         ms.Position = bpsOffset; W16(8); W16(8); W16(8); W16(8);           // BitsPerSample
         ms.Position = sfOffset; W16(1); W16(1); W16(1); W16(2);            // SampleFormat
         ms.Position = resOffset; W32(72); W32(1); W32(72); W32(1);         // XRes 72/1, YRes 72/1
+        if (hasIcc) { ms.Position = iccOffset; ms.Write(icc!, 0, iccLen); }
 
         // ---- strip pixel data (RGBA8, top-down — TIFF stores top row first) ----
         ms.Position = stripOffset;
         ms.Write(rgba, 0, Math.Min(rgba.Length, stripBytes));
         return ms.ToArray();
+    }
+
+    /// <summary>Insert an <c>iCCP</c> chunk (embedded ICC profile, zlib-compressed) into a PNG byte
+    /// stream, right after the IHDR chunk. Returns the PNG unchanged when <paramref name="icc"/> is
+    /// empty or the input isn't a recognisable PNG.</summary>
+    public static byte[] InjectPngIccp(byte[] png, byte[]? icc, string profileName = "ICC profile")
+    {
+        if (icc is not { Length: > 0 } || png.Length < 8 + 12 + 13) return png;
+        // PNG sig (8) then IHDR chunk = len(4)+"IHDR"(4)+data(13)+crc(4) = 8 + 25.
+        int ihdrEnd = 8 + 4 + 4 + 13 + 4;
+        if (png[8 + 4] != 'I' || png[8 + 5] != 'H' || png[8 + 6] != 'D' || png[8 + 7] != 'R') return png;
+
+        // iCCP data: name (Latin-1, ≤79) + 0x00 + compression(0) + zlib(profile)
+        string name = string.IsNullOrEmpty(profileName) ? "ICC profile" : profileName;
+        if (name.Length > 79) name = name[..79];
+        byte[] nameBytes = System.Text.Encoding.Latin1.GetBytes(name);
+        byte[] zicc;
+        using (var z = new System.IO.MemoryStream())
+        {
+            using (var def = new System.IO.Compression.ZLibStream(z, System.IO.Compression.CompressionLevel.Optimal, true))
+                def.Write(icc, 0, icc.Length);
+            zicc = z.ToArray();
+        }
+        var data = new byte[nameBytes.Length + 2 + zicc.Length];
+        Array.Copy(nameBytes, data, nameBytes.Length);
+        data[nameBytes.Length] = 0;       // null terminator
+        data[nameBytes.Length + 1] = 0;   // compression method: 0 = zlib
+        Array.Copy(zicc, 0, data, nameBytes.Length + 2, zicc.Length);
+
+        var chunk = new byte[12 + data.Length];
+        WriteBE(chunk, 0, (uint)data.Length);
+        chunk[4] = (byte)'i'; chunk[5] = (byte)'C'; chunk[6] = (byte)'C'; chunk[7] = (byte)'P';
+        Array.Copy(data, 0, chunk, 8, data.Length);
+        WriteBE(chunk, 8 + data.Length, Crc32(chunk, 4, 4 + data.Length));   // CRC over type+data
+
+        var outp = new byte[png.Length + chunk.Length];
+        Array.Copy(png, 0, outp, 0, ihdrEnd);                       // sig + IHDR
+        Array.Copy(chunk, 0, outp, ihdrEnd, chunk.Length);          // iCCP
+        Array.Copy(png, ihdrEnd, outp, ihdrEnd + chunk.Length, png.Length - ihdrEnd);
+        return outp;
+    }
+
+    private static void WriteBE(byte[] b, int o, uint v)
+    { b[o] = (byte)(v >> 24); b[o + 1] = (byte)(v >> 16); b[o + 2] = (byte)(v >> 8); b[o + 3] = (byte)v; }
+
+    private static uint[]? _crcTable;
+    private static uint Crc32(byte[] data, int start, int end)
+    {
+        var t = _crcTable ??= BuildCrcTable();
+        uint c = 0xFFFFFFFF;
+        for (int i = start; i < end; i++) c = t[(c ^ data[i]) & 0xFF] ^ (c >> 8);
+        return c ^ 0xFFFFFFFF;
+    }
+    private static uint[] BuildCrcTable()
+    {
+        var t = new uint[256];
+        for (uint n = 0; n < 256; n++)
+        {
+            uint c = n;
+            for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+            t[n] = c;
+        }
+        return t;
     }
 
     /// <summary>Decode image bytes (PNG/JPEG/…) to RGBA8 sRGB, or null if undecodable (OS clipboard paste).</summary>

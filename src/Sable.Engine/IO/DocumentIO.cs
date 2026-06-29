@@ -27,7 +27,8 @@ public static class DocumentIO
 
     /// <summary>Export the flattened RGBA8 to a file in the chosen format, optionally resized (PLAN §16.12).
     /// <paramref name="dpi"/> &gt; 0 writes the physical resolution (PNG pHYs / JPEG JFIF density).</summary>
-    public static void Export(string path, ImageCodec.ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality, double dpi = 0)
+    public static void Export(string path, ImageCodec.ImageFormat fmt, int srcW, int srcH, byte[] rgba, int outW, int outH, int quality,
+        double dpi = 0, byte[]? icc = null, string? iccName = null)
         => System.IO.File.WriteAllBytes(path,
-            ImageMeta.ApplyDpi(ImageCodec.EncodeScaled(fmt, srcW, srcH, rgba, outW, outH, quality), fmt, dpi));
+            ImageMeta.ApplyDpi(ImageCodec.EncodeScaled(fmt, srcW, srcH, rgba, outW, outH, quality, icc, iccName), fmt, dpi));
 }

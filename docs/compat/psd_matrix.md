@@ -191,7 +191,7 @@ Mapped adjustments remain editable (sliders in `AdjustmentPanel`); round-trip in
 
 | Resource | Status |
 |---|---|
-| ICC profile (image resources) | **UNSUPPORTED** — colour mode data + image resources section skipped entirely; no profile preservation (roadmap Workstream 5) |
+| ICC profile (image resources) | **PARTIAL** — the embedded ICC profile (resource 1039) is now read into `Document.IccProfile` (+ best-effort `IccProfileName` from the 'desc'/'mluc' tag), preserved through edit, re-embedded on **PNG (iCCP)** + **TIFF (tag 34675)** export, and saved in `.sable`. NOT yet a colour-managed pipeline (working space stays sRGB float; no profile *conversion* / soft-proof). JPEG/WebP ICC embedding + PNG/JPEG *decode* ICC capture = follow-ups (roadmap Workstream 5). |
 | EXIF / IPTC / XMP | **UNSUPPORTED** — skipped |
 | Resolution (DPI) | **UNSUPPORTED** — not read from PSD (Sable has DPI on raster export via `ImageMeta`, not on PSD import) |
 

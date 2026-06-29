@@ -20,6 +20,7 @@ public static class PsdFixtures
     {
         private readonly MemoryStream _ms = new();
         public int Width, Height, Depth = 8, Channels = 3, Mode = 3;
+        public byte[]? ImageResources;   // image-resources section body (e.g. an ICC profile block)
 
         public byte[] Build(byte[]? layerInfo, byte[]? composite = null)
         {
@@ -27,7 +28,9 @@ public static class PsdFixtures
             for (int i = 0; i < 6; i++) _ms.WriteByte(0);
             W16((ushort)Channels); W32((uint)Height); W32((uint)Width);
             W16((ushort)Depth); W16((ushort)Mode);
-            W32(0); W32(0);
+            W32(0);   // colour mode data length
+            if (ImageResources is null) W32(0);
+            else { W32((uint)ImageResources.Length); _ms.Write(ImageResources); }
             if (layerInfo is null) W32(0);
             else { W32((uint)(4 + layerInfo.Length)); W32((uint)layerInfo.Length); _ms.Write(layerInfo); }
             if (composite is not null) _ms.Write(composite);
@@ -635,6 +638,55 @@ public static class PsdFixtures
         li.Add("TYPE", 4, 6, 20, 60, fill: (1, 1, 1, 255), tagged: Tagged("TySh", tysh.ToArray()));
         return new Builder { Width = 64, Height = 64 }.Build(li.Build());
     }
+
+    /// <summary>§10 (Workstream 5): a document with an embedded ICC profile in image-resource 1039.</summary>
+    public static byte[] IccTaggedDocument(string desc = "sRGB Test Profile")
+    {
+        var res = ImageResourceBlock((0x040F, SampleIccProfile(desc)));
+        var li = new Layers();
+        li.Add("Background", 0, 0, 4, 4, fill: (50, 60, 70, 255));
+        return new Builder { Width = 4, Height = 4, ImageResources = res }.Build(li.Build());
+    }
+
+    /// <summary>A minimal but structurally-valid ICC profile (≥128 B) carrying a single 'desc' tag,
+    /// so import can both round-trip the raw bytes and read the profile name.</summary>
+    public static byte[] SampleIccProfile(string desc = "sRGB Test Profile")
+    {
+        var ascii = Encoding.ASCII.GetBytes(desc + "\0");
+        int descCount = ascii.Length;
+        int descElemLen = 12 + descCount;            // 'desc' + reserved(4) + count(4) + ascii
+        int tagTableLen = 4 + 1 * 12;                // count + one tag entry
+        int descOffset = 128 + tagTableLen;
+        int total = descOffset + descElemLen;
+        var b = new byte[Math.Max(total, 132)];
+        WBE(b, 0, (uint)total);                       // profile size
+        b[36] = (byte)'a'; b[37] = (byte)'c'; b[38] = (byte)'s'; b[39] = (byte)'p';   // 'acsp' signature
+        WBE(b, 128, 1);                               // tag count
+        b[132] = (byte)'d'; b[133] = (byte)'e'; b[134] = (byte)'s'; b[135] = (byte)'c';
+        WBE(b, 136, (uint)descOffset); WBE(b, 140, (uint)descElemLen);
+        b[descOffset] = (byte)'d'; b[descOffset + 1] = (byte)'e'; b[descOffset + 2] = (byte)'s'; b[descOffset + 3] = (byte)'c';
+        WBE(b, descOffset + 8, (uint)descCount);
+        Array.Copy(ascii, 0, b, descOffset + 12, descCount);
+        return b;
+    }
+
+    private static byte[] ImageResourceBlock(params (ushort id, byte[] data)[] res)
+    {
+        using var ms = new MemoryStream();
+        foreach (var (id, data) in res)
+        {
+            ms.Write("8BIM"u8);
+            W16(ms, id);
+            ms.WriteByte(0); ms.WriteByte(0);   // empty Pascal name (len 0), padded to even
+            W32(ms, (uint)data.Length);
+            ms.Write(data);
+            if ((data.Length & 1) != 0) ms.WriteByte(0);
+        }
+        return ms.ToArray();
+    }
+
+    private static void WBE(byte[] b, int o, uint v)
+    { b[o] = (byte)(v >> 24); b[o + 1] = (byte)(v >> 16); b[o + 2] = (byte)(v >> 8); b[o + 3] = (byte)v; }
 
     /// <summary>§7: real vector mask composite (ch −3) → silently skipped.</summary>
     public static byte[] RealVectorMaskComposite()

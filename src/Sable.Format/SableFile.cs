@@ -43,6 +43,8 @@ public static class SableFile
         public List<float> GuidesX { get; set; } = new();
         public List<float> GuidesY { get; set; } = new();
         public string? SavedSelection { get; set; }   // zip entry name of the stored selection mask
+        public string? IccProfile { get; set; }       // zip entry name of the embedded ICC profile
+        public string? IccName { get; set; }           // human-readable profile description
     }
 
     private sealed class LayerDto
@@ -211,6 +213,7 @@ public static class SableFile
         dto.GuidesX.AddRange(doc.GuidesX);
         dto.GuidesY.AddRange(doc.GuidesY);
         if (doc.SavedSelection is { } sel) { dto.SavedSelection = "selection.raw"; WriteEntry(zip, dto.SavedSelection, sel); }
+        if (doc.IccProfile is { Length: > 0 } icc) { dto.IccProfile = "color.icc"; dto.IccName = doc.IccProfileName; WriteEntry(zip, dto.IccProfile, icc); }
         if (previewPng is { Length: > 0 })
         {
             var pe = zip.CreateEntry(PreviewEntry, CompressionLevel.NoCompression);   // PNG is already compressed
@@ -369,6 +372,14 @@ public static class SableFile
             using var es = se.Open();
             ReadFully(es, buf);
             doc.SavedSelection = buf;
+        }
+        if (dto.IccProfile is not null && zip.GetEntry(dto.IccProfile) is { } ie)
+        {
+            var buf = new byte[ie.Length];
+            using var es = ie.Open();
+            ReadFully(es, buf);
+            doc.IccProfile = buf;
+            doc.IccProfileName = dto.IccName;
         }
         foreach (var ld in dto.Layers)
             if (BuildLayer(ld, zip, dto.Width, dto.Height) is { } l) doc.Layers.Add(l);

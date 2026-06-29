@@ -56,9 +56,10 @@ public static class PsdReader
         if (depth == 16)
             warnings.Add("16-bit document converted to 8-bit.");
 
-        // ---- colour mode data + image resources: skip ----
+        // ---- colour mode data: skip ----
         r.Skip((int)r.U32());
-        r.Skip((int)r.U32());
+        // ---- image resources: scan for the embedded ICC profile (resource 1039), skip the rest ----
+        byte[]? icc = ParseImageResources(ref r, warnings);
 
         // ---- layer and mask info ----
         long lmiLen = r.U32();
@@ -97,6 +98,11 @@ public static class PsdReader
         r.Pos = lmiEnd;
 
         var doc = new Document(width, height);
+        if (icc is not null)
+        {
+            doc.IccProfile = icc;
+            doc.IccProfileName = IccDescription(icc);
+        }
 
         if (records.Count > 0)
         {
@@ -118,6 +124,76 @@ public static class PsdReader
     }
 
     // ------------------------------------------------------------------ parsing
+
+    /// <summary>Scan the image-resources section (a length-prefixed sequence of "8BIM" blocks) for
+    /// the embedded ICC profile (resource ID 1039 / 0x040F) and return its raw bytes; advances the
+    /// reader past the whole section. Every other resource is skipped. Robust to truncation.</summary>
+    private static byte[]? ParseImageResources(ref Reader r, List<string> warnings)
+    {
+        long len = r.U32();
+        long end = r.Pos + len;
+        if (len <= 0 || end > r.Bytes.Length) { r.Pos = Math.Min(end, r.Bytes.Length); return null; }
+        byte[]? icc = null;
+        while (r.Pos + 12 <= end)
+        {
+            if (r.ReadAscii(4) != "8BIM") break;       // out of sync → stop scanning
+            int id = r.U16();
+            // Pascal name: 1 length byte + bytes, padded so the (name+1) span is even.
+            int nameLen = r.U8();
+            r.Skip(nameLen);
+            if (((nameLen + 1) & 1) != 0) r.Skip(1);   // pad name field to even
+            long size = r.U32();
+            long dataStart = r.Pos;
+            long next = dataStart + size + (size & 1);   // data padded to even
+            if (next > end) break;
+            if (id == 0x040F && size > 0 && dataStart + size <= r.Bytes.Length)   // 1039 = ICC profile
+            {
+                icc = new byte[size];
+                Array.Copy(r.Bytes, dataStart, icc, 0, size);
+            }
+            r.Pos = next;
+        }
+        r.Pos = end;
+        if (icc is not null && icc.Length < 128) { warnings.Add("embedded colour profile too small — ignored."); icc = null; }
+        return icc;
+    }
+
+    /// <summary>Best-effort ICC profile name: the 'desc' tag's ASCII text (ICC profiles store a
+    /// human-readable description). Returns null when the tag table can't be read.</summary>
+    private static string? IccDescription(byte[] icc)
+    {
+        try
+        {
+            if (icc.Length < 132) return null;
+            int tagCount = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(128));
+            int p = 132;
+            for (int i = 0; i < tagCount && p + 12 <= icc.Length; i++, p += 12)
+            {
+                string sig = Encoding.ASCII.GetString(icc, p, 4);
+                int off = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(p + 4));
+                int size = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(p + 8));
+                if (sig != "desc" || off <= 0 || off + 12 > icc.Length) continue;
+                string type = Encoding.ASCII.GetString(icc, off, 4);
+                if (type == "desc")   // ICCv2 textDescriptionType: count(4) at off+8, ASCII at off+12
+                {
+                    int n = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(off + 8));
+                    n = Math.Max(0, Math.Min(n, Math.Min(size, icc.Length - off - 12)));
+                    return Encoding.ASCII.GetString(icc, off + 12, n).TrimEnd('\0', ' ');
+                }
+                if (type == "mluc" && off + 28 <= icc.Length)   // ICCv4 multiLocalizedUnicodeType (UTF-16BE)
+                {
+                    int recs = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(off + 8));
+                    if (recs <= 0) return null;
+                    int sLen = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(off + 20));
+                    int sOff = (int)BinaryPrimitives.ReadUInt32BigEndian(icc.AsSpan(off + 24));
+                    if (sOff <= 0 || off + sOff + sLen > icc.Length) return null;
+                    return Encoding.BigEndianUnicode.GetString(icc, off + sOff, sLen).TrimEnd('\0', ' ');
+                }
+            }
+        }
+        catch { /* malformed profile → no name */ }
+        return null;
+    }
 
     private sealed class ChannelData
     {

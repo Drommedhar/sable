@@ -20,6 +20,17 @@ public sealed class Document
     /// pipeline lands incrementally (bit-depth milestone, PLAN §6).</summary>
     public BitDepth Depth { get; set; } = BitDepth.Eight;
 
+    /// <summary>Embedded ICC colour profile (raw bytes) carried through import → edit → export so a
+    /// colour-managed document keeps its profile (roadmap Workstream 5). Null = untagged (assume sRGB).
+    /// Captured from PSD image-resource 1039; re-embedded on PNG (iCCP) / TIFF (tag 34675) export and
+    /// persisted in <c>.sable</c>. The working pipeline stays linear-float sRGB; this is metadata
+    /// preservation, not yet a conversion pipeline.</summary>
+    public byte[]? IccProfile { get; set; }
+
+    /// <summary>Human-readable profile name (e.g. "sRGB IEC61966-2.1"), for the title bar / report.
+    /// Best-effort; may be null even when <see cref="IccProfile"/> is set.</summary>
+    public string? IccProfileName { get; set; }
+
     /// <summary>A stored selection coverage mask (Select ▸ Save/Load Selection, PLAN §3). Doc-sized.</summary>
     public byte[]? SavedSelection { get; set; }
 
