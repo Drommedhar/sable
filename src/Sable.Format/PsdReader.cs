@@ -519,37 +519,9 @@ public static class PsdReader
     /// missing-font toast still warns the user).</summary>
     internal static (string family, bool bold, bool italic) MapPsFont(string psName)
     {
-        bool bold = psName.Contains("Bold", StringComparison.OrdinalIgnoreCase)
-                 || psName.Contains("Black", StringComparison.OrdinalIgnoreCase)
-                 || psName.Contains("Heavy", StringComparison.OrdinalIgnoreCase);
-        bool italic = psName.Contains("Italic", StringComparison.OrdinalIgnoreCase)
-                   || psName.Contains("Oblique", StringComparison.OrdinalIgnoreCase);
-
-        static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).ToArray());
-        var n = Norm(psName).ToLowerInvariant();
-
-        string best = "";
-        try
-        {
-            foreach (var fam in Sable.Imaging.TextRaster.Families())
-            {
-                var nf = Norm(fam).ToLowerInvariant();
-                if (nf.Length >= 3 && n.StartsWith(nf) && nf.Length > Norm(best).Length)
-                    best = fam;
-            }
-        }
-        catch { /* no font system (headless) → heuristic below */ }
-        if (best.Length > 0) return (best, bold, italic);
-
-        // heuristic: base name before '-', camel-case split ("OpenSans" → "Open Sans")
-        var baseName = psName.Split('-')[0];
-        var sb = new StringBuilder(baseName.Length + 4);
-        for (int i = 0; i < baseName.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(baseName[i]) && char.IsLower(baseName[i - 1])) sb.Append(' ');
-            sb.Append(baseName[i]);
-        }
-        return (sb.ToString(), bold, italic);
+        var (bold, italic) = FontMatcher.StyleFlags(psName);
+        try { return (FontMatcher.Resolve(psName, Sable.Imaging.TextRaster.Families(), out _), bold, italic); }
+        catch { return (FontMatcher.Humanize(psName), bold, italic); }   // no font system (headless)
     }
 
     /// <summary>EngineData: Photoshop's PostScript-style text blob

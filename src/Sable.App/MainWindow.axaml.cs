@@ -600,7 +600,8 @@ public partial class MainWindow : Window
         var doc = PsdReader.Load(path, out var warnings, out var fonts);
         var tab = OpenInNewTab(doc, null, System.IO.Path.GetFileName(path), path);
 
-        var missing = fonts.Where(f => !FontInstalled(f)).ToList();
+        var families = Sable.Imaging.TextRaster.Families();
+        var missing = fonts.Where(f => !FontMatcher.IsInstalled(f, families)).ToList();
         var report = CompatibilityReport.Build(System.IO.Path.GetFileName(path), warnings, fonts);
         report.MissingFonts.AddRange(missing);
         tab.CompatibilityReport = report;
@@ -616,21 +617,6 @@ public partial class MainWindow : Window
                 Loc.T("compatReport.viewReport"), () => ShowCompatibilityReport(tab));
         }
         return tab;
-    }
-
-    /// <summary>Loose match of a PSD PostScript font name ("OpenSans-Bold") against installed
-    /// family names ("Open Sans") — alphanumeric-normalised family must prefix the PS name.</summary>
-    private static bool FontInstalled(string psName)
-    {
-        static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).ToArray());
-        var n = Norm(psName).ToLowerInvariant();
-        if (n.Length == 0) return true;   // unparseable → don't cry wolf
-        foreach (var fam in Sable.Imaging.TextRaster.Families())
-        {
-            var nf = Norm(fam).ToLowerInvariant();
-            if (nf.Length >= 3 && n.StartsWith(nf)) return true;
-        }
-        return false;
     }
 
     private void OpenLaunchArgs()
