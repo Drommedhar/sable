@@ -80,6 +80,9 @@ public partial class SettingsWindow : Window
         UndoSlider.Value = _s.UndoLimit;
         UndoLabel.Text = _s.UndoLimit.ToString();
         RendererLabel.Text = gpuName;
+        AutosaveSwitch.IsChecked = _s.AutosaveEnabled;
+        AutosaveSlider.Value = System.Math.Clamp(_s.AutosaveMinutes, 1, 60);
+        AutosaveLabel.Text = _s.AutosaveMinutes.ToString();
         // Machine Learning
         AiEnabledSwitch.IsChecked = _s.AiEnabled;
         GenerativeEnabledSwitch.IsChecked = _s.GenerativeAiEnabled;
@@ -167,6 +170,11 @@ public partial class SettingsWindow : Window
     private void OnUndoSlider(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         if (UndoLabel is not null) UndoLabel.Text = ((int)UndoSlider.Value).ToString();
+    }
+
+    private void OnAutosaveSlider(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (AutosaveLabel is not null) AutosaveLabel.Text = ((int)AutosaveSlider.Value).ToString();
     }
 
     // ===== Machine Learning: enable → auto licence-cycle + install (PHASE8_AI) =====
@@ -513,6 +521,8 @@ public partial class SettingsWindow : Window
         _s.ShowWelcomeScreen = WelcomeSwitch.IsChecked == true;
         _s.AccentColor = NormHex(AccentField.Hex, _s.AccentColor);
         _s.UndoLimit = (int)UndoSlider.Value;
+        _s.AutosaveEnabled = AutosaveSwitch.IsChecked == true;
+        _s.AutosaveMinutes = System.Math.Clamp((int)AutosaveSlider.Value, 1, 60);
         _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.GenerativeAiEnabled = GenerativeEnabledSwitch.IsChecked == true;
         _s.SmartSelectQuality = (SmartSelectQuality)System.Math.Clamp(SmartSelectCombo.SelectedIndex, 0, 3);
@@ -561,6 +571,29 @@ public partial class SettingsWindow : Window
             content.Children.Add(reset);
             KeyRows.Children.Add(new SettingRow { Label = c.Label, Content = content });
         }
+
+        if (KeymapPresetCombo.ItemCount == 0)
+        {
+            foreach (var p in KeymapPresets.All) KeymapPresetCombo.Items.Add(new ComboBoxItem { Content = p.Name });
+            KeymapPresetCombo.SelectedIndex = 0;
+        }
+    }
+
+    /// <summary>Apply the selected migration preset to the working key map (overwrites every command's
+    /// gesture; the user can still tweak individual rows before OK).</summary>
+    private void OnApplyKeymapPreset(object? sender, RoutedEventArgs e)
+    {
+        int i = KeymapPresetCombo.SelectedIndex;
+        if (i < 0 || i >= KeymapPresets.All.Count) return;
+        var preset = KeymapPresets.All[i];
+        foreach (var c in KeyCommands.Catalog)
+        {
+            var g = KeymapPresets.GestureFor(preset, c.Id);
+            _workKeys[c.Id] = g;
+            if (_keyBoxes.TryGetValue(c.Id, out var box)) box.Text = g;
+        }
+        KeyWarn.Text = Loc.T("settingsWindow.presetApplied", preset.Name);
+        KeyWarn.IsVisible = true;
     }
 
     /// <summary>Capture the pressed chord as a gesture; tunnel so the read-only box never types.</summary>

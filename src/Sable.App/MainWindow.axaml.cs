@@ -639,6 +639,7 @@ public partial class MainWindow : Window
             UpdateEmptyState();     // welcome-screen toggle may have changed
             RebuildKeyGestures();   // pick up any rebound hotkeys
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
+            StartAutosave();   // pick up an edited autosave interval / toggle without a restart
         }
         // AI enable + model installs (+ GPU runtime + ComfyUI sources) happen LIVE inside the ML panel. Drop
         // any built backend so the next AI op rebuilds it — picking up a newly installed model / source.
@@ -1287,6 +1288,10 @@ public partial class MainWindow : Window
 
     private void StartAutosave()
     {
+        // (Re)build the timer from current settings — also called after Preferences so an edited
+        // interval / disabled toggle takes effect live, without a restart.
+        _autosaveTimer?.Stop();
+        _autosaveTimer = null;
         if (!_settings.AutosaveEnabled) return;
         int mins = System.Math.Clamp(_settings.AutosaveMinutes, 1, 120);
         _autosaveTimer = new Avalonia.Threading.DispatcherTimer
@@ -3364,6 +3369,7 @@ public partial class MainWindow : Window
             (Loc.T("menu.file.save"), () => OnSaveSable(null, _e)),
             (Loc.T("menu.file.saveAs"), () => OnSaveAsSable(null, _e)),
             (Loc.T("menu.file.export"), () => OnExport(null, _e)),
+            (Loc.T("menu.file.exportAssets"), () => OnBatchExport(null, _e)),
             (Loc.T("menu.edit.undo"), () => Doc?.Undo.Undo()),
             (Loc.T("menu.edit.redo"), () => Doc?.Undo.Redo()),
             (Loc.T("menu.edit.copy"), () => OnCopy(null, _e)),
@@ -4339,5 +4345,56 @@ public partial class MainWindow : Window
         {
             await ConfirmWindow.Ask(this, Loc.T("mainWindow.exportErrorTitle"), Loc.T("mainWindow.exportError", ex.Message));
         }
+    }
+
+    /// <summary>Batch asset export (ROADMAP P3): render each chosen top-level layer at each chosen
+    /// scale variant and write one file per (layer × scale) into the output folder.</summary>
+    private async void OnBatchExport(object? sender, RoutedEventArgs e)
+    {
+        if (Canvas.Document is not { } doc) return;
+        var top = doc.Layers.ToList();   // top-level layers (groups export as their flattened composite)
+        if (top.Count == 0) return;
+
+        var dlg = new BatchExportDialog(top);
+        if (!await dlg.ShowDialog<bool>(this)) return;
+
+        string ext = ImageCodec.Extension(dlg.Format);
+
+        // Build the full (layer, scale) job list + disambiguate colliding file names up front.
+        var jobs = new System.Collections.Generic.List<(Sable.Engine.Layers.Layer Layer, Sable.Engine.IO.ScaleVariant Scale, string Name)>();
+        foreach (var layer in dlg.SelectedLayers)
+            foreach (var scale in dlg.Scales)
+                jobs.Add((layer, scale, Sable.Engine.IO.AssetExport.BuildFileName(layer.Name, scale.Suffix, ext)));
+        var names = Sable.Engine.IO.AssetExport.UniqueNames(jobs.Select(j => j.Name).ToList());
+
+        int written = 0, failed = 0;
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            var (layer, scale, _) = jobs[i];
+            try
+            {
+                if (Canvas.RenderLayersToPixels(new System.Collections.Generic.List<Sable.Engine.Layers.Layer> { layer }) is not { } rgba)
+                { failed++; continue; }
+
+                int sw = doc.Width, sh = doc.Height;
+                if (dlg.Trim && Sable.Engine.IO.AssetExport.AlphaBounds(rgba, sw, sh, out int bx, out int by, out int bw, out int bh))
+                {
+                    rgba = Sable.Engine.IO.AssetExport.Crop(rgba, sw, sh, bx, by, bw, bh);
+                    sw = bw; sh = bh;
+                }
+
+                int ow = System.Math.Max(1, sw * scale.Percent / 100);
+                int oh = System.Math.Max(1, sh * scale.Percent / 100);
+                var path = System.IO.Path.Combine(dlg.Folder, names[i]);
+                Sable.Engine.IO.DocumentIO.Export(path, dlg.Format, sw, sh, rgba, ow, oh, dlg.Quality, doc.Dpi,
+                    doc.IccProfile, doc.IccProfileName);
+                written++;
+            }
+            catch { failed++; }
+        }
+
+        ShowToast(Loc.T("batchExport.doneTitle"),
+            failed == 0 ? Loc.T("batchExport.done", written, dlg.Folder)
+                        : Loc.T("batchExport.doneWithErrors", written, failed));
     }
 }

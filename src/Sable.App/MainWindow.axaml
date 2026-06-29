@@ -68,6 +68,7 @@
                 <MenuItem x:Name="FileCloseOthersItem" Header="{loc:Loc menu.file.closeOthers}" Click="OnCloseOthers" />
                 <Separator />
                 <MenuItem x:Name="FileExportItem" Header="{loc:Loc menu.file.export}" Click="OnExport" />
+                <MenuItem x:Name="FileExportAssetsItem" Header="{loc:Loc menu.file.exportAssets}" Click="OnBatchExport" />
             </MenuItem>
             <MenuItem Header="{loc:Loc menu.edit}">
                 <MenuItem Header="{loc:Loc menu.edit.undo}" Command="{Binding UndoEditCommand}" InputGesture="Ctrl+Z" Tag="edit.undo" />

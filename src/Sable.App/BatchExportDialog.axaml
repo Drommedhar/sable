@@ -1,0 +1,78 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.BatchExportDialog"
+        Width="520" Height="560"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc batchExport.title}">
+    <Border Padding="14">
+        <DockPanel LastChildFill="True">
+
+            <!-- buttons (bottom) -->
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+                <Button Content="{loc:Loc batchExport.cancel}" Classes="opt" Padding="14,0" Click="OnCancel" />
+                <Button x:Name="ExportButton" Content="{loc:Loc batchExport.export}" Classes="opt" Padding="14,0" Click="OnExport" />
+            </StackPanel>
+
+            <StackPanel Spacing="12">
+                <TextBlock Text="{loc:Loc batchExport.title}" Classes="panelHeader" Padding="0" />
+
+                <!-- output folder -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{loc:Loc batchExport.folder}" Classes="adjLabel" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBox Grid.Column="0" x:Name="FolderBox" IsReadOnly="True" />
+                        <Button Grid.Column="1" Content="{loc:Loc batchExport.browse}" Classes="opt" Padding="12,0" Click="OnBrowse" />
+                    </Grid>
+                </StackPanel>
+
+                <!-- format + quality -->
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="{loc:Loc batchExport.format}" Classes="adjLabel" />
+                        <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="OnFormatChanged">
+                            <ComboBoxItem>PNG</ComboBoxItem>
+                            <ComboBoxItem>JPEG</ComboBoxItem>
+                            <ComboBoxItem>WebP</ComboBoxItem>
+                            <ComboBoxItem>TIFF</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" x:Name="QualityRow" Spacing="4" IsVisible="False">
+                        <TextBlock x:Name="QualityLabel" Text="{loc:Loc batchExport.quality90}" Classes="adjLabel" />
+                        <Slider x:Name="QualitySlider" Minimum="1" Maximum="100" Value="90" ValueChanged="OnQuality" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- scale variants -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{loc:Loc batchExport.sizes}" Classes="adjLabel" />
+                    <StackPanel Orientation="Horizontal" Spacing="14">
+                        <CheckBox x:Name="Scale05" Content="0.5x" />
+                        <CheckBox x:Name="Scale1" Content="1x" IsChecked="True" />
+                        <CheckBox x:Name="Scale2" Content="2x" />
+                        <CheckBox x:Name="Scale3" Content="3x" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- trim -->
+                <CheckBox x:Name="TrimCheck" Content="{loc:Loc batchExport.trim}" IsChecked="True" />
+
+                <!-- layers -->
+                <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                        <TextBlock Grid.Column="0" Text="{loc:Loc batchExport.layers}" Classes="adjLabel" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="{loc:Loc batchExport.all}" Classes="opt" Padding="10,0" Click="OnSelectAll" />
+                        <Button Grid.Column="2" Content="{loc:Loc batchExport.none}" Classes="opt" Padding="10,0" Margin="6,0,0,0" Click="OnSelectNone" />
+                    </Grid>
+                    <Border Background="{DynamicResource ChromeCanvas}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1" CornerRadius="3" Height="180">
+                        <ScrollViewer>
+                            <StackPanel x:Name="LayerList" Margin="8" Spacing="4" />
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </DockPanel>
+    </Border>
+</Window>
