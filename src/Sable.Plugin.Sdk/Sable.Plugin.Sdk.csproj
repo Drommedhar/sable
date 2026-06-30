@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The plugin SDK is versioned independently of the app (see SdkVersion.cs). -->
+    <Title>Sable Plugin SDK</Title>
+    <Description>Stable, capability-based contracts third-party Sable plugins build against. References only the BCL — no engine internals (PLUGIN_SDK_PLAN.md §8.3).</Description>
+  </PropertyGroup>
+
+</Project>

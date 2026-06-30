@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Title>Sable Plugin Host</Title>
+    <Description>Host-side plugin discovery, manifest validation, assembly loading, registry, and per-plugin exception isolation. Engine-backed IHostContext implementations are wired by the app.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Plugin.Sdk\Sable.Plugin.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>
