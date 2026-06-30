@@ -213,6 +213,17 @@
     "done": "{0} Datei(en) nach {1} exportiert.",
     "doneWithErrors": "{0} Datei(en) exportiert, {1} fehlgeschlagen."
   },
+  "pluginManager": {
+    "title": "Plugins",
+    "reload": "Neu laden",
+    "close": "Schließen",
+    "log": "Protokoll",
+    "empty": "Keine Plugins installiert. Lege einen Plugin-Ordner im Plugins-Verzeichnis ab und klicke auf Neu laden.",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren",
+    "crashes": "{0} Absturz/Abstürze",
+    "capabilities": "Fähigkeiten: {0}"
+  },
   "historyWindow": {
     "history": "Verlauf",
     "addSnapshot": "Schnappschuss hinzufügen",
@@ -324,6 +335,7 @@
     "panelLayers": "Ebenen-Panel",
     "contextTaskBar": "Kontext-Aktionsleiste",
     "plugins": "_Plugins",
+    "managePlugins": "Plugins verwalten…",
     "noPluginsLoaded": "Keine Plugins geladen",
     "help": "_Hilfe",
     "keyboardShortcuts": "Tastaturkürzel...",

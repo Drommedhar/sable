@@ -1292,6 +1292,8 @@ public partial class MainWindow : Window
     private Sable.Plugins.PluginLogHub? _pluginLog;
     private Sable.Plugins.Engine.LayerHandles? _layerHandles;
     private readonly List<Sable.Plugin.Sdk.Commands.PluginCommand> _pluginCommands = new();
+    private string _pluginsDir = "";
+    private PluginsManagerWindow? _pluginsManagerWindow;
 
     private static string PluginDataDir(string sub) =>
         System.IO.Path.Combine(
@@ -1320,7 +1322,8 @@ public partial class MainWindow : Window
             state, _layerHandles, _exportRegistry,
             new AppCommandApi(RegisterPluginCommand), new AppMenuApi(AddPluginMenuItem));
 
-        string pluginsDir = PluginDataDir("plugins");
+        _pluginsDir = PluginDataDir("plugins");
+        string pluginsDir = _pluginsDir;
         string settingsDir = PluginDataDir("plugin-settings");
         _pluginManager = new Sable.Plugins.PluginManager(pluginsDir, _pluginLog.For("host"),
             p => Sable.Plugins.HostContextFactory.Create(
@@ -1336,6 +1339,15 @@ public partial class MainWindow : Window
         catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
 
         PluginsMenu.IsVisible = true;
+    }
+
+    private void OnManagePlugins(object? sender, RoutedEventArgs e)
+    {
+        if (_pluginManager is null || _pluginLog is null) return;
+        if (_pluginsManagerWindow is { } w) { w.Activate(); return; }
+        _pluginsManagerWindow = new PluginsManagerWindow(_pluginManager, _pluginLog, _pluginsDir);
+        _pluginsManagerWindow.Closed += (_, _) => _pluginsManagerWindow = null;
+        _pluginsManagerWindow.Show(this);
     }
 
     private void RegisterPluginCommand(Sable.Plugin.Sdk.Commands.PluginCommand command)

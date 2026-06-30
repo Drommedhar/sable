@@ -209,6 +209,8 @@
                 <MenuItem x:Name="ContextBarItem" Header="{loc:Loc mainWindow.contextTaskBar}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleContextBar" />
             </MenuItem>
             <MenuItem Header="{loc:Loc mainWindow.plugins}" x:Name="PluginsMenu" IsVisible="False">
+                <MenuItem Header="{loc:Loc mainWindow.managePlugins}" Click="OnManagePlugins" />
+                <Separator />
                 <MenuItem x:Name="PluginsEmptyItem" Header="{loc:Loc mainWindow.noPluginsLoaded}" IsEnabled="False" />
             </MenuItem>
             <MenuItem Header="{loc:Loc mainWindow.help}">

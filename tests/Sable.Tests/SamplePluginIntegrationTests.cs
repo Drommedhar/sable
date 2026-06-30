@@ -111,6 +111,43 @@ public sealed class SamplePluginIntegrationTests
     }
 
     [Fact]
+    public void Sample_plugin_loads_from_disk_via_LoadAll()
+    {
+        // Lay the built sample DLL + a manifest into a temp plugins/<name>/ dir, then load it the
+        // real way (discovery → collectible ALC → activate), not via AddBuiltIn.
+        var dll = typeof(SamplePlugin.SamplePlugin).Assembly.Location;
+        var root = Path.Combine(Path.GetTempPath(), "sable_disk_" + Guid.NewGuid().ToString("N"));
+        var pdir = Path.Combine(root, "sample");
+        Directory.CreateDirectory(pdir);
+        File.Copy(dll, Path.Combine(pdir, Path.GetFileName(dll)));
+        File.WriteAllText(Path.Combine(pdir, "manifest.json"), """
+        {
+          "id": "com.sable.sample",
+          "name": "Sample",
+          "version": "1.0.0",
+          "sdk_version": "1",
+          "entrypoint": "Sable.SamplePlugin.SamplePlugin",
+          "capabilities": ["document.read","command.register","ui.menu_command","export.provider"],
+          "permissions": { "filesystem_read": "none", "filesystem_write": "none", "network": false, "gpu": false }
+        }
+        """);
+
+        var doc = new Document(32, 32);
+        var export = new ExportRegistry();
+        var cmds = new CollectingCommands();
+        var log = new PluginLogHub();
+        var state = new EngineHostState { ActiveDocument = () => doc, ActiveUndo = () => new UndoStack() };
+        var services = SableHostServices.Build(state, new LayerHandles(), export, cmds, new CollectingMenus());
+        var mgr = new PluginManager(root, log.For("host"),
+            p => HostContextFactory.Create(p, services, log.For(p.Id), new PluginSettingsStore(Path.GetTempPath(), p.Id)));
+
+        int activated = mgr.LoadAll();
+        Assert.Equal(1, activated);
+        Assert.NotNull(export.ById("ppm"));
+        Assert.Single(cmds.Commands);
+    }
+
+    [Fact]
     public void Ppm_exporter_writes_a_valid_P6_header_and_drops_alpha()
     {
         var img = new ExportImage { Width = 2, Height = 1, Rgba = new byte[] { 10, 20, 30, 255, 40, 50, 60, 0 } };

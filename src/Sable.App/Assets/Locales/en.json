@@ -213,6 +213,17 @@
     "done": "Exported {0} file(s) to {1}.",
     "doneWithErrors": "Exported {0} file(s), {1} failed."
   },
+  "pluginManager": {
+    "title": "Plugins",
+    "reload": "Reload",
+    "close": "Close",
+    "log": "Log",
+    "empty": "No plugins installed. Drop a plugin folder into the plugins directory and click Reload.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "crashes": "{0} crash(es)",
+    "capabilities": "Capabilities: {0}"
+  },
   "historyWindow": {
     "history": "History",
     "addSnapshot": "Add Snapshot",
@@ -324,6 +335,7 @@
     "panelLayers": "Layers Panel",
     "contextTaskBar": "Contextual Task Bar",
     "plugins": "_Plugins",
+    "managePlugins": "Manage Plugins…",
     "noPluginsLoaded": "No plugins loaded",
     "help": "_Help",
     "keyboardShortcuts": "Keyboard Shortcuts...",
