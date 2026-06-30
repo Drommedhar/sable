@@ -311,12 +311,9 @@ sub-menus.
 
 ### 6.8 Export — `host.Export` (`export.provider`)
 
-Implement `IExportProvider` and register it; the host collects it in its **export registry**.
-
-> Status: registration is fully wired (the host builds the registry with its built-in formats and
-> your provider is added to it). **Surfacing plugin formats in the Export dialog is being
-> finalized** — until then a registered provider is reachable to the host (and verified by tests)
-> but may not yet show in the Export UI. The contract below is stable.
+Implement `IExportProvider` and register it; your format then appears in the **Export** and
+**Export Assets** dialogs alongside the built-in formats. The host renders the (scaled) composite
+and calls your `Encode`.
 
 ```csharp
 public sealed class MyExporter : IExportProvider
@@ -412,5 +409,5 @@ See [`samples/Sable.SamplePlugin`](../../samples/Sable.SamplePlugin):
 
 Build it, copy `Sable.SamplePlugin.dll` + `manifest.json` into
 `…/Sable/plugins/sample/`, enable plugins, and you'll find **Report Active Document** in the
-command palette and under **Plugins ▸ Sample**. The `PpmExportProvider` registers with the host's
-export registry (see the §6.8 status note on Export-dialog surfacing).
+command palette and under **Plugins ▸ Sample**, plus **Portable Pixmap (PPM)** as a choice in the
+Export and Export Assets dialogs.

@@ -1306,8 +1306,7 @@ public partial class MainWindow : Window
     {
         if (!_settings.PluginsEnabled || _pluginManager is not null) return;
 
-        _exportRegistry = new Sable.Plugins.ExportRegistry();
-        Sable.Plugins.Engine.BuiltInExporters.RegisterAll(_exportRegistry);
+        EnsureExportRegistry();   // built-ins; plugins add their formats to the same registry
         _pluginLog = new Sable.Plugins.PluginLogHub(
             e => System.Diagnostics.Debug.WriteLine($"[plugin {e.PluginId}] {e.Level}: {e.Message}"));
         _layerHandles = new Sable.Plugins.Engine.LayerHandles();
@@ -4426,37 +4425,68 @@ public partial class MainWindow : Window
     {
         if (Canvas.Document is not { } doc || Canvas.ReadComposite() is not { } rgba) return;
 
-        var dlg = new ExportDialog(doc.Width, doc.Height, rgba);
+        var dlg = new ExportDialog(doc.Width, doc.Height, rgba, PluginExporters());
         if (!await dlg.ShowDialog<bool>(this)) return;
 
-        string ext = ImageCodec.Extension(dlg.Format);
+        string ext = dlg.PluginProvider?.Extension ?? ImageCodec.Extension(dlg.Format);
+        string typeName = dlg.PluginProvider?.Label ?? dlg.Format.ToString();
         string baseName = System.IO.Path.GetFileNameWithoutExtension(_activeTab?.Title ?? Loc.T("mainWindow.untitledFile"));
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.T("mainWindow.exportTitle"),
             SuggestedFileName = $"{baseName}.{ext}",
             DefaultExtension = ext,
-            FileTypeChoices = new[] { new FilePickerFileType(dlg.Format.ToString()) { Patterns = new[] { "*." + ext } } }
+            FileTypeChoices = new[] { new FilePickerFileType(typeName) { Patterns = new[] { "*." + ext } } }
         });
 
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            int depthBits = (int)doc.Depth;
-            if (depthBits >= 16 && dlg.Format is ImageCodec.ImageFormat.Png or ImageCodec.ImageFormat.Tiff
-                && Canvas.ReadCompositeFloats() is { } rgbaF)
-                DocumentIO.ExportFloat(path, dlg.Format, doc.Width, doc.Height, rgbaF, dlg.OutW, dlg.OutH, dlg.Quality, depthBits, doc.Dpi,
-                    doc.IccProfile, doc.IccProfileName);
+            if (dlg.PluginProvider is { } prov)
+            {
+                // Plugin format: hand it the (scaled) RGBA8 composite. Built-in 16-bit/ICC path is unaffected.
+                var scaled = ImageCodec.ResizeRgba(rgba, doc.Width, doc.Height, dlg.OutW, dlg.OutH);
+                var bytes = prov.Encode(
+                    new Sable.Plugin.Sdk.Export.ExportImage { Width = dlg.OutW, Height = dlg.OutH, Rgba = scaled },
+                    new Sable.Plugin.Sdk.Export.ExportOptions { Quality = dlg.Quality, IccProfile = doc.IccProfile, IccProfileName = doc.IccProfileName });
+                System.IO.File.WriteAllBytes(path, bytes);
+            }
             else
-                DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi,
-                    doc.IccProfile, doc.IccProfileName);
+            {
+                int depthBits = (int)doc.Depth;
+                if (depthBits >= 16 && dlg.Format is ImageCodec.ImageFormat.Png or ImageCodec.ImageFormat.Tiff
+                    && Canvas.ReadCompositeFloats() is { } rgbaF)
+                    DocumentIO.ExportFloat(path, dlg.Format, doc.Width, doc.Height, rgbaF, dlg.OutW, dlg.OutH, dlg.Quality, depthBits, doc.Dpi,
+                        doc.IccProfile, doc.IccProfileName);
+                else
+                    DocumentIO.Export(path, dlg.Format, doc.Width, doc.Height, rgba, dlg.OutW, dlg.OutH, dlg.Quality, doc.Dpi,
+                        doc.IccProfile, doc.IccProfileName);
+            }
         }
         catch (System.Exception ex)
         {
             await ConfirmWindow.Ask(this, Loc.T("mainWindow.exportErrorTitle"), Loc.T("mainWindow.exportError", ex.Message));
         }
     }
+
+    // --- export registry (built-ins always; plugin formats added when plugins are enabled) ---
+    private static readonly System.Collections.Generic.HashSet<string> _builtInExportIds =
+        new(System.StringComparer.OrdinalIgnoreCase) { "png", "jpeg", "webp", "tiff" };
+
+    private Sable.Plugins.ExportRegistry EnsureExportRegistry()
+    {
+        if (_exportRegistry is null)
+        {
+            _exportRegistry = new Sable.Plugins.ExportRegistry();
+            Sable.Plugins.Engine.BuiltInExporters.RegisterAll(_exportRegistry);
+        }
+        return _exportRegistry;
+    }
+
+    /// <summary>Plugin-contributed export formats (the registry minus the built-ins), for the export dialogs.</summary>
+    private System.Collections.Generic.List<Sable.Plugin.Sdk.Export.IExportProvider> PluginExporters()
+        => EnsureExportRegistry().Providers.Where(p => !_builtInExportIds.Contains(p.Id)).ToList();
 
     /// <summary>Batch asset export (ROADMAP P3): render each chosen top-level layer at each chosen
     /// scale variant and write one file per (layer × scale) into the output folder.</summary>
@@ -4466,10 +4496,11 @@ public partial class MainWindow : Window
         var top = doc.Layers.ToList();   // top-level layers (groups export as their flattened composite)
         if (top.Count == 0) return;
 
-        var dlg = new BatchExportDialog(top);
+        var dlg = new BatchExportDialog(top, PluginExporters());
         if (!await dlg.ShowDialog<bool>(this)) return;
 
-        string ext = ImageCodec.Extension(dlg.Format);
+        var prov = dlg.PluginProvider;
+        string ext = prov?.Extension ?? ImageCodec.Extension(dlg.Format);
 
         // Build the full (layer, scale) job list + disambiguate colliding file names up front.
         var jobs = new System.Collections.Generic.List<(Sable.Engine.Layers.Layer Layer, Sable.Engine.IO.ScaleVariant Scale, string Name)>();
@@ -4497,8 +4528,17 @@ public partial class MainWindow : Window
                 int ow = System.Math.Max(1, sw * scale.Percent / 100);
                 int oh = System.Math.Max(1, sh * scale.Percent / 100);
                 var path = System.IO.Path.Combine(dlg.Folder, names[i]);
-                Sable.Engine.IO.DocumentIO.Export(path, dlg.Format, sw, sh, rgba, ow, oh, dlg.Quality, doc.Dpi,
-                    doc.IccProfile, doc.IccProfileName);
+                if (prov is not null)
+                {
+                    var scaled = ImageCodec.ResizeRgba(rgba, sw, sh, ow, oh);
+                    var bytes = prov.Encode(
+                        new Sable.Plugin.Sdk.Export.ExportImage { Width = ow, Height = oh, Rgba = scaled },
+                        new Sable.Plugin.Sdk.Export.ExportOptions { Quality = dlg.Quality, IccProfile = doc.IccProfile, IccProfileName = doc.IccProfileName });
+                    System.IO.File.WriteAllBytes(path, bytes);
+                }
+                else
+                    Sable.Engine.IO.DocumentIO.Export(path, dlg.Format, sw, sh, rgba, ow, oh, dlg.Quality, doc.Dpi,
+                        doc.IccProfile, doc.IccProfileName);
                 written++;
             }
             catch { failed++; }

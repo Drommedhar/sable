@@ -164,6 +164,20 @@ public static class ImageCodec
             : ImageFormat.Png;
     }
 
+    /// <summary>Resample an RGBA8 buffer to a new size (straight alpha). Returns the input unchanged when
+    /// the size already matches. Used to honour an export scale for providers that take raw RGBA
+    /// (e.g. plugin export formats).</summary>
+    public static byte[] ResizeRgba(byte[] rgba, int srcW, int srcH, int outW, int outH)
+    {
+        if (outW == srcW && outH == srcH) return rgba;
+        var info = new SKImageInfo(srcW, srcH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var src = new SKBitmap(info);
+        Marshal.Copy(rgba, 0, src.GetPixels(), Math.Min(rgba.Length, srcW * srcH * 4));
+        using var dst = src.Resize(new SKImageInfo(outW, outH, SKColorType.Rgba8888, SKAlphaType.Unpremul),
+                                   SKSamplingOptions.Default);
+        return GetPixels(dst ?? src);
+    }
+
     /// <summary>Encode RGBA8 to bytes in the given format, optionally resized. quality 1..100 (PNG ignores it).
     /// JPEG has no alpha → flattened over white. <paramref name="icc"/> = embedded ICC profile to write
     /// (PNG iCCP / TIFF tag 34675); JPEG/WebP ICC embedding is a follow-up.</summary>

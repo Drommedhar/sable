@@ -7,6 +7,7 @@ using Sable.App.Localization;
 using Sable.Engine.IO;
 using Sable.Engine.Layers;
 using Sable.Imaging;
+using Sable.Plugin.Sdk.Export;
 
 namespace Sable.App;
 
@@ -17,21 +18,32 @@ namespace Sable.App;
 /// </summary>
 public partial class BatchExportDialog : Window
 {
+    private const int BuiltInCount = 4;   // PNG / JPEG / WebP / TIFF in the XAML combo
+
     public string Folder { get; private set; } = "";
     public ImageCodec.ImageFormat Format { get; private set; }
+    public IExportProvider? PluginProvider { get; private set; }
     public int Quality { get; private set; } = 90;
     public bool Trim { get; private set; } = true;
     public List<ScaleVariant> Scales { get; private set; } = new();
     public List<Layer> SelectedLayers { get; private set; } = new();
 
     private readonly List<(Layer Layer, CheckBox Box)> _rows = new();
+    private readonly List<IExportProvider> _plugins = new();
 
     public BatchExportDialog() : this(new List<Layer>()) { }
 
-    public BatchExportDialog(IReadOnlyList<Layer> topLevelLayers)
+    public BatchExportDialog(IReadOnlyList<Layer> topLevelLayers, IEnumerable<IExportProvider>? pluginProviders = null)
     {
         InitializeComponent();
         WindowEscapeHelper.AddEscapeClose(this);
+
+        if (pluginProviders is not null)
+            foreach (var p in pluginProviders)
+            {
+                _plugins.Add(p);
+                FormatCombo.Items.Add(new ComboBoxItem { Content = p.Label });
+            }
 
         foreach (var layer in topLevelLayers)
         {
@@ -54,9 +66,18 @@ public partial class BatchExportDialog : Window
         _ => ImageCodec.ImageFormat.Png,
     };
 
+    private IExportProvider? CurrentPlugin
+    {
+        get
+        {
+            int i = FormatCombo.SelectedIndex - BuiltInCount;
+            return i >= 0 && i < _plugins.Count ? _plugins[i] : null;
+        }
+    }
+
     private void OnFormatChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (QualityRow is not null) QualityRow.IsVisible = CurrentFormat != ImageCodec.ImageFormat.Png;
+        if (QualityRow is not null) QualityRow.IsVisible = CurrentPlugin is not null || CurrentFormat != ImageCodec.ImageFormat.Png;
     }
 
     private void OnQuality(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -98,6 +119,7 @@ public partial class BatchExportDialog : Window
     private void OnExport(object? sender, RoutedEventArgs e)
     {
         Format = CurrentFormat;
+        PluginProvider = CurrentPlugin;
         Quality = (int)QualitySlider.Value;
         Trim = TrimCheck.IsChecked == true;
         Scales = CollectScales();

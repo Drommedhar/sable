@@ -176,4 +176,19 @@ public class ExportFormatTests
         Assert.Equal(w, dec!.Value.width);
         Assert.InRange(dec.Value.rgba[0], 198, 202);
     }
+
+    [Fact]
+    public void ResizeRgba_same_size_returns_input()
+    {
+        var rgba = new byte[2 * 2 * 4];
+        Assert.Same(rgba, ImageCodec.ResizeRgba(rgba, 2, 2, 2, 2));
+    }
+
+    [Fact]
+    public void ResizeRgba_changes_dimensions()
+    {
+        var rgba = new byte[2 * 1 * 4];   // 2×1 RGBA8
+        var outp = ImageCodec.ResizeRgba(rgba, 2, 1, 4, 2);
+        Assert.Equal(4 * 2 * 4, outp.Length);   // 4×2 RGBA8
+    }
 }

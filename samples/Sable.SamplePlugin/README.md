@@ -7,8 +7,7 @@ It declares the capabilities `document.read`, `command.register`, `ui.menu_comma
 
 - a **command** (`Report Active Document`) in the Ctrl+K palette,
 - a **menu item** under **Plugins ▸ Sample**,
-- a **PPM (P6) export provider** (registered with the host's export registry; surfacing plugin
-  formats in the Export dialog is being finalized — see the guide's §6.8).
+- a **PPM (P6) export format** (appears in the Export and Export Assets dialogs).
 
 Each registration is guarded with `?.` so the plugin still loads if the host withholds a
 capability — the recommended robust pattern.
