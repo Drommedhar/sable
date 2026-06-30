@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Title>Sable Plugin Engine Bridge</Title>
+    <Description>Engine-backed implementations of the plugin host APIs (document/layer read + basic layer writes via commands) and built-in export providers. Bridges Sable.Engine to the SDK so the app just wires HostServices. Kept out of Sable.Plugins so the host stays engine-free.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sable.Plugin.Sdk\Sable.Plugin.Sdk.csproj" />
+    <ProjectReference Include="..\Sable.Plugins\Sable.Plugins.csproj" />
+    <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
+    <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Imaging\Sable.Imaging.csproj" />
+  </ItemGroup>
+
+</Project>

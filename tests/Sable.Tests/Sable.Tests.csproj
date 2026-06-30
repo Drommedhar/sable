@@ -24,6 +24,9 @@
     <ProjectReference Include="..\..\src\Sable.Tools\Sable.Tools.csproj" />
     <ProjectReference Include="..\..\src\Sable.Format\Sable.Format.csproj" />
     <ProjectReference Include="..\..\src\Sable.Imaging\Sable.Imaging.csproj" />
+    <ProjectReference Include="..\..\src\Sable.Plugin.Sdk\Sable.Plugin.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Sable.Plugins\Sable.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\Sable.Plugins.Engine\Sable.Plugins.Engine.csproj" />
     <ProjectReference Include="..\..\src\Sable.Gpu\Sable.Gpu.csproj" />
     <ProjectReference Include="..\..\src\Sable.Ai\Sable.Ai.csproj" />
     <ProjectReference Include="..\..\src\Sable.Ai.Sidecar\Sable.Ai.Sidecar.csproj" />

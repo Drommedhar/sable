@@ -11,6 +11,9 @@
     <Project Path="src/Sable.Gpu.Spike/Sable.Gpu.Spike.csproj" />
     <Project Path="src/Sable.Gpu/Sable.Gpu.csproj" />
     <Project Path="src/Sable.Imaging/Sable.Imaging.csproj" />
+    <Project Path="src/Sable.Plugin.Sdk/Sable.Plugin.Sdk.csproj" />
+    <Project Path="src/Sable.Plugins/Sable.Plugins.csproj" />
+    <Project Path="src/Sable.Plugins.Engine/Sable.Plugins.Engine.csproj" />
     <Project Path="src/Sable.Tools/Sable.Tools.csproj" />
     <Project Path="src/Sable.UI/Sable.UI.csproj" />
   </Folder>
