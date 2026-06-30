@@ -31,6 +31,14 @@ public sealed class UndoStack
 
     public event Action? Changed;
 
+    /// <summary>Execute several commands as ONE undo entry (transaction). No-op on an empty set;
+    /// a single command is recorded directly (no wrapper). See <see cref="MacroCommand"/>.</summary>
+    public void ExecuteMacro(string name, IReadOnlyList<IUndoableCommand> commands)
+    {
+        if (commands.Count == 0) return;
+        Execute(commands.Count == 1 ? commands[0] : new MacroCommand(name, commands));
+    }
+
     /// <summary>Execute a command and record it.</summary>
     public void Execute(IUndoableCommand command)
     {
