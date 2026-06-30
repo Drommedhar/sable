@@ -46,6 +46,15 @@ public sealed class PluginRegistry
         }
     }
 
+    /// <summary>Forget a plugin entirely (used on uninstall). Returns true if it was present.</summary>
+    public bool Remove(string id)
+    {
+        if (!_byId.TryGetValue(id, out var p)) return false;
+        _byId.Remove(id);
+        _order.Remove(p);
+        return true;
+    }
+
     public bool IsRunnable(LoadedPlugin p)
         => p.State is PluginState.Discovered or PluginState.Loaded or PluginState.Active;
 }

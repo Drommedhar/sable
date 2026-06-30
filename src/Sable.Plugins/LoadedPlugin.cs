@@ -22,6 +22,11 @@ public sealed class LoadedPlugin
     public PluginManifest? Manifest { get; internal set; }
     public IPlugin? Instance { get; internal set; }
 
+    /// <summary>The collectible load context this plugin's assembly was loaded into (null for
+    /// built-in/in-proc plugins). Kept so the host can unload it on uninstall, freeing the DLL
+    /// file so it can be deleted.</summary>
+    internal System.Runtime.Loader.AssemblyLoadContext? LoadContext { get; set; }
+
     public PluginState State { get; internal set; } = PluginState.Discovered;
 
     private readonly List<string> _errors = new();

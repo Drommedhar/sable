@@ -17,7 +17,7 @@ using Sable.UI.ViewModels;
 
 namespace Sable.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IPluginAdmin
 {
     private bool _panning;
     private Point _lastPointer;
@@ -631,7 +631,7 @@ public partial class MainWindow : Window
 
     private async void OnPreferences(object? sender, RoutedEventArgs e)
     {
-        var dlg = new SettingsWindow(_settings, GpuName, ModelReg);
+        var dlg = new SettingsWindow(_settings, GpuName, ModelReg, this);
         bool ok = await dlg.ShowDialog<bool>(this);
         if (ok)
         {
@@ -1286,14 +1286,18 @@ public partial class MainWindow : Window
         if (Canvas.Document is { } d && d.SavedSelection is { } m) d.SetMaskSelection((byte[])m.Clone());
     }
 
-    // --- plugin host (PLUGIN_SDK_PLAN; opt-in, default off) ---
+    // --- plugin host (PLUGIN_SDK_PLAN; opt-in, default off; managed in Settings ▸ Plugins) ---
     private Sable.Plugins.PluginManager? _pluginManager;
     private Sable.Plugins.ExportRegistry? _exportRegistry;
     private Sable.Plugins.PluginLogHub? _pluginLog;
     private Sable.Plugins.Engine.LayerHandles? _layerHandles;
-    private readonly List<Sable.Plugin.Sdk.Commands.PluginCommand> _pluginCommands = new();
-    private string _pluginsDir = "";
-    private PluginsManagerWindow? _pluginsManagerWindow;
+    private Sable.Plugins.Engine.EngineHostState? _pluginHostState;
+
+    // contributions tracked PER plugin id, so uninstall can release them (their delegates root the
+    // plugin's collectible load context — dropping them lets the assembly unload + the DLL delete).
+    private readonly Dictionary<string, List<Sable.Plugin.Sdk.Commands.PluginCommand>> _pluginCommandsById = new();
+    private readonly Dictionary<string, List<Sable.Plugin.Sdk.Ui.MenuContribution>> _pluginMenusById = new();
+    private readonly Dictionary<string, List<string>> _pluginExportIdsById = new();
 
     private static string PluginDataDir(string sub) =>
         System.IO.Path.Combine(
@@ -1301,7 +1305,7 @@ public partial class MainWindow : Window
             "Sable", sub);
 
     /// <summary>Build the plugin host and load installed plugins — only when the user has opted in.
-    /// Idempotent: a second call (e.g. after enabling in Preferences) is a no-op once built.</summary>
+    /// Idempotent: a second call (e.g. after enabling in Settings) is a no-op once built.</summary>
     private void InitPluginsIfEnabled()
     {
         if (!_settings.PluginsEnabled || _pluginManager is not null) return;
@@ -1310,23 +1314,18 @@ public partial class MainWindow : Window
         _pluginLog = new Sable.Plugins.PluginLogHub(
             e => System.Diagnostics.Debug.WriteLine($"[plugin {e.PluginId}] {e.Level}: {e.Message}"));
         _layerHandles = new Sable.Plugins.Engine.LayerHandles();
-
-        var state = new Sable.Plugins.Engine.EngineHostState
+        _pluginHostState = new Sable.Plugins.Engine.EngineHostState
         {
             ActiveDocument = () => Canvas.Document,
             ActiveUndo = () => _activeTab?.Vm.Undo,
             SelectedLayer = () => _activeTab?.Vm.SelectedLayer?.Model,
         };
-        var services = Sable.Plugins.Engine.SableHostServices.Build(
-            state, _layerHandles, _exportRegistry,
-            new AppCommandApi(RegisterPluginCommand), new AppMenuApi(AddPluginMenuItem));
 
-        _pluginsDir = PluginDataDir("plugins");
-        string pluginsDir = _pluginsDir;
+        string pluginsDir = PluginDataDir("plugins");
         string settingsDir = PluginDataDir("plugin-settings");
         _pluginManager = new Sable.Plugins.PluginManager(pluginsDir, _pluginLog.For("host"),
             p => Sable.Plugins.HostContextFactory.Create(
-                p, services, _pluginLog!.For(p.Id),
+                p, BuildHostServicesFor(p.Id), _pluginLog!.For(p.Id),
                 new Sable.Plugins.PluginSettingsStore(settingsDir, p.Id)));
 
         try
@@ -1340,30 +1339,55 @@ public partial class MainWindow : Window
         PluginsMenu.IsVisible = true;
     }
 
-    private void OnManagePlugins(object? sender, RoutedEventArgs e)
+    /// <summary>Per-plugin host services: the read/write APIs are shared, but command/menu/export
+    /// registrations are bucketed by plugin id so they can be removed on uninstall.</summary>
+    private Sable.Plugins.HostServices BuildHostServicesFor(string id)
     {
-        if (_pluginManager is null || _pluginLog is null) return;
-        if (_pluginsManagerWindow is { } w) { w.Activate(); return; }
-        _pluginsManagerWindow = new PluginsManagerWindow(_pluginManager, _pluginLog, _pluginsDir);
-        _pluginsManagerWindow.Closed += (_, _) => _pluginsManagerWindow = null;
-        _pluginsManagerWindow.Show(this);
+        var reg = EnsureExportRegistry();
+        return new Sable.Plugins.HostServices
+        {
+            Document = new Sable.Plugins.Engine.EngineDocumentApi(_pluginHostState!),
+            Layers = new Sable.Plugins.Engine.EngineLayerApi(_pluginHostState!, _layerHandles!),
+            LayerWrites = new Sable.Plugins.Engine.EngineLayerWriteApi(_pluginHostState!, _layerHandles!),
+            Commands = new AppCommandApi(c => AddPluginCommand(id, c)),
+            Menus = new AppMenuApi(m => AddPluginMenuItem(id, m)),
+            Export = new AppExportApi(reg, pid => Bucket(_pluginExportIdsById, id).Add(pid)),
+        };
     }
 
-    private void RegisterPluginCommand(Sable.Plugin.Sdk.Commands.PluginCommand command)
-        => _pluginCommands.Add(command);
+    private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string id)
+        => map.TryGetValue(id, out var list) ? list : (map[id] = new List<T>());
 
-    private void AddPluginMenuItem(Sable.Plugin.Sdk.Ui.MenuContribution item)
+    private void AddPluginCommand(string id, Sable.Plugin.Sdk.Commands.PluginCommand command)
+        => Bucket(_pluginCommandsById, id).Add(command);
+
+    private void AddPluginMenuItem(string id, Sable.Plugin.Sdk.Ui.MenuContribution item)
     {
-        PluginsEmptyItem.IsVisible = false;
-        var parent = (ItemsControl)PluginsMenu;
-        // resolve / create the slash-separated sub-menu path under the Plugins menu
-        if (!string.IsNullOrWhiteSpace(item.MenuPath))
-            foreach (var part in item.MenuPath.Split('/', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries))
-                parent = FindOrAddSubMenu(parent, part);
+        Bucket(_pluginMenusById, id).Add(item);
+        RebuildPluginsMenu();
+    }
 
-        var leaf = new MenuItem { Header = item.Title };
-        leaf.Click += (_, _) => RunGuarded(item.Title, item.Run);
-        parent.Items.Add(leaf);
+    /// <summary>Rebuild the Plugins menu from all current contributions (call after add/remove).</summary>
+    private void RebuildPluginsMenu()
+    {
+        PluginsMenu.Items.Clear();
+        bool any = false;
+        foreach (var list in _pluginMenusById.Values)
+            foreach (var item in list)
+            {
+                any = true;
+                var parent = (ItemsControl)PluginsMenu;
+                if (!string.IsNullOrWhiteSpace(item.MenuPath))
+                    foreach (var part in item.MenuPath!.Split('/', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries))
+                        parent = FindOrAddSubMenu(parent, part);
+                var leaf = new MenuItem { Header = item.Title };
+                var run = item.Run;
+                var title = item.Title;
+                leaf.Click += (_, _) => RunGuarded(title, run);
+                parent.Items.Add(leaf);
+            }
+        if (!any)
+            PluginsMenu.Items.Add(new MenuItem { Header = Loc.T("mainWindow.noPluginsLoaded"), IsEnabled = false });
     }
 
     private static MenuItem FindOrAddSubMenu(ItemsControl parent, string header)
@@ -1373,6 +1397,38 @@ public partial class MainWindow : Window
         var added = new MenuItem { Header = header };
         parent.Items.Add(added);
         return added;
+    }
+
+    /// <summary>Drop a plugin's registered commands/menus/exporters (releases its delegates).</summary>
+    private void RemovePluginContributions(string id)
+    {
+        _pluginCommandsById.Remove(id);
+        _pluginMenusById.Remove(id);
+        if (_pluginExportIdsById.TryGetValue(id, out var exportIds))
+        {
+            foreach (var pid in exportIds) _exportRegistry?.Unregister(pid);
+            _pluginExportIdsById.Remove(id);
+        }
+        RebuildPluginsMenu();
+    }
+
+    /// <summary>Tear the plugin host down entirely (global disable): shut down, drop all
+    /// contributions, and null the manager so a later enable rebuilds cleanly.</summary>
+    private void TeardownPlugins()
+    {
+        try { _pluginManager?.ShutdownAll(); } catch { }
+        foreach (var id in _pluginExportIdsById.Keys.ToList())
+            if (_pluginExportIdsById.TryGetValue(id, out var ex))
+                foreach (var pid in ex) _exportRegistry?.Unregister(pid);
+        _pluginCommandsById.Clear();
+        _pluginMenusById.Clear();
+        _pluginExportIdsById.Clear();
+        _pluginManager = null;
+        _pluginLog = null;
+        _pluginHostState = null;
+        PluginsMenu.IsVisible = false;
+        PluginsMenu.Items.Clear();
+        PluginsMenu.Items.Add(new MenuItem { Header = Loc.T("mainWindow.noPluginsLoaded"), IsEnabled = false });
     }
 
     /// <summary>Run a plugin-supplied callback behind a try/catch so a misbehaving plugin can't take
@@ -1386,6 +1442,42 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine(ex);
         }
     }
+
+    // --- IPluginAdmin (drives the Settings ▸ Plugins page) ---
+    bool IPluginAdmin.Enabled
+    {
+        get => _settings.PluginsEnabled;
+        set
+        {
+            if (_settings.PluginsEnabled == value) return;
+            _settings.PluginsEnabled = value;
+            Sable.Core.Settings.SettingsService.Save(_settings);
+            if (value) InitPluginsIfEnabled();
+            else TeardownPlugins();
+        }
+    }
+
+    string IPluginAdmin.PluginsDir => PluginDataDir("plugins");
+
+    IReadOnlyList<Sable.Plugins.LoadedPlugin> IPluginAdmin.List()
+        => _pluginManager?.Registry.All ?? (IReadOnlyList<Sable.Plugins.LoadedPlugin>)System.Array.Empty<Sable.Plugins.LoadedPlugin>();
+
+    void IPluginAdmin.Enable(string id) => _pluginManager?.Enable(id);
+    void IPluginAdmin.Disable(string id) => _pluginManager?.Disable(id);
+
+    bool IPluginAdmin.Uninstall(string id)
+    {
+        RemovePluginContributions(id);
+        return _pluginManager?.Uninstall(id) ?? false;
+    }
+
+    Sable.Plugins.PluginInstaller.InstallResult IPluginAdmin.Install(string source)
+    {
+        if (_pluginManager is not null) return _pluginManager.Install(source);   // copies + loads live
+        return Sable.Plugins.PluginInstaller.Install(PluginDataDir("plugins"), source);  // copy only; loads on enable
+    }
+
+    void IPluginAdmin.Reload() => _pluginManager?.LoadAll();
 
     // --- autosave + crash recovery (PLAN §2.6) ---
     private Avalonia.Threading.DispatcherTimer? _autosaveTimer;
@@ -3513,12 +3605,13 @@ public partial class MainWindow : Window
             (Loc.T("mainWindow.windowHistory"), () => OnToggleHistory(null, _e)),
         };
         foreach (var t in _toolKinds) { var k = t; actions.Add((Loc.T("tools.cyclePrefix", ToolDisplayName(k)), () => Canvas.ActiveTool = k)); }
-        foreach (var c in _pluginCommands)
-        {
-            var cmd = c;
-            string label = string.IsNullOrWhiteSpace(cmd.Category) ? cmd.Title : $"{cmd.Category}: {cmd.Title}";
-            actions.Add((label, () => RunGuarded(cmd.Title, cmd.Run)));
-        }
+        foreach (var list in _pluginCommandsById.Values)
+            foreach (var c in list)
+            {
+                var cmd = c;
+                string label = string.IsNullOrWhiteSpace(cmd.Category) ? cmd.Title : $"{cmd.Category}: {cmd.Title}";
+                actions.Add((label, () => RunGuarded(cmd.Title, cmd.Run)));
+            }
         var pal = new CommandPalette(actions);
         pal.Show(this);
     }

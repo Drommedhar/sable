@@ -111,12 +111,25 @@ public sealed class PluginLoader
         try
         {
             var instance = (IPlugin)Activator.CreateInstance(entry)!;
+            plugin.LoadContext = alc;   // keep the ALC so we can unload it on uninstall
             return AttachInstance(plugin, instance);
         }
         catch (Exception ex)
         {
             return Fail(plugin, $"failed to construct entrypoint: {ex.Message}");
         }
+    }
+
+    /// <summary>Deactivate (if active) and unload the plugin's collectible load context, so its DLL
+    /// file is no longer locked. The unload completes asynchronously after the GC reclaims it; the
+    /// caller should GC + retry before deleting the file. Leaves the plugin <see cref="PluginState.Discovered"/>.</summary>
+    public void Unload(LoadedPlugin plugin)
+    {
+        if (plugin.State == PluginState.Active) Deactivate(plugin);
+        plugin.Instance = null;
+        try { plugin.LoadContext?.Unload(); } catch { /* best-effort */ }
+        plugin.LoadContext = null;
+        plugin.State = PluginState.Discovered;
     }
 
     /// <summary>

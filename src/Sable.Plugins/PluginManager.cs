@@ -85,6 +85,40 @@ public sealed class PluginManager
         return _loader.Activate(p, _contextFactory(p));
     }
 
+    /// <summary>Install a plugin from a folder or .zip into the plugins root, then load it.
+    /// Returns the install result (folder + any error). On success the plugin is loaded + activated.</summary>
+    public PluginInstaller.InstallResult Install(string source)
+    {
+        var result = PluginInstaller.Install(_rootDir, source);
+        if (result.Ok) LoadAll();   // pick up the newly installed folder
+        return result;
+    }
+
+    /// <summary>Uninstall a plugin: deactivate + unload its load context, forget it, and delete its
+    /// folder from disk. The manifest is deleted first so it can't reload even if the DLL file is
+    /// still locked (collectible-ALC unload finalises asynchronously). Returns true if the folder
+    /// was fully removed; false means a restart is needed to clear the leftover files.</summary>
+    public bool Uninstall(string id)
+    {
+        var p = Registry.Get(id);
+        if (p is null) return false;
+        var dir = p.Directory;
+
+        _loader.Unload(p);
+        Registry.Remove(id);
+
+        try { System.IO.File.Delete(System.IO.Path.Combine(dir, "manifest.json")); } catch { }
+
+        for (int attempt = 0; attempt < 3 && System.IO.Directory.Exists(dir); attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            try { System.IO.Directory.Delete(dir, recursive: true); }
+            catch { /* DLL still locked by the unloading ALC — retry */ }
+        }
+        return !System.IO.Directory.Exists(dir);
+    }
+
     public void ShutdownAll()
     {
         foreach (var p in Registry.All)

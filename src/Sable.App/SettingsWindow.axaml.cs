@@ -16,6 +16,7 @@ using Sable.Ai.Download;
 using Sable.Ai.Models;
 using Sable.Core.Ai;
 using Sable.Core.Settings;
+using Sable.Plugins;
 
 using Sable.App.Localization;
 
@@ -41,16 +42,19 @@ public partial class SettingsWindow : Window
     private List<string> _langCodes = new();
     private bool _loadingLang;
 
+    private readonly IPluginAdmin? _plugins;
+
     public SettingsWindow() : this(new SableSettings(), "—", null) { }
 
-    public SettingsWindow(SableSettings settings, string gpuName, ModelRegistry? registry)
+    internal SettingsWindow(SableSettings settings, string gpuName, ModelRegistry? registry, IPluginAdmin? plugins = null)
     {
         InitializeComponent();
         WindowEscapeHelper.AddEscapeClose(this);
         _s = settings;
         _registry = registry;
+        _plugins = plugins;
         _downloader = registry is not null ? new ModelDownloader(registry) : null;
-        _panels = new[] { PanelGeneral, PanelUI, PanelPerf, PanelColor, PanelAI, PanelUpdates, PanelKeys, PanelAbout };
+        _panels = new[] { PanelGeneral, PanelUI, PanelPerf, PanelColor, PanelAI, PanelUpdates, PanelKeys, PanelAbout, PanelPlugins };
 
         // General
         ReopenSwitch.IsChecked = _s.ReopenOnStartup;
@@ -83,7 +87,12 @@ public partial class SettingsWindow : Window
         AutosaveSwitch.IsChecked = _s.AutosaveEnabled;
         AutosaveSlider.Value = System.Math.Clamp(_s.AutosaveMinutes, 1, 60);
         AutosaveLabel.Text = _s.AutosaveMinutes.ToString();
-        PluginsSwitch.IsChecked = _s.PluginsEnabled;
+        // Plugins page
+        _pluginsInitializing = true;
+        PluginsSwitch.IsChecked = _plugins?.Enabled ?? _s.PluginsEnabled;
+        _pluginsInitializing = false;
+        PluginActionsRow.IsEnabled = PluginsSwitch.IsChecked == true;
+        BuildPluginList();
         // Machine Learning
         AiEnabledSwitch.IsChecked = _s.AiEnabled;
         GenerativeEnabledSwitch.IsChecked = _s.GenerativeAiEnabled;
@@ -524,7 +533,7 @@ public partial class SettingsWindow : Window
         _s.UndoLimit = (int)UndoSlider.Value;
         _s.AutosaveEnabled = AutosaveSwitch.IsChecked == true;
         _s.AutosaveMinutes = System.Math.Clamp((int)AutosaveSlider.Value, 1, 60);
-        _s.PluginsEnabled = PluginsSwitch.IsChecked == true;
+        // PluginsEnabled is applied LIVE on the Plugins page (via IPluginAdmin), not on OK.
         _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.GenerativeAiEnabled = GenerativeEnabledSwitch.IsChecked == true;
         _s.SmartSelectQuality = (SmartSelectQuality)System.Math.Clamp(SmartSelectCombo.SelectedIndex, 0, 3);
@@ -535,6 +544,167 @@ public partial class SettingsWindow : Window
             if (_workKeys.TryGetValue(c.Id, out var g) && g != c.DefaultGesture)
                 _s.KeyBindings[c.Id] = g;
         Close(true);
+    }
+
+    // ===== Plugins page (PLUGIN_SDK_PLAN §24): enable/disable, install, uninstall =====
+    private bool _pluginsInitializing;
+
+    private void OnPluginsEnabledChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_pluginsInitializing || _plugins is null) return;
+        _plugins.Enabled = PluginsSwitch.IsChecked == true;
+        PluginActionsRow.IsEnabled = PluginsSwitch.IsChecked == true;
+        BuildPluginList();
+    }
+
+    private void SetPluginStatus(string? text)
+    {
+        if (PluginStatus is null) return;
+        PluginStatus.Text = text ?? "";
+        PluginStatus.IsVisible = !string.IsNullOrEmpty(text);
+    }
+
+    private void BuildPluginList()
+    {
+        if (PluginListPanel is null) return;
+        PluginListPanel.Children.Clear();
+        if (_plugins is null) return;
+
+        var plugins = _plugins.List();
+        if (plugins.Count == 0)
+        {
+            PluginListPanel.Children.Add(new TextBlock
+            {
+                Text = PluginsSwitch.IsChecked == true ? Loc.T("settingsWindow.pluginNone") : Loc.T("settingsWindow.pluginDisabled"),
+                Classes = { "settingHint" },
+            });
+            return;
+        }
+
+        foreach (var p in plugins)
+            PluginListPanel.Children.Add(BuildPluginCard(p));
+    }
+
+    private Control BuildPluginCard(LoadedPlugin p)
+    {
+        var card = new Border
+        {
+            BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new Avalonia.CornerRadius(3),
+            Padding = new Avalonia.Thickness(10, 8),
+        };
+        card.Bind(Border.BackgroundProperty, this.GetResourceObservable("ChromeCanvas"));
+        card.Bind(Border.BorderBrushProperty, this.GetResourceObservable("ChromeBorder"));
+
+        var col = new StackPanel { Spacing = 3 };
+
+        var top = new DockPanel { LastChildFill = false };
+        var name = new TextBlock { Text = p.Manifest?.Name ?? p.Id, FontWeight = FontWeight.SemiBold, FontSize = 12 };
+        name.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeText"));
+        DockPanel.SetDock(name, Dock.Left);
+        top.Children.Add(name);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        DockPanel.SetDock(buttons, Dock.Right);
+
+        bool active = p.State == PluginState.Active;
+        var toggle = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
+        toggle.Content = active ? Loc.T("settingsWindow.pluginDisableBtn") : Loc.T("settingsWindow.pluginEnableBtn");
+        toggle.IsEnabled = p.State is PluginState.Active or PluginState.Loaded or PluginState.Disabled or PluginState.Discovered;
+        toggle.Click += OnTogglePlugin;
+        buttons.Children.Add(toggle);
+
+        var uninstall = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
+        uninstall.Content = Loc.T("settingsWindow.pluginUninstallBtn");
+        uninstall.Click += OnUninstallPlugin;
+        buttons.Children.Add(uninstall);
+
+        top.Children.Add(buttons);
+        col.Children.Add(top);
+
+        col.Children.Add(Faint($"{p.Id}  ·  {p.State}"));
+        if (p.Manifest is { } m) col.Children.Add(Faint(Loc.T("settingsWindow.pluginCaps", string.Join(", ", m.Capabilities))));
+        foreach (var err in p.Errors) col.Children.Add(WarnRow(err));
+
+        card.Child = col;
+        return card;
+    }
+
+    private TextBlock Faint(string s)
+    {
+        var tb = new TextBlock { Text = s, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        tb.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeTextFaint"));
+        return tb;
+    }
+
+    private TextBlock WarnRow(string s)
+    {
+        var tb = new TextBlock { Text = s, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        tb.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("ChromeWarn"));
+        return tb;
+    }
+
+    private void OnTogglePlugin(object? sender, RoutedEventArgs e)
+    {
+        if (_plugins is null || sender is not Button { Tag: string id }) return;
+        var p = _plugins.List().FirstOrDefault(x => x.Id == id);
+        if (p is null) return;
+        if (p.State == PluginState.Active) _plugins.Disable(id); else _plugins.Enable(id);
+        BuildPluginList();
+    }
+
+    private void OnUninstallPlugin(object? sender, RoutedEventArgs e)
+    {
+        if (_plugins is null || sender is not Button { Tag: string id }) return;
+        bool fully = _plugins.Uninstall(id);
+        SetPluginStatus(fully ? null : Loc.T("settingsWindow.pluginRestartToRemove"));
+        BuildPluginList();
+    }
+
+    private async void OnInstallPluginFolder(object? sender, RoutedEventArgs e)
+    {
+        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        { Title = Loc.T("settingsWindow.pluginInstallFolder"), AllowMultiple = false });
+        var path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) InstallFrom(path);
+    }
+
+    private async void OnInstallPluginZip(object? sender, RoutedEventArgs e)
+    {
+        var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("settingsWindow.pluginInstallZip"),
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("Zip") { Patterns = new[] { "*.zip" } } },
+        });
+        var path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) InstallFrom(path);
+    }
+
+    private void InstallFrom(string source)
+    {
+        if (_plugins is null) return;
+        var r = _plugins.Install(source);
+        SetPluginStatus(r.Ok ? null : Loc.T("settingsWindow.pluginInstallFailed", r.Error ?? ""));
+        BuildPluginList();
+    }
+
+    private void OnReloadPlugins(object? sender, RoutedEventArgs e)
+    {
+        _plugins?.Reload();
+        BuildPluginList();
+    }
+
+    private void OnOpenPluginsFolder(object? sender, RoutedEventArgs e)
+    {
+        if (_plugins is null) return;
+        try
+        {
+            System.IO.Directory.CreateDirectory(_plugins.PluginsDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            { FileName = _plugins.PluginsDir, UseShellExecute = true });
+        }
+        catch { /* best-effort */ }
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(false);

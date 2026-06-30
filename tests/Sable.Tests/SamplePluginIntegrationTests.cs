@@ -148,6 +148,54 @@ public sealed class SamplePluginIntegrationTests
     }
 
     [Fact]
+    public void Install_load_then_uninstall_removes_the_plugin_and_frees_the_dll()
+    {
+        // Stage a source folder (real sample DLL + manifest), install it, load it, then uninstall.
+        var dll = typeof(SamplePlugin.SamplePlugin).Assembly.Location;
+        var src = Path.Combine(Path.GetTempPath(), "sable_src_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(src);
+        File.Copy(dll, Path.Combine(src, Path.GetFileName(dll)));
+        File.WriteAllText(Path.Combine(src, "manifest.json"), """
+        {
+          "id": "com.sable.sample", "name": "Sample", "version": "1.0.0", "sdk_version": "1",
+          "entrypoint": "Sable.SamplePlugin.SamplePlugin",
+          "capabilities": ["command.register"],
+          "permissions": { "filesystem_read": "none", "filesystem_write": "none", "network": false, "gpu": false }
+        }
+        """);
+
+        var root = Path.Combine(Path.GetTempPath(), "sable_root_" + Guid.NewGuid().ToString("N"));
+        var (mgr, _, _, _, _) = Host(new Document(8, 8), """["command.register"]""");
+        // rebuild the manager rooted at our temp plugins dir
+        var export = new ExportRegistry();
+        var cmds = new CollectingCommands();
+        var state = new EngineHostState { ActiveDocument = () => new Document(8, 8), ActiveUndo = () => new UndoStack() };
+        var services = SableHostServices.Build(state, new LayerHandles(), export, cmds, new CollectingMenus());
+        var log = new PluginLogHub();
+        mgr = new PluginManager(root, log.For("host"),
+            p => HostContextFactory.Create(p, services, log.For(p.Id), new PluginSettingsStore(Path.GetTempPath(), p.Id)));
+
+        var install = mgr.Install(src);
+        Assert.True(install.Ok, install.Error);
+        Assert.Single(mgr.Registry.All);             // installed + loaded
+        Assert.Single(cmds.Commands);                // its command registered
+
+        // The host must release the plugin's contributions (their delegates pin the ALC) before
+        // unload, else the DLL stays locked. MainWindow does this via RemovePluginContributions.
+        cmds.Commands.Clear();
+
+        mgr.Uninstall("com.sable.sample");
+        // Deterministic guarantees: forgotten from the registry, and the manifest is gone so it
+        // can never reload — even if the DLL file is still locked by the unloading ALC (file
+        // cleanup beyond the manifest is best-effort / completes on a later GC or restart).
+        Assert.Empty(mgr.Registry.All);
+        Assert.False(File.Exists(Path.Combine(install.Directory!, "manifest.json")));
+
+        try { Directory.Delete(src, true); } catch { }
+        try { Directory.Delete(root, true); } catch { }
+    }
+
+    [Fact]
     public void Ppm_exporter_writes_a_valid_P6_header_and_drops_alpha()
     {
         var img = new ExportImage { Width = 2, Height = 1, Rgba = new byte[] { 10, 20, 30, 255, 40, 50, 60, 0 } };

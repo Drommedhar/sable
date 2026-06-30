@@ -25,6 +25,7 @@
                     <ListBoxItem Tag="5">Updates</ListBoxItem>
                     <ListBoxItem Tag="6">Keyboard</ListBoxItem>
                     <ListBoxItem Tag="7">About</ListBoxItem>
+                    <ListBoxItem Tag="8">Plugins</ListBoxItem>
                 </ListBox>
             </DockPanel>
         </Border>
@@ -104,10 +105,6 @@
                             <TextBlock x:Name="AutosaveLabel" Classes="settingLabel" Width="56" Text="5" />
                         </StackPanel>
                     </local:SettingRow>
-                    <local:SettingRow Label="Enable plugins (experimental)">
-                        <ToggleSwitch x:Name="PluginsSwitch" />
-                    </local:SettingRow>
-                    <TextBlock Classes="settingHint" Margin="0,2,0,0" Text="{loc:Loc settingsWindow.pluginsHint}" />
                 </StackPanel>
 
                 <!-- Colour -->
@@ -185,6 +182,25 @@
                     <TextBlock x:Name="VersionLabel" Classes="settingLabel" Foreground="{DynamicResource ChromeTextDim}" />
                     <TextBlock Classes="settingHint" Margin="0,6,0,0"
                                Text="{loc:Loc settingsWindow.crossPlatformGPUFirstRaster}" />
+                </StackPanel>
+
+                <!-- Plugins -->
+                <StackPanel x:Name="PanelPlugins" Spacing="2" IsVisible="False">
+                    <TextBlock Text="{loc:Loc settingsWindow.plugins}" FontSize="16" Foreground="{DynamicResource ChromeText}" Margin="0,0,0,8" />
+                    <local:SettingRow Label="Enable plugins (experimental)">
+                        <ToggleSwitch x:Name="PluginsSwitch" IsCheckedChanged="OnPluginsEnabledChanged" />
+                    </local:SettingRow>
+                    <TextBlock Classes="settingHint" Margin="0,2,0,8" Text="{loc:Loc settingsWindow.pluginsHint}" />
+
+                    <StackPanel x:Name="PluginActionsRow" Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+                        <Button Content="{loc:Loc settingsWindow.pluginInstallFolder}" Classes="opt" Padding="12,0" Click="OnInstallPluginFolder" />
+                        <Button Content="{loc:Loc settingsWindow.pluginInstallZip}" Classes="opt" Padding="12,0" Click="OnInstallPluginZip" />
+                        <Button Content="{loc:Loc settingsWindow.pluginReload}" Classes="opt" Padding="12,0" Click="OnReloadPlugins" />
+                        <Button Content="{loc:Loc settingsWindow.pluginOpenFolder}" Classes="opt" Padding="12,0" Click="OnOpenPluginsFolder" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="PluginStatus" Classes="settingHint" Foreground="{DynamicResource ChromeWarn}" IsVisible="False" Margin="0,0,0,6" />
+                    <StackPanel x:Name="PluginListPanel" Spacing="8" />
                 </StackPanel>
                 </StackPanel>
             </ScrollViewer>
