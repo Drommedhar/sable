@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Export;
+using Sable.Plugin.Sdk.Import;
 using Sable.Plugin.Sdk.Ui;
 using Sable.Plugins;
 
@@ -38,6 +39,24 @@ internal sealed class AppExportApi : IExportApi
         _recordId = recordId;
     }
     public void Register(IExportProvider provider)
+    {
+        _registry.Register(provider);
+        _recordId(provider.Id);
+    }
+}
+
+/// <summary>UI-side <see cref="IImportApi"/>: registers the provider with the shared
+/// <see cref="ImportRegistry"/> and records its id against the plugin (for clean uninstall).</summary>
+internal sealed class AppImportApi : IImportApi
+{
+    private readonly ImportRegistry _registry;
+    private readonly Action<string> _recordId;
+    public AppImportApi(ImportRegistry registry, Action<string> recordId)
+    {
+        _registry = registry;
+        _recordId = recordId;
+    }
+    public void Register(IImportProvider provider)
     {
         _registry.Register(provider);
         _recordId(provider.Id);

@@ -14,7 +14,8 @@ public static class SableHostServices
 {
     public static HostServices Build(
         EngineHostState state, LayerHandles handles, ExportRegistry export,
-        ICommandApi? commands = null, IMenuApi? menus = null)
+        ICommandApi? commands = null, IMenuApi? menus = null,
+        Sable.Plugin.Sdk.Import.IImportApi? import = null)
     {
         var txn = new PluginTransaction();
         return new HostServices
@@ -23,6 +24,7 @@ public static class SableHostServices
             Layers = new EngineLayerApi(state, handles),
             LayerWrites = new EngineLayerWriteApi(state, handles, txn),
             Export = export,
+            Import = import,
             Commands = commands,
             Menus = menus,
             Selection = new EngineSelectionApi(state),

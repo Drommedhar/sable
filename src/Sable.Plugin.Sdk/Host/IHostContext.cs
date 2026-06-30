@@ -2,6 +2,7 @@ using Sable.Plugin.Sdk.Automation;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Document;
 using Sable.Plugin.Sdk.Export;
+using Sable.Plugin.Sdk.Import;
 using Sable.Plugin.Sdk.Layers;
 using Sable.Plugin.Sdk.Manifest;
 using Sable.Plugin.Sdk.Pixels;
@@ -38,6 +39,7 @@ public interface IHostContext
     ICommandApi? Commands { get; }      // command.register
     IMenuApi? Menus { get; }            // ui.menu_command
     IExportApi? Export { get; }         // export.provider
+    IImportApi? Import { get; }         // import.provider
     ISelectionApi? Selection { get; }   // selection.read
     IPixelApi? Pixels { get; }          // pixel.read
     ITransactionApi? Transactions { get; } // undo.transaction

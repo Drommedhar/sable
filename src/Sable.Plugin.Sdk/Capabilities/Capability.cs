@@ -17,6 +17,7 @@ public static class Capability
     public const string CommandRegister = "command.register";
     public const string AutomationBatch = "automation.batch";
     public const string ExportProvider = "export.provider";
+    public const string ImportProvider = "import.provider";
     public const string UiMenuCommand = "ui.menu_command";
 
     // P1 — workflow tooling (declared now so manifests validate; APIs land later).
@@ -37,7 +38,7 @@ public static class Capability
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
         DocumentRead, LayerRead, LayerWriteBasic, CommandRegister, AutomationBatch,
-        ExportProvider, UiMenuCommand,
+        ExportProvider, ImportProvider, UiMenuCommand,
         SelectionRead, PixelRead, PixelWriteLayerOutput, UiPanel, UndoTransaction, DocumentEvents,
         FilterNode, GeneratorNode, GpuCompute, ExternalToolBridge,
     };
@@ -46,7 +47,7 @@ public static class Capability
     public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(StringComparer.Ordinal)
     {
         DocumentRead, LayerRead, LayerWriteBasic, CommandRegister,
-        ExportProvider, UiMenuCommand,
+        ExportProvider, ImportProvider, UiMenuCommand,
         SelectionRead, PixelRead, UndoTransaction,
     };
 

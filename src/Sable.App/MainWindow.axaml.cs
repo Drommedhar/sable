@@ -1298,6 +1298,10 @@ public partial class MainWindow : Window, IPluginAdmin
     private readonly Dictionary<string, List<Sable.Plugin.Sdk.Commands.PluginCommand>> _pluginCommandsById = new();
     private readonly Dictionary<string, List<Sable.Plugin.Sdk.Ui.MenuContribution>> _pluginMenusById = new();
     private readonly Dictionary<string, List<string>> _pluginExportIdsById = new();
+    private readonly Dictionary<string, List<string>> _pluginImportIdsById = new();
+    private Sable.Plugins.ImportRegistry? _importRegistry;
+
+    private Sable.Plugins.ImportRegistry EnsureImportRegistry() => _importRegistry ??= new Sable.Plugins.ImportRegistry();
 
     private static string PluginDataDir(string sub) =>
         System.IO.Path.Combine(
@@ -1359,6 +1363,7 @@ public partial class MainWindow : Window, IPluginAdmin
             Commands = new AppCommandApi(c => AddPluginCommand(id, c)),
             Menus = new AppMenuApi(m => AddPluginMenuItem(id, m)),
             Export = new AppExportApi(reg, pid => Bucket(_pluginExportIdsById, id).Add(pid)),
+            Import = new AppImportApi(EnsureImportRegistry(), pid => Bucket(_pluginImportIdsById, id).Add(pid)),
             Selection = new Sable.Plugins.Engine.EngineSelectionApi(_pluginHostState!),
             Pixels = new Sable.Plugins.Engine.EnginePixelApi(_pluginHostState!),
             Transactions = new Sable.Plugins.Engine.EngineTransactionApi(_pluginHostState!, txn),
@@ -1419,6 +1424,11 @@ public partial class MainWindow : Window, IPluginAdmin
             foreach (var pid in exportIds) _exportRegistry?.Unregister(pid);
             _pluginExportIdsById.Remove(id);
         }
+        if (_pluginImportIdsById.TryGetValue(id, out var importIds))
+        {
+            foreach (var pid in importIds) _importRegistry?.Unregister(pid);
+            _pluginImportIdsById.Remove(id);
+        }
         RebuildPluginsMenu();
     }
 
@@ -1430,9 +1440,13 @@ public partial class MainWindow : Window, IPluginAdmin
         foreach (var id in _pluginExportIdsById.Keys.ToList())
             if (_pluginExportIdsById.TryGetValue(id, out var ex))
                 foreach (var pid in ex) _exportRegistry?.Unregister(pid);
+        foreach (var id in _pluginImportIdsById.Keys.ToList())
+            if (_pluginImportIdsById.TryGetValue(id, out var im))
+                foreach (var pid in im) _importRegistry?.Unregister(pid);
         _pluginCommandsById.Clear();
         _pluginMenusById.Clear();
         _pluginExportIdsById.Clear();
+        _pluginImportIdsById.Clear();
         _pluginManager = null;
         _pluginLog = null;
         _pluginHostState = null;
@@ -4402,16 +4416,15 @@ public partial class MainWindow : Window, IPluginAdmin
 
     private async void OnOpenImage(object? sender, RoutedEventArgs e)
     {
+        var patterns = new List<string> { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.psd" };
+        patterns.AddRange(EnsureImportRegistry().AllExtensions().Select(ext => "*." + ext));   // plugin formats
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = Loc.T("mainWindow.openImageTitle"),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType(Loc.T("mainWindow.imagesFilter"))
-                {
-                    Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.psd" }
-                }
+                new FilePickerFileType(Loc.T("mainWindow.imagesFilter")) { Patterns = patterns.ToArray() }
             }
         });
 
@@ -4420,6 +4433,7 @@ public partial class MainWindow : Window, IPluginAdmin
 
         try
         {
+            if (TryOpenWithPlugin(path)) { NoteRecent(path); return; }
             if (path.EndsWith(".psd", System.StringComparison.OrdinalIgnoreCase)) OpenPsdTab(path);
             else OpenInNewTab(DocumentIO.OpenImage(path), null, System.IO.Path.GetFileName(path), path);
             NoteRecent(path);
@@ -4599,6 +4613,22 @@ public partial class MainWindow : Window, IPluginAdmin
     /// <summary>Plugin-contributed export formats (the registry minus the built-ins), for the export dialogs.</summary>
     private System.Collections.Generic.List<Sable.Plugin.Sdk.Export.IExportProvider> PluginExporters()
         => EnsureExportRegistry().Providers.Where(p => !_builtInExportIds.Contains(p.Id)).ToList();
+
+    /// <summary>If a plugin import provider handles this file's extension, decode it through that
+    /// provider and open it as a new document. Returns false to fall through to the built-in openers.</summary>
+    private bool TryOpenWithPlugin(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path);
+        if (_importRegistry?.ByExtension(ext) is not { } prov) return false;
+
+        var img = prov.Decode(System.IO.File.ReadAllBytes(path));
+        var doc = new Sable.Engine.Document(img.Width, img.Height);
+        var layer = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, System.IO.Path.GetFileNameWithoutExtension(path));
+        layer.SetBufferFromBytes(img.Width, img.Height, img.Rgba);
+        doc.Layers.Add(layer);
+        OpenInNewTab(doc, null, System.IO.Path.GetFileName(path), path);
+        return true;
+    }
 
     /// <summary>Batch asset export (ROADMAP P3): render each chosen top-level layer at each chosen
     /// scale variant and write one file per (layer × scale) into the output folder.</summary>

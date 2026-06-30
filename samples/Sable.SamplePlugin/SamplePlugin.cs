@@ -1,9 +1,11 @@
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
 using Sable.Plugin.Sdk;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Export;
 using Sable.Plugin.Sdk.Host;
+using Sable.Plugin.Sdk.Import;
 using Sable.Plugin.Sdk.Ui;
 
 namespace Sable.SamplePlugin;
@@ -49,6 +51,7 @@ public sealed class SamplePlugin : IPlugin
         });
 
         host.Export?.Register(new PpmExportProvider());
+        host.Import?.Register(new PpmImportProvider());
     }
 
     public void Shutdown() => _host?.Logger.Info("Sample plugin shutting down.");
@@ -106,5 +109,48 @@ public sealed class PpmExportProvider : IExportProvider
             ms.WriteByte(src[p + 2]);
         }
         return ms.ToArray();
+    }
+}
+
+/// <summary>Reads a binary PPM (P6) back into an RGBA8 image (the inverse of
+/// <see cref="PpmExportProvider"/>) — a tiny example of an <see cref="IImportProvider"/>.</summary>
+public sealed class PpmImportProvider : IImportProvider
+{
+    public string Id => "ppm";
+    public string Label => "Portable Pixmap (PPM)";
+    public IReadOnlyList<string> Extensions => new[] { "ppm" };
+
+    public ImportImage Decode(byte[] data)
+    {
+        int pos = 0;
+        if (Token(data, ref pos) != "P6") throw new InvalidDataException("not a binary PPM (P6)");
+        int w = int.Parse(Token(data, ref pos));
+        int h = int.Parse(Token(data, ref pos));
+        int max = int.Parse(Token(data, ref pos));
+        if (max != 255) throw new InvalidDataException("only 8-bit PPM is supported");
+        pos++;   // single whitespace separating the header from the pixel data
+
+        var rgba = new byte[w * h * 4];
+        for (int i = 0; i < w * h; i++)
+        {
+            rgba[i * 4] = data[pos++];
+            rgba[i * 4 + 1] = data[pos++];
+            rgba[i * 4 + 2] = data[pos++];
+            rgba[i * 4 + 3] = 255;
+        }
+        return new ImportImage { Width = w, Height = h, Rgba = rgba };
+    }
+
+    // Read the next whitespace-delimited ASCII token, skipping '#' comment lines.
+    private static string Token(byte[] d, ref int pos)
+    {
+        while (pos < d.Length && (char.IsWhiteSpace((char)d[pos]) || d[pos] == '#'))
+        {
+            if (d[pos] == '#') { while (pos < d.Length && d[pos] != '\n') pos++; }
+            else pos++;
+        }
+        int start = pos;
+        while (pos < d.Length && !char.IsWhiteSpace((char)d[pos])) pos++;
+        return Encoding.ASCII.GetString(d, start, pos - start);
     }
 }

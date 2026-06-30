@@ -387,6 +387,7 @@ public class PluginSdkTests
         public ICommandApi? Commands => null;
         public IMenuApi? Menus => null;
         public IExportApi? Export => null;
+        public Sable.Plugin.Sdk.Import.IImportApi? Import => null;
         public Sable.Plugin.Sdk.Selection.ISelectionApi? Selection => null;
         public Sable.Plugin.Sdk.Pixels.IPixelApi? Pixels => null;
         public ITransactionApi? Transactions => null;

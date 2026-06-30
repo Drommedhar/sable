@@ -170,6 +170,7 @@ guard every optional API with `?.`.
 | `command.register` | Add commands to the Ctrl+K command palette | `host.Commands` → `ICommandApi` |
 | `ui.menu_command` | Add items under the **Plugins** menu | `host.Menus` → `IMenuApi` |
 | `export.provider` | Contribute a file-export format | `host.Export` → `IExportApi` |
+| `import.provider` | Contribute a file-open format | `host.Import` → `IImportApi` |
 | `selection.read` | Read the active selection (bounds + mask) | `host.Selection` → `ISelectionApi` |
 | `pixel.read` | Read active-layer + composite pixels (RGBA8) | `host.Pixels` → `IPixelApi` |
 | `undo.transaction` | Group several edits into one undo step | `host.Transactions` → `ITransactionApi` |
@@ -339,6 +340,25 @@ host.Export?.Register(new MyExporter());
 ```
 
 The host flattens/scales the composite before calling you; honour `options.Cancellation`.
+
+### 6.8b Import — `host.Import` (`import.provider`)
+
+Mirror of export: contribute an **open** format. Your extensions appear in the Open dialog, and a
+matching file is decoded through your provider into a new single-layer document.
+
+```csharp
+public sealed class MyImporter : IImportProvider
+{
+    public string Id => "myfmt";
+    public string Label => "My Format";
+    public IReadOnlyList<string> Extensions => new[] { "myf" };   // lowercase, no dot
+
+    public ImportImage Decode(byte[] data)   // throw on a malformed file
+        => new() { Width = w, Height = h, Rgba = DecodeToRgba8(data) };
+}
+
+host.Import?.Register(new MyImporter());
+```
 
 ### 6.9 Selection read — `host.Selection` (`selection.read`)
 

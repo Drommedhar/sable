@@ -249,4 +249,15 @@ public sealed class SamplePluginIntegrationTests
         int header = Encoding.ASCII.GetBytes("P6\n2 1\n255\n").Length;
         Assert.Equal(new byte[] { 10, 20, 30, 40, 50, 60 }, bytes[header..]);
     }
+
+    [Fact]
+    public void Ppm_export_then_import_round_trips_the_rgb()
+    {
+        var rgba = new byte[] { 10, 20, 30, 255, 40, 50, 60, 255 };   // 2×1 opaque
+        var encoded = new PpmExportProvider().Encode(new ExportImage { Width = 2, Height = 1, Rgba = rgba }, new ExportOptions());
+        var decoded = new PpmImportProvider().Decode(encoded);
+        Assert.Equal(2, decoded.Width);
+        Assert.Equal(1, decoded.Height);
+        Assert.Equal(rgba, decoded.Rgba);   // alpha comes back as 255
+    }
 }

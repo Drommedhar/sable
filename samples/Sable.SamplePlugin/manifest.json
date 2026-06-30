@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "sdk_version": "1",
   "entrypoint": "Sable.SamplePlugin.SamplePlugin",
-  "capabilities": ["document.read", "layer.read", "layer.write.basic", "selection.read", "pixel.read", "undo.transaction", "command.register", "ui.menu_command", "export.provider"],
+  "capabilities": ["document.read", "layer.read", "layer.write.basic", "selection.read", "pixel.read", "undo.transaction", "command.register", "ui.menu_command", "export.provider", "import.provider"],
   "permissions": {
     "filesystem_read": "none",
     "filesystem_write": "none",
