@@ -1,0 +1,81 @@
+using System.IO;
+using System.Text;
+using Sable.Plugin.Sdk;
+using Sable.Plugin.Sdk.Commands;
+using Sable.Plugin.Sdk.Export;
+using Sable.Plugin.Sdk.Host;
+using Sable.Plugin.Sdk.Ui;
+
+namespace Sable.SamplePlugin;
+
+/// <summary>
+/// Minimal reference plugin. On <see cref="Initialize"/> it contributes (capability-gated):
+///  - a command in the Ctrl+K palette,
+///  - a menu item under the Plugins menu,
+///  - a "PPM" export format.
+/// Each registration is guarded behind a null-check because the host hands a null API when the
+/// matching capability was not granted — the canonical way to write a robust plugin.
+/// </summary>
+public sealed class SamplePlugin : IPlugin
+{
+    private IHostContext? _host;
+
+    public void Initialize(IHostContext host)
+    {
+        _host = host;
+        host.Logger.Info("Sample plugin initialising.");
+
+        host.Commands?.Register(new PluginCommand
+        {
+            Id = "report",
+            Title = "Report Active Document",
+            Category = "Sample",
+            Run = ReportDocument,
+        });
+
+        host.Menus?.AddCommand(new MenuContribution
+        {
+            Id = "report",
+            Title = "Report Active Document",
+            MenuPath = "Sample",
+            Run = ReportDocument,
+        });
+
+        host.Export?.Register(new PpmExportProvider());
+    }
+
+    public void Shutdown() => _host?.Logger.Info("Sample plugin shutting down.");
+
+    private void ReportDocument()
+    {
+        var info = _host?.Document?.Active;
+        if (info is null) { _host?.Logger.Info("No active document."); return; }
+        _host?.Logger.Info($"Active document: {info.Width}x{info.Height}, {info.LayerCount} layer(s).");
+    }
+}
+
+/// <summary>Exports the flattened composite as a binary PPM (P6) image — a tiny, dependency-free
+/// example of an <see cref="IExportProvider"/>. Alpha is dropped (PPM is RGB-only).</summary>
+public sealed class PpmExportProvider : IExportProvider
+{
+    public string Id => "ppm";
+    public string Label => "Portable Pixmap (PPM)";
+    public string Extension => "ppm";
+    public bool SupportsAlpha => false;
+
+    public byte[] Encode(ExportImage image, ExportOptions options)
+    {
+        var header = Encoding.ASCII.GetBytes($"P6\n{image.Width} {image.Height}\n255\n");
+        using var ms = new MemoryStream(header.Length + image.Width * image.Height * 3);
+        ms.Write(header);
+        var src = image.Rgba;
+        for (int i = 0; i < image.Width * image.Height; i++)
+        {
+            int p = i * 4;
+            ms.WriteByte(src[p]);
+            ms.WriteByte(src[p + 1]);
+            ms.WriteByte(src[p + 2]);
+        }
+        return ms.ToArray();
+    }
+}

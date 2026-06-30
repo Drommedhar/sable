@@ -1,0 +1,16 @@
+{
+  "id": "com.sable.sample",
+  "name": "Sable Sample Plugin",
+  "version": "1.0.0",
+  "sdk_version": "1",
+  "entrypoint": "Sable.SamplePlugin.SamplePlugin",
+  "capabilities": ["document.read", "command.register", "ui.menu_command", "export.provider"],
+  "permissions": {
+    "filesystem_read": "none",
+    "filesystem_write": "none",
+    "network": false,
+    "gpu": false
+  },
+  "author": "Sable",
+  "website": "https://github.com/Drommedhar/sable"
+}

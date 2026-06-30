@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Title>Sable Sample Plugin</Title>
+    <Description>A minimal example Sable plugin: registers a command, a menu item, and a PPM export provider. References only the SDK. Copy this + manifest.json into %AppData%/Sable/plugins/&lt;name&gt;/ (with the built DLL) to try it.</Description>
+    <!-- A plugin ships only its own DLL; the SDK is provided by the host at load time. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sable.Plugin.Sdk\Sable.Plugin.Sdk.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

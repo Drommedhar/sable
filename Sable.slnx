@@ -17,6 +17,9 @@
     <Project Path="src/Sable.Tools/Sable.Tools.csproj" />
     <Project Path="src/Sable.UI/Sable.UI.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Sable.SamplePlugin/Sable.SamplePlugin.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Sable.Tests/Sable.Tests.csproj" />
   </Folder>
