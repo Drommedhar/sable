@@ -196,6 +196,49 @@ public sealed class SamplePluginIntegrationTests
     }
 
     [Fact]
+    public void Consent_gate_withholds_until_approved()
+    {
+        // Stage + install the sample to a temp plugins root.
+        var dll = typeof(SamplePlugin.SamplePlugin).Assembly.Location;
+        var src = Path.Combine(Path.GetTempPath(), "sable_consent_src_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(src);
+        File.Copy(dll, Path.Combine(src, Path.GetFileName(dll)));
+        File.WriteAllText(Path.Combine(src, "manifest.json"), """
+        {
+          "id": "com.sable.sample", "name": "Sample", "version": "1.0.0", "sdk_version": "1",
+          "entrypoint": "Sable.SamplePlugin.SamplePlugin",
+          "capabilities": ["command.register"],
+          "permissions": { "filesystem_read": "none", "filesystem_write": "none", "network": false, "gpu": false }
+        }
+        """);
+
+        var root = Path.Combine(Path.GetTempPath(), "sable_consent_root_" + Guid.NewGuid().ToString("N"));
+        var export = new ExportRegistry();
+        var cmds = new CollectingCommands();
+        var log = new PluginLogHub();
+        var state = new EngineHostState { ActiveDocument = () => new Document(8, 8), ActiveUndo = () => new UndoStack() };
+        var services = SableHostServices.Build(state, new LayerHandles(), export, cmds, new CollectingMenus());
+        var mgr = new PluginManager(root, log.For("host"),
+            p => HostContextFactory.Create(p, services, log.For(p.Id), new PluginSettingsStore(Path.GetTempPath(), p.Id)));
+
+        bool approved = false;
+        mgr.ConsentGate = _ => approved;   // not yet approved
+
+        mgr.Install(src);   // copies + LoadAll
+        var p = mgr.Registry.All[0];
+        Assert.Equal(PluginState.NeedsConsent, p.State);   // withheld
+        Assert.Empty(cmds.Commands);                       // its command did NOT register
+
+        approved = true;
+        Assert.True(mgr.ActivateApproved("com.sable.sample"));
+        Assert.Equal(PluginState.Active, mgr.Registry.All[0].State);
+        Assert.NotEmpty(cmds.Commands);                    // now registered
+
+        try { Directory.Delete(src, true); } catch { }
+        try { Directory.Delete(root, true); } catch { }
+    }
+
+    [Fact]
     public void Ppm_exporter_writes_a_valid_P6_header_and_drops_alpha()
     {
         var img = new ExportImage { Width = 2, Height = 1, Rgba = new byte[] { 10, 20, 30, 255, 40, 50, 60, 0 } };

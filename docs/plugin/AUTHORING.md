@@ -202,10 +202,11 @@ do with host-mediated resources and are surfaced for the user's trust decision.
 | `external_process` | bool | Launch external processes. |
 | `document_metadata` | bool | Read document metadata. |
 
-> **Security note:** permissions are currently **declarative**, not sandbox-enforced — a plugin
-> runs in-process with full CLR trust and *can* technically do more than it declares. They exist
-> for transparency and for the future out-of-process tier that will enforce them. Treat enabling
-> a plugin as running arbitrary code: only enable plugins you trust.
+> **Security note:** the user must **approve** your declared capabilities + permissions before the
+> plugin runs (consent prompt). However, permissions are currently **declarative**, not
+> sandbox-enforced — once approved, a plugin runs in-process with full CLR trust and *can*
+> technically do more than it declared. Consent + enforcement together arrive with the future
+> out-of-process tier. Declare only what you use, and users: only approve plugins you trust.
 
 ---
 
@@ -385,11 +386,16 @@ never reference engine types.
 ## 8. Lifecycle & safety
 
 ```
-Discovered → (manifest valid) → Loaded → (Initialize ok) → Active
-                   │ invalid                    │ throws
-                   ▼                             ▼
-                 Failed                    (caught; may quarantine)
+Discovered → (manifest valid) → Loaded → (user approves) → (Initialize ok) → Active
+                   │ invalid          │ not approved              │ throws
+                   ▼                  ▼                           ▼
+                 Failed         NeedsConsent              (caught; may quarantine)
 ```
+
+- **Consent.** A plugin loads but does **not run** until the user approves the exact set of
+  capabilities + permissions it requests (shown in a prompt on install, and an **Approve…** button
+  on its card). If a later version asks for *more* access, the user is re-prompted — a plugin can't
+  silently widen its reach.
 
 - **Crash isolation.** Every call into your plugin (`Initialize`, command/menu callbacks,
   `Shutdown`) runs behind a try/catch. A throw is logged, not propagated to the host.
@@ -413,8 +419,8 @@ must be compatible: the host loads a plugin when `MinSupportedMajor ≤ pluginMa
 
 - **Location:** `…/Sable/plugins/<folder>/` containing your `manifest.json` + DLL(s).
 - **Enable:** Preferences ▸ Performance ▸ *Enable plugins* (off by default; takes effect live).
-- **Manage:** Plugins ▸ *Manage Plugins…* — shows each plugin's state, capabilities, load errors,
-  crash count, an Enable/Disable toggle, **Reload**, and the diagnostics log.
+- **Manage:** Preferences ▸ **Plugins** — install (folder or .zip), **approve** a plugin's
+  requested access, enable/disable, uninstall, reload, and open the plugins folder.
 - **Per-plugin settings** live in `…/Sable/plugin-settings/<id>.json`.
 
 ---

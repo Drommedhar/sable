@@ -1328,7 +1328,11 @@ public partial class MainWindow : Window, IPluginAdmin
         _pluginManager = new Sable.Plugins.PluginManager(pluginsDir, _pluginLog.For("host"),
             p => Sable.Plugins.HostContextFactory.Create(
                 p, BuildHostServicesFor(p.Id), _pluginLog!.For(p.Id),
-                new Sable.Plugins.PluginSettingsStore(settingsDir, p.Id)));
+                new Sable.Plugins.PluginSettingsStore(settingsDir, p.Id)))
+        {
+            // a plugin runs only after the user has approved its requested capabilities/permissions
+            ConsentGate = p => p.Manifest is { } m && Sable.Plugins.PluginConsent.IsApproved(_settings.ApprovedPlugins, m),
+        };
 
         try
         {
@@ -1470,6 +1474,15 @@ public partial class MainWindow : Window, IPluginAdmin
 
     void IPluginAdmin.Enable(string id) => _pluginManager?.Enable(id);
     void IPluginAdmin.Disable(string id) => _pluginManager?.Disable(id);
+
+    void IPluginAdmin.Approve(string id)
+    {
+        var p = _pluginManager?.Registry.Get(id);
+        if (p?.Manifest is not { } m) return;
+        _settings.ApprovedPlugins[id] = Sable.Plugins.PluginConsent.Fingerprint(m);
+        Sable.Core.Settings.SettingsService.Save(_settings);
+        _pluginManager?.ActivateApproved(id);
+    }
 
     bool IPluginAdmin.Uninstall(string id)
     {

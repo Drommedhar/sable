@@ -9,6 +9,9 @@ public enum PluginState
     Failed,
     /// <summary>Manifest valid + assembly loaded + instance constructed, not yet initialized.</summary>
     Loaded,
+    /// <summary>Loaded but withheld from running until the user approves its requested capabilities
+    /// /permissions (PLUGIN_SDK_PLAN.md §12 consent).</summary>
+    NeedsConsent,
     /// <summary>Initialized and running.</summary>
     Active,
     /// <summary>User-disabled. Stays installed; not initialized.</summary>

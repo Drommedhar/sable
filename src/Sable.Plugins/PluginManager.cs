@@ -31,6 +31,11 @@ public sealed class PluginManager
     /// <summary>When true, plugins are discovered + validated but never loaded/activated.</summary>
     public bool SafeMode { get; set; }
 
+    /// <summary>Optional user-consent check (PLUGIN_SDK_PLAN §12): returns false for a plugin the user
+    /// has not approved, so it loads but is withheld in <see cref="PluginState.NeedsConsent"/> instead
+    /// of activating. Null = no consent gate (everything activates).</summary>
+    public Func<LoadedPlugin, bool>? ConsentGate { get; set; }
+
     /// <summary>
     /// Run the full pipeline over the plugins root. Idempotent-ish: only adds plugins not already
     /// in the registry. Returns the number activated.
@@ -54,10 +59,25 @@ public sealed class PluginManager
 
             if (SafeMode) continue;
             if (!_loader.Load(candidate)) continue;
+            if (ConsentGate is not null && !ConsentGate(candidate))
+            {
+                candidate.State = PluginState.NeedsConsent;   // loaded but withheld pending approval
+                continue;
+            }
             if (_loader.Activate(candidate, _contextFactory(candidate)))
                 activated++;
         }
         return activated;
+    }
+
+    /// <summary>Activate a plugin the user just approved (was <see cref="PluginState.NeedsConsent"/>).</summary>
+    public bool ActivateApproved(string id)
+    {
+        var p = Registry.Get(id);
+        if (p is null || SafeMode) return false;
+        if (p.Instance is null && p.Manifest is not null && !_loader.Load(p)) return false;
+        if (p.State == PluginState.NeedsConsent) p.State = PluginState.Loaded;   // approved → eligible to activate
+        return _loader.Activate(p, _contextFactory(p));
     }
 
     /// <summary>Activate a built-in/in-proc plugin not loaded from disk (manifest already set).</summary>

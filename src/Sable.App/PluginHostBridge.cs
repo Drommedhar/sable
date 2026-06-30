@@ -59,6 +59,10 @@ internal interface IPluginAdmin
     void Enable(string id);
     void Disable(string id);
 
+    /// <summary>Record the user's approval of a plugin's requested capabilities/permissions and
+    /// activate it (was <see cref="PluginState.NeedsConsent"/>).</summary>
+    void Approve(string id);
+
     /// <summary>Remove a plugin's contributions + unload + delete its folder. True = fully removed.</summary>
     bool Uninstall(string id);
 

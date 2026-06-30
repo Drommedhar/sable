@@ -147,6 +147,11 @@ public sealed class SableSettings
     /// runs external assemblies in-process, so it is an explicit opt-in.</summary>
     public bool PluginsEnabled { get; set; }
 
+    /// <summary>Per-plugin consent: plugin id → approved-request fingerprint (PluginConsent.Fingerprint).
+    /// A plugin runs only when its current request matches the stored fingerprint; asking for more
+    /// access changes the fingerprint and forces a re-approval.</summary>
+    public Dictionary<string, string> ApprovedPlugins { get; set; } = new();
+
     // --- Updates ---
     public bool AutoCheckUpdates { get; set; } = true;     // consumed by UpdateService (Phase 2 #4)
 

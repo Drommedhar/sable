@@ -607,12 +607,22 @@ public partial class SettingsWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         DockPanel.SetDock(buttons, Dock.Right);
 
-        bool active = p.State == PluginState.Active;
-        var toggle = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
-        toggle.Content = active ? Loc.T("settingsWindow.pluginDisableBtn") : Loc.T("settingsWindow.pluginEnableBtn");
-        toggle.IsEnabled = p.State is PluginState.Active or PluginState.Loaded or PluginState.Disabled or PluginState.Discovered;
-        toggle.Click += OnTogglePlugin;
-        buttons.Children.Add(toggle);
+        if (p.State == PluginState.NeedsConsent)
+        {
+            var approve = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
+            approve.Content = Loc.T("settingsWindow.pluginApproveBtn");
+            approve.Click += OnApprovePlugin;
+            buttons.Children.Add(approve);
+        }
+        else
+        {
+            bool active = p.State == PluginState.Active;
+            var toggle = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
+            toggle.Content = active ? Loc.T("settingsWindow.pluginDisableBtn") : Loc.T("settingsWindow.pluginEnableBtn");
+            toggle.IsEnabled = p.State is PluginState.Active or PluginState.Loaded or PluginState.Disabled or PluginState.Discovered;
+            toggle.Click += OnTogglePlugin;
+            buttons.Children.Add(toggle);
+        }
 
         var uninstall = new Button { Classes = { "opt" }, Padding = new Avalonia.Thickness(10, 0), Tag = p.Id };
         uninstall.Content = Loc.T("settingsWindow.pluginUninstallBtn");
@@ -653,6 +663,21 @@ public partial class SettingsWindow : Window
         BuildPluginList();
     }
 
+    private async void OnApprovePlugin(object? sender, RoutedEventArgs e)
+    {
+        if (_plugins is null || sender is not Button { Tag: string id }) return;
+        var p = _plugins.List().FirstOrDefault(x => x.Id == id);
+        if (p?.Manifest is not { } m) return;
+        if (await ConfirmConsent(m)) { _plugins.Approve(id); BuildPluginList(); }
+    }
+
+    /// <summary>Show the capability/permission request and ask the user to allow the plugin to run.</summary>
+    private System.Threading.Tasks.Task<bool> ConfirmConsent(Sable.Plugin.Sdk.Manifest.PluginManifest m)
+        => ConfirmWindow.Ask(this,
+            Loc.T("settingsWindow.pluginConsentTitle", m.Name),
+            Loc.T("settingsWindow.pluginConsentBody") + "\n\n" + PluginConsent.DescribeRequest(m),
+            Loc.T("settingsWindow.pluginAllow"), Loc.T("settingsWindow.pluginDeny"));
+
     private void OnUninstallPlugin(object? sender, RoutedEventArgs e)
     {
         if (_plugins is null || sender is not Button { Tag: string id }) return;
@@ -681,12 +706,17 @@ public partial class SettingsWindow : Window
         if (!string.IsNullOrWhiteSpace(path)) InstallFrom(path);
     }
 
-    private void InstallFrom(string source)
+    private async void InstallFrom(string source)
     {
         if (_plugins is null) return;
         var r = _plugins.Install(source);
         SetPluginStatus(r.Ok ? null : Loc.T("settingsWindow.pluginInstallFailed", r.Error ?? ""));
         BuildPluginList();
+        if (!r.Ok) return;
+
+        // A freshly-installed plugin loads in NeedsConsent — prompt for approval right away.
+        foreach (var p in _plugins.List().Where(x => x.State == PluginState.NeedsConsent).ToList())
+            if (p.Manifest is { } m && await ConfirmConsent(m)) { _plugins.Approve(p.Id); BuildPluginList(); }
     }
 
     private void OnReloadPlugins(object? sender, RoutedEventArgs e)
