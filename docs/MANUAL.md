@@ -41,7 +41,13 @@ With no document open, Sable shows a welcome screen with a grid of your recent f
 
 - **File ▸ Open** (Ctrl+O) — opens a `.sable` document.
 - **File ▸ Open Image** — imports any raster image (PNG, JPEG, WebP, BMP — anything the codec understands, EXIF rotation honoured) as a new document with one pixel layer.
-- **Photoshop documents** — opening a `.psd` imports the file **with its layer structure**: layers, groups, opacity, blend modes and masks are mapped to Sable's equivalents. After the import a notes dialog lists anything that could not be mapped exactly (and a toast warns about missing fonts in text layers). The imported document is a new untitled tab — your original PSD is never modified.
+- **Photoshop documents** — opening a `.psd` (or large-format **`.psb`**) imports the file **with its layer structure**: layers, groups (including pass-through), opacity, fill opacity, blend modes, clipping masks and layer masks are mapped to Sable's equivalents.
+  - **Adjustment layers** import as **editable** Sable adjustments (Brightness/Contrast, Levels, Curves, Hue/Saturation, Colour Balance, Black & White, Channel Mixer, Photo Filter, Posterize, Threshold, Gradient Map, Exposure, Vibrance, Invert and more) — not flattened.
+  - **Solid-colour fill layers with a vector mask** import as **editable path layers** (fill colour plus Bézier nodes), including compound shapes with holes.
+  - **Smart Objects** import as rasterised layers with their placement and source metadata preserved (embedded editing isn't supported yet).
+  - **Text and other shape/effect constructs** that can't be mapped exactly are rasterised, and anything simplified (multi-style text, text warp, vertical text, gradient-overlay stops, bevel contours, …) is reported.
+  - An embedded **ICC colour profile** is preserved and re-embedded on export.
+  - After import, the **Compatibility Report** (Window ▸ Compatibility Report, or *View report* on the import toast) lists everything that came in with reduced fidelity, plus any **missing fonts** referenced by text layers. The imported document is a new untitled tab — your original file is never modified.
 - **File ▸ New from Clipboard** — creates a document from the image currently on the system clipboard.
 - **File ▸ Place** — inserts an image file into the *current* document as a new layer.
 - **File ▸ Open Recent** — your recent files; also shown on the welcome screen.
@@ -166,7 +172,7 @@ Outside the document a checkerboard is drawn (the same checker shows through tra
 
 ### Colour mode and bit depth
 
-**Image ▸ Mode** switches the document depth between **8-bit**, **16-bit** and **32-bit (float)** per channel. Internally Sable composites in linear float colour regardless, so switching depth never degrades blending quality; the depth governs layer storage precision. The status bar shows the current mode.
+**Image ▸ Mode** switches the document depth between **8-bit**, **16-bit** and **32-bit (float)** per channel. Sable composites in linear float colour regardless, and now **edits and stores at the chosen depth end to end** — 16- and 32-bit documents keep their full precision through painting, adjustments and filters, and 16-bit PNG and TIFF import and export at full depth. The status bar shows the current mode.
 
 ### Resizing
 
@@ -637,11 +643,17 @@ AI inference is GPU-only by design (DirectML / CUDA / WebGPU-Metal). Sable check
 
 **File ▸ Export** opens the export dialog:
 
-- **Format** — **PNG** (lossless), **JPEG** or **WebP**.
-- **Quality** — 1–100% for JPEG/WebP.
+- **Format** — **PNG** (lossless), **JPEG**, **WebP** or **TIFF**, plus any **formats added by plugins**.
+- **Quality** — 1–100% for the lossy formats.
 - **Scale** — export at a percentage of the document size; the resulting pixel dimensions and an **estimated file size** update live.
 
-The export is the flattened composite, rendered on the GPU. For lossless interchange of the *layered* document, use `.sable` (or keep the source `.psd` you imported — Sable never overwrites it).
+The export is the flattened composite, rendered on the GPU. PNG and TIFF export at the document's bit depth (16-bit where applicable), and an embedded ICC profile is re-embedded.
+
+### Export Assets (batch)
+
+**File ▸ Export Assets** exports several layers in one action: tick the layers to export, pick a format and one or more **scale variants** (0.5× / 1× / 2× / 3×, each with its own filename suffix), optionally **trim each layer to its content**, choose an output folder, and Export. Every selected layer is written at every chosen scale; colliding filenames are disambiguated automatically.
+
+For lossless interchange of the *layered* document, use `.sable` (or keep the source `.psd` you imported — Sable never overwrites it).
 
 ---
 
@@ -662,6 +674,34 @@ A document saved and reopened is exactly the document you left.
 
 ---
 
+## Plugins
+
+Sable can be extended with **plugins** — small add-ons that contribute new commands, menu items, file formats and batch operations, and can read and edit your document. Plugins are **off by default** and run inside Sable with full trust, so only enable ones you trust.
+
+### Enabling and managing plugins
+
+Everything lives in **Edit ▸ Preferences ▸ Plugins**:
+
+- **Enable plugins** — the master switch (takes effect immediately).
+- **Install from Folder… / Install from .zip…** — point Sable at a plugin (a folder, or a `.zip`, containing the plugin's `manifest.json` and its files); it is copied into your plugins folder and loaded.
+- **Approve access** — before a plugin runs, Sable shows exactly what it requests (its **capabilities** and **permissions**) and asks you to **Allow** or **Don't allow**. A plugin that is later updated to request *more* access asks again — it can never quietly widen its reach.
+- Each installed plugin shows a card with its name, state, requested capabilities, recent **log** and any load errors, and buttons to **Enable / Disable**, **Uninstall**, or (if pending) **Approve…**.
+- **Reload** re-scans the folder for newly added plugins; **Open Plugins Folder** opens it in your file manager.
+
+### What plugins can add
+
+- **Commands** — appear in the **Ctrl+K command palette**.
+- **Menu items** — under a top-level **Plugins** menu.
+- **Open and export formats** — extra file types in the Open dialog and the Export / Export Assets dialogs.
+- **Keyboard shortcuts** — a plugin command can suggest a default shortcut (rebindable like any other).
+- **Batch operations** — run from **Plugins ▸ Batch Process…**: queue a list of files and a plugin processes them all headlessly, with progress and cancel.
+
+### Writing a plugin
+
+A plugin is a .NET assembly plus a `manifest.json` declaring its capabilities. The complete authoring guide — quick start, manifest reference, every host API, lifecycle and security — is in **`docs/plugin/AUTHORING.md`**, with a working example in **`samples/Sable.SamplePlugin`**.
+
+---
+
 ## Settings reference
 
 **Edit ▸ Preferences** — searchable, grouped by category:
@@ -674,8 +714,9 @@ A document saved and reopened is exactly the document you left.
 | **Performance** | Undo limit per document (default 256) · autosave on/off and interval |
 | **Colour** | Working colour info (linear RGBA float pipeline) |
 | **Machine Learning** | AI on/off (licence walkthrough) · per-feature model rows with Install · Smart Select quality (Auto/Fast/Balanced/Thorough) · model folder · generative tier on/off · model sources |
+| **Plugins** | Enable plugins · install from folder/.zip · approve / enable / disable / uninstall each plugin · per-plugin log · reload · open plugins folder (see [Plugins](#plugins)) |
 | **Updates** | Automatic update checks |
-| **Keyboard** | Rebind any command shortcut: click a row, press the combination (a modifier or F-key is required), Backspace unbinds, Reset restores the default. Conflicts are reassigned with a warning. Tool letters and navigation keys are fixed. |
+| **Keyboard** | **Migration preset** — apply a Photoshop or Affinity keymap in one click. Rebind any command shortcut: click a row, press the combination (a modifier or F-key is required), Backspace unbinds, Reset restores the default. Conflicts are reassigned with a warning. Tool letters and navigation keys are fixed. |
 | **About** | Version, runtime, GPU renderer, licence |
 
 ---
@@ -705,7 +746,7 @@ Press to activate, press again to cycle the group, **hold for a temporary tool**
 | H | Hand |
 | Z | Zoom |
 
-### Commands (all rebindable in Preferences ▸ Keyboard)
+### Commands (all rebindable in Preferences ▸ Keyboard; apply a Photoshop/Affinity preset there to migrate)
 
 | Shortcut | Command |
 |---|---|
