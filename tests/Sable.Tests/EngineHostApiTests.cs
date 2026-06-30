@@ -132,4 +132,68 @@ public sealed class EngineHostApiTests
         Assert.False(reg.ById("jpeg")!.SupportsAlpha);
         Assert.Equal("tiff", reg.ByExtension("tif") is null ? reg.ByExtension("tiff")!.Id : reg.ByExtension("tif")!.Id);
     }
+
+    // --- P1 capabilities ---
+
+    [Fact]
+    public void SelectionApi_reports_rect_and_mask()
+    {
+        var (doc, _, state, _) = World();
+        Assert.True(new EngineSelectionApi(state).Current is { HasSelection: false });
+
+        doc.Selection = new SelRect(2, 3, 4, 5);
+        var info = new EngineSelectionApi(state).Current!;
+        Assert.True(info.HasSelection);
+        Assert.Equal((2, 3, 4, 5), (info.X, info.Y, info.Width, info.Height));
+    }
+
+    [Fact]
+    public void PixelApi_reads_active_layer_and_composite()
+    {
+        var (doc, _, state, _) = World();
+        doc.Layers.Add(new PixelLayer(64, 48, "bg"));
+        var active = new EnginePixelApi(state).ActiveLayer()!;
+        Assert.Equal(64 * 48 * 4, active.Rgba.Length);
+
+        // composite comes from the injected delegate (the app's GPU readback)
+        var withComposite = state with { ReadComposite = () => (new byte[8 * 8 * 4], 8, 8) };
+        var comp = new EnginePixelApi(withComposite).Composite()!;
+        Assert.Equal(8, comp.Width);
+        Assert.Null(new EnginePixelApi(state).Composite());   // none injected → null
+    }
+
+    [Fact]
+    public void TransactionApi_groups_writes_into_one_undo_step()
+    {
+        var (doc, undo, state, handles) = World();
+        var l = new PixelLayer(64, 48, "x") { Opacity = 1f, Visible = true };
+        doc.Layers.Add(l);
+        var id = new EngineLayerApi(state, handles).All()[0].Id;
+
+        var txn = new PluginTransaction();
+        var w = new EngineLayerWriteApi(state, handles, txn);
+        var tx = new EngineTransactionApi(state, txn);
+
+        tx.Run("Batch edit", () => { w.SetOpacity(id, 0.5f); w.SetVisible(id, false); });
+
+        Assert.Equal(1, undo.Cursor);          // two writes → ONE history entry
+        Assert.Equal(0.5f, l.Opacity, 3);
+        Assert.False(l.Visible);
+
+        undo.Undo();                            // reverts the whole batch
+        Assert.Equal(1f, l.Opacity, 3);
+        Assert.True(l.Visible);
+    }
+
+    [Fact]
+    public void Writes_outside_a_transaction_are_separate_steps()
+    {
+        var (doc, undo, state, handles) = World();
+        doc.Layers.Add(new PixelLayer(64, 48, "x"));
+        var id = new EngineLayerApi(state, handles).All()[0].Id;
+        var w = new EngineLayerWriteApi(state, handles, new PluginTransaction());
+        w.SetOpacity(id, 0.5f);
+        w.SetVisible(id, false);
+        Assert.Equal(2, undo.Cursor);
+    }
 }

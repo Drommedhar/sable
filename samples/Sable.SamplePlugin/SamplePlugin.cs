@@ -32,13 +32,20 @@ public sealed class SamplePlugin : IPlugin
             Category = "Sample",
             Run = ReportDocument,
         });
-
         host.Menus?.AddCommand(new MenuContribution
         {
-            Id = "report",
-            Title = "Report Active Document",
-            MenuPath = "Sample",
-            Run = ReportDocument,
+            Id = "report", Title = "Report Active Document", MenuPath = "Sample", Run = ReportDocument,
+        });
+
+        // Demonstrates undo.transaction + layer.read + layer.write.basic: a multi-layer edit that
+        // the user undoes in a single step.
+        host.Commands?.Register(new PluginCommand
+        {
+            Id = "halve", Title = "Halve All Layer Opacities", Category = "Sample", Run = HalveOpacities,
+        });
+        host.Menus?.AddCommand(new MenuContribution
+        {
+            Id = "halve", Title = "Halve All Layer Opacities", MenuPath = "Sample", Run = HalveOpacities,
         });
 
         host.Export?.Register(new PpmExportProvider());
@@ -48,9 +55,31 @@ public sealed class SamplePlugin : IPlugin
 
     private void ReportDocument()
     {
-        var info = _host?.Document?.Active;
-        if (info is null) { _host?.Logger.Info("No active document."); return; }
-        _host?.Logger.Info($"Active document: {info.Width}x{info.Height}, {info.LayerCount} layer(s).");
+        if (_host is null) return;
+        var info = _host.Document?.Active;
+        if (info is null) { _host.Logger.Info("No active document."); return; }
+
+        var sel = _host.Selection?.Current;
+        string selText = sel is { HasSelection: true } ? $"{sel.Width}x{sel.Height} @ {sel.X},{sel.Y}" : "none";
+        var comp = _host.Pixels?.Composite();
+        _host.Logger.Info(
+            $"Active document: {info.Width}x{info.Height}, {info.LayerCount} layer(s); " +
+            $"selection: {selText}; composite: {(comp is null ? "n/a" : $"{comp.Width}x{comp.Height}")}.");
+    }
+
+    private void HalveOpacities()
+    {
+        if (_host?.Layers is not { } layers || _host.LayerWrites is not { } writes) return;
+
+        void DoIt()
+        {
+            foreach (var l in layers.All())
+                writes.SetOpacity(l.Id, l.Opacity * 0.5f);
+        }
+
+        // Group every SetOpacity into one undo step when the capability is granted, else apply directly.
+        if (_host.Transactions is { } txn) txn.Run("Halve All Layer Opacities", DoIt);
+        else DoIt();
     }
 }
 

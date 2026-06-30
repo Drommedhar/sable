@@ -15,13 +15,19 @@ public static class SableHostServices
     public static HostServices Build(
         EngineHostState state, LayerHandles handles, ExportRegistry export,
         ICommandApi? commands = null, IMenuApi? menus = null)
-        => new()
+    {
+        var txn = new PluginTransaction();
+        return new HostServices
         {
             Document = new EngineDocumentApi(state),
             Layers = new EngineLayerApi(state, handles),
-            LayerWrites = new EngineLayerWriteApi(state, handles),
+            LayerWrites = new EngineLayerWriteApi(state, handles, txn),
             Export = export,
             Commands = commands,
             Menus = menus,
+            Selection = new EngineSelectionApi(state),
+            Pixels = new EnginePixelApi(state),
+            Transactions = new EngineTransactionApi(state, txn),
         };
+    }
 }

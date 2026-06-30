@@ -2,11 +2,13 @@
 
 A complete, minimal reference plugin for Sable. Use it as a template.
 
-It declares the capabilities `document.read`, `command.register`, `ui.menu_command`,
-`export.provider` and contributes:
+It declares `document.read`, `layer.read`, `layer.write.basic`, `selection.read`, `pixel.read`,
+`undo.transaction`, `command.register`, `ui.menu_command`, `export.provider` and contributes:
 
-- a **command** (`Report Active Document`) in the Ctrl+K palette,
-- a **menu item** under **Plugins ▸ Sample**,
+- **Report Active Document** (Ctrl+K palette + **Plugins ▸ Sample**) — reports document size,
+  selection, and composite size via the read APIs,
+- **Halve All Layer Opacities** — a multi-layer edit grouped into ONE undo step via
+  `host.Transactions.Run` (demonstrates `undo.transaction` + `layer.write.basic`),
 - a **PPM (P6) export format** (appears in the Export and Export Assets dialogs).
 
 Each registration is guarded with `?.` so the plugin still loads if the host withholds a

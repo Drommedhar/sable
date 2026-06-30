@@ -42,11 +42,12 @@ public static class Capability
         FilterNode, GeneratorNode, GpuCompute, ExternalToolBridge,
     };
 
-    /// <summary>Capabilities backed by a real host API in this SDK version (P0).</summary>
+    /// <summary>Capabilities backed by a real host API surfaced on <see cref="Host.IHostContext"/>.</summary>
     public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(StringComparer.Ordinal)
     {
-        DocumentRead, LayerRead, LayerWriteBasic, CommandRegister, AutomationBatch,
+        DocumentRead, LayerRead, LayerWriteBasic, CommandRegister,
         ExportProvider, UiMenuCommand,
+        SelectionRead, PixelRead, UndoTransaction,
     };
 
     public static bool IsKnown(string id) => Known.Contains(id);

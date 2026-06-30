@@ -78,9 +78,9 @@ public sealed class SamplePluginIntegrationTests
         var plugin = ValidatedManifest("""["document.read","command.register","ui.menu_command","export.provider"]""");
         Assert.True(mgr.AddBuiltIn(plugin, new SamplePlugin.SamplePlugin()));
 
-        Assert.Single(cmds.Commands);
+        Assert.Equal(2, cmds.Commands.Count);   // report + halve
         Assert.Equal("report", cmds.Commands[0].Id);
-        Assert.Single(menus.Items);
+        Assert.Equal(2, menus.Items.Count);
         Assert.NotNull(export.ById("ppm"));   // exporter contributed
     }
 
@@ -106,8 +106,8 @@ public sealed class SamplePluginIntegrationTests
         // capability set excludes export.provider → host.Export is null → plugin's ?. skips it
         mgr.AddBuiltIn(ValidatedManifest("""["command.register"]"""), new SamplePlugin.SamplePlugin());
 
-        Assert.Single(cmds.Commands);     // command still registered
-        Assert.Null(export.ById("ppm"));  // exporter gated off
+        Assert.Equal(2, cmds.Commands.Count);   // commands still registered
+        Assert.Null(export.ById("ppm"));        // exporter gated off
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public sealed class SamplePluginIntegrationTests
         int activated = mgr.LoadAll();
         Assert.Equal(1, activated);
         Assert.NotNull(export.ById("ppm"));
-        Assert.Single(cmds.Commands);
+        Assert.Equal(2, cmds.Commands.Count);
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public sealed class SamplePluginIntegrationTests
         var install = mgr.Install(src);
         Assert.True(install.Ok, install.Error);
         Assert.Single(mgr.Registry.All);             // installed + loaded
-        Assert.Single(cmds.Commands);                // its command registered
+        Assert.Equal(2, cmds.Commands.Count);        // its commands registered
 
         // The host must release the plugin's contributions (their delegates pin the ALC) before
         // unload, else the DLL stays locked. MainWindow does this via RemovePluginContributions.

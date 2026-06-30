@@ -10,13 +10,17 @@ namespace Sable.Plugins.Engine;
 
 /// <summary>Shared accessors the engine-backed APIs read through, so the app can point them at the
 /// active tab's document/undo/selection without these adapters knowing about tabs or Avalonia.</summary>
-public sealed class EngineHostState
+public sealed record EngineHostState
 {
     public required Func<Document?> ActiveDocument { get; init; }
     public required Func<Sable.Core.Undo.UndoStack?> ActiveUndo { get; init; }
 
     /// <summary>The single selected layer, or null (none / multi-selection).</summary>
     public Func<Layer?>? SelectedLayer { get; init; }
+
+    /// <summary>The flattened composite (RGBA8 + size), or null when unavailable (headless / no GPU).
+    /// Supplied by the app (GPU readback); the engine bridge can't composite on its own.</summary>
+    public Func<(byte[] Rgba, int Width, int Height)?>? ReadComposite { get; init; }
 }
 
 /// <summary>Read access to the active document (capability <c>document.read</c>).</summary>

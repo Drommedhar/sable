@@ -37,11 +37,21 @@ public sealed class EngineLayerWriteApi : ILayerWriteApi
 {
     private readonly EngineHostState _state;
     private readonly LayerHandles _handles;
+    private readonly PluginTransaction? _txn;
 
-    public EngineLayerWriteApi(EngineHostState state, LayerHandles handles)
+    public EngineLayerWriteApi(EngineHostState state, LayerHandles handles, PluginTransaction? txn = null)
     {
         _state = state;
         _handles = handles;
+        _txn = txn;
+    }
+
+    /// <summary>Execute now, or buffer into the open transaction so the whole batch is one undo step.
+    /// Buffered commands are applied (Do) + recorded together at commit by <see cref="EngineTransactionApi"/>.</summary>
+    private void Submit(IUndoableCommand cmd)
+    {
+        if (_txn?.Pending is { } pending) pending.Add(cmd);
+        else Active().undo.Execute(cmd);
     }
 
     private static float Clamp01(float v) => Math.Clamp(v, 0f, 1f);
@@ -59,7 +69,7 @@ public sealed class EngineLayerWriteApi : ILayerWriteApi
     private void Edit<T>(string id, string name, Func<Layer, T> get, Action<Layer, T> set, T value)
     {
         var l = Require(id);
-        Active().undo.Execute(new LayerPropCommand<T>(l, name, get(l), value, set));
+        Submit(new LayerPropCommand<T>(l, name, get(l), value, set));
     }
 
     public void SetName(string id, string name)
@@ -79,23 +89,23 @@ public sealed class EngineLayerWriteApi : ILayerWriteApi
 
     public string AddPixelLayer(string name, string? parentId = null, int index = -1)
     {
-        var (doc, undo) = Active();
+        var doc = _state.ActiveDocument() ?? throw new InvalidOperationException("no active document");
         var parent = parentId is null ? doc.Layers : Require(parentId).Children;
         int at = index < 0 ? parent.Count : index;
         var layer = new PixelLayer(doc.Width, doc.Height, name);
-        undo.Execute(new AddLayerCommand(doc, parent, layer, at));
+        Submit(new AddLayerCommand(doc, parent, layer, at));
         return _handles.IdFor(layer);
     }
 
     public void Remove(string id)
     {
-        var (doc, undo) = Active();
-        undo.Execute(new RemoveLayerCommand(doc, Require(id)));
+        var doc = _state.ActiveDocument() ?? throw new InvalidOperationException("no active document");
+        Submit(new RemoveLayerCommand(doc, Require(id)));
     }
 
     public void Move(string id, int delta)
     {
-        var (doc, undo) = Active();
-        undo.Execute(new MoveLayerCommand(doc, Require(id), delta));
+        var doc = _state.ActiveDocument() ?? throw new InvalidOperationException("no active document");
+        Submit(new MoveLayerCommand(doc, Require(id), delta));
     }
 }

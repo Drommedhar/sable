@@ -170,6 +170,9 @@ guard every optional API with `?.`.
 | `command.register` | Add commands to the Ctrl+K command palette | `host.Commands` → `ICommandApi` |
 | `ui.menu_command` | Add items under the **Plugins** menu | `host.Menus` → `IMenuApi` |
 | `export.provider` | Contribute a file-export format | `host.Export` → `IExportApi` |
+| `selection.read` | Read the active selection (bounds + mask) | `host.Selection` → `ISelectionApi` |
+| `pixel.read` | Read active-layer + composite pixels (RGBA8) | `host.Pixels` → `IPixelApi` |
+| `undo.transaction` | Group several edits into one undo step | `host.Transactions` → `ITransactionApi` |
 
 ### Declared but not yet surfaced on `IHostContext`
 
@@ -177,8 +180,8 @@ These ids are **known to the validator** (so manifests using them load) but the 
 does not yet expose an API for them — declaring them grants nothing usable yet:
 
 `automation.batch` (an `IBatchApi` contract exists in the SDK but isn't wired into the host),
-`selection.read`, `pixel.read`, `pixel.write.layer_output`, `ui.panel`, `undo.transaction`,
-`document.events`, `filter.node`, `generator.node`, `gpu.compute`, `external_tool.bridge`.
+`pixel.write.layer_output`, `ui.panel`, `document.events`, `filter.node`, `generator.node`,
+`gpu.compute`, `external_tool.bridge`.
 
 Declare only what you use — it keeps the trust surface honest and future-proof.
 
@@ -335,6 +338,39 @@ host.Export?.Register(new MyExporter());
 ```
 
 The host flattens/scales the composite before calling you; honour `options.Cancellation`.
+
+### 6.9 Selection read — `host.Selection` (`selection.read`)
+
+```csharp
+var sel = host.Selection?.Current;          // null when no document
+if (sel is { HasSelection: true })
+{
+    // sel.X / sel.Y / sel.Width / sel.Height  (doc px bounds)
+    byte[]? mask = sel.Mask;                 // doc-sized coverage (255=in, 0=out), or null for a plain rect
+}
+```
+
+### 6.10 Pixel read — `host.Pixels` (`pixel.read`)
+
+```csharp
+var layer = host.Pixels?.ActiveLayer();     // active pixel layer (its own size), or null
+var comp  = host.Pixels?.Composite();        // flattened doc composite, or null when unavailable
+// buffer.Width / buffer.Height / buffer.Rgba (RGBA8, straight alpha). Copies — safe to read.
+```
+
+### 6.11 Transactions — `host.Transactions` (`undo.transaction`)
+
+Group several layer-write calls so the user undoes them as **one** step:
+
+```csharp
+host.Transactions?.Run("Recolour layers", () =>
+{
+    foreach (var l in host.Layers!.All())
+        host.LayerWrites!.SetOpacity(l.Id, l.Opacity * 0.5f);
+});   // one history entry; undo reverts the whole batch. If the body throws, nothing is recorded.
+```
+
+Without the capability, fall back to making the writes directly (each becomes its own undo step).
 
 ---
 

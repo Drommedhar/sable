@@ -5,6 +5,8 @@ using Sable.Plugin.Sdk.Export;
 using Sable.Plugin.Sdk.Host;
 using Sable.Plugin.Sdk.Layers;
 using Sable.Plugin.Sdk.Manifest;
+using Sable.Plugin.Sdk.Pixels;
+using Sable.Plugin.Sdk.Selection;
 using Sable.Plugin.Sdk.Ui;
 
 namespace Sable.Plugins;
@@ -20,7 +22,8 @@ public sealed class HostContext : IHostContext
     public HostContext(
         PluginManifest manifest, IPluginLogger logger, IPluginSettings settings,
         IDocumentApi? document, ILayerApi? layers, ILayerWriteApi? layerWrites,
-        ICommandApi? commands, IMenuApi? menus, IExportApi? export)
+        ICommandApi? commands, IMenuApi? menus, IExportApi? export,
+        ISelectionApi? selection, IPixelApi? pixels, ITransactionApi? transactions)
     {
         Manifest = manifest;
         Logger = logger;
@@ -31,6 +34,9 @@ public sealed class HostContext : IHostContext
         Commands = commands;
         Menus = menus;
         Export = export;
+        Selection = selection;
+        Pixels = pixels;
+        Transactions = transactions;
     }
 
     public PluginManifest Manifest { get; }
@@ -45,6 +51,9 @@ public sealed class HostContext : IHostContext
     public ICommandApi? Commands { get; }
     public IMenuApi? Menus { get; }
     public IExportApi? Export { get; }
+    public ISelectionApi? Selection { get; }
+    public IPixelApi? Pixels { get; }
+    public ITransactionApi? Transactions { get; }
 }
 
 /// <summary>
@@ -61,6 +70,9 @@ public sealed class HostServices
     public ICommandApi? Commands { get; init; }
     public IMenuApi? Menus { get; init; }
     public IExportApi? Export { get; init; }
+    public ISelectionApi? Selection { get; init; }
+    public IPixelApi? Pixels { get; init; }
+    public ITransactionApi? Transactions { get; init; }
 }
 
 /// <summary>
@@ -84,6 +96,9 @@ public static class HostContextFactory
             G(Capability.LayerWriteBasic) ? services.LayerWrites : null,
             G(Capability.CommandRegister) ? services.Commands : null,
             G(Capability.UiMenuCommand) ? services.Menus : null,
-            G(Capability.ExportProvider) ? services.Export : null);
+            G(Capability.ExportProvider) ? services.Export : null,
+            G(Capability.SelectionRead) ? services.Selection : null,
+            G(Capability.PixelRead) ? services.Pixels : null,
+            G(Capability.UndoTransaction) ? services.Transactions : null);
     }
 }

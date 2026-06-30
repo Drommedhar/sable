@@ -1319,6 +1319,8 @@ public partial class MainWindow : Window, IPluginAdmin
             ActiveDocument = () => Canvas.Document,
             ActiveUndo = () => _activeTab?.Vm.Undo,
             SelectedLayer = () => _activeTab?.Vm.SelectedLayer?.Model,
+            ReadComposite = () => Canvas.Document is { } d && Canvas.ReadComposite() is { } rgba
+                ? (rgba, d.Width, d.Height) : null,
         };
 
         string pluginsDir = PluginDataDir("plugins");
@@ -1344,14 +1346,18 @@ public partial class MainWindow : Window, IPluginAdmin
     private Sable.Plugins.HostServices BuildHostServicesFor(string id)
     {
         var reg = EnsureExportRegistry();
+        var txn = new Sable.Plugins.Engine.PluginTransaction();
         return new Sable.Plugins.HostServices
         {
             Document = new Sable.Plugins.Engine.EngineDocumentApi(_pluginHostState!),
             Layers = new Sable.Plugins.Engine.EngineLayerApi(_pluginHostState!, _layerHandles!),
-            LayerWrites = new Sable.Plugins.Engine.EngineLayerWriteApi(_pluginHostState!, _layerHandles!),
+            LayerWrites = new Sable.Plugins.Engine.EngineLayerWriteApi(_pluginHostState!, _layerHandles!, txn),
             Commands = new AppCommandApi(c => AddPluginCommand(id, c)),
             Menus = new AppMenuApi(m => AddPluginMenuItem(id, m)),
             Export = new AppExportApi(reg, pid => Bucket(_pluginExportIdsById, id).Add(pid)),
+            Selection = new Sable.Plugins.Engine.EngineSelectionApi(_pluginHostState!),
+            Pixels = new Sable.Plugins.Engine.EnginePixelApi(_pluginHostState!),
+            Transactions = new Sable.Plugins.Engine.EngineTransactionApi(_pluginHostState!, txn),
         };
     }
 
