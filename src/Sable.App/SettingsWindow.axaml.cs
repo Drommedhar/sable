@@ -83,6 +83,7 @@ public partial class SettingsWindow : Window
         AutosaveSwitch.IsChecked = _s.AutosaveEnabled;
         AutosaveSlider.Value = System.Math.Clamp(_s.AutosaveMinutes, 1, 60);
         AutosaveLabel.Text = _s.AutosaveMinutes.ToString();
+        PluginsSwitch.IsChecked = _s.PluginsEnabled;
         // Machine Learning
         AiEnabledSwitch.IsChecked = _s.AiEnabled;
         GenerativeEnabledSwitch.IsChecked = _s.GenerativeAiEnabled;
@@ -523,6 +524,7 @@ public partial class SettingsWindow : Window
         _s.UndoLimit = (int)UndoSlider.Value;
         _s.AutosaveEnabled = AutosaveSwitch.IsChecked == true;
         _s.AutosaveMinutes = System.Math.Clamp((int)AutosaveSlider.Value, 1, 60);
+        _s.PluginsEnabled = PluginsSwitch.IsChecked == true;
         _s.AiEnabled = AiEnabledSwitch.IsChecked == true;
         _s.GenerativeAiEnabled = GenerativeEnabledSwitch.IsChecked == true;
         _s.SmartSelectQuality = (SmartSelectQuality)System.Math.Clamp(SmartSelectCombo.SelectedIndex, 0, 3);

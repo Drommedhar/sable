@@ -104,6 +104,10 @@
                             <TextBlock x:Name="AutosaveLabel" Classes="settingLabel" Width="56" Text="5" />
                         </StackPanel>
                     </local:SettingRow>
+                    <local:SettingRow Label="Enable plugins (experimental)">
+                        <ToggleSwitch x:Name="PluginsSwitch" />
+                    </local:SettingRow>
+                    <TextBlock Classes="settingHint" Margin="0,2,0,0" Text="{loc:Loc settingsWindow.pluginsHint}" />
                 </StackPanel>
 
                 <!-- Colour -->

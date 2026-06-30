@@ -142,6 +142,11 @@ public sealed class SableSettings
     public bool AutosaveEnabled { get; set; } = true;
     public int AutosaveMinutes { get; set; } = 5;          // autosave interval for crash recovery
 
+    // --- Plugins (PLUGIN_SDK_PLAN) ---
+    /// <summary>Load third-party plugins from %AppData%/Sable/plugins. Off by default — enabling it
+    /// runs external assemblies in-process, so it is an explicit opt-in.</summary>
+    public bool PluginsEnabled { get; set; }
+
     // --- Updates ---
     public bool AutoCheckUpdates { get; set; } = true;     // consumed by UpdateService (Phase 2 #4)
 

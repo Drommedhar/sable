@@ -208,6 +208,9 @@
                 <MenuItem x:Name="PanelLayersItem" Header="{loc:Loc mainWindow.panelLayers}" ToggleType="CheckBox" IsChecked="True" Click="OnTogglePanelLayers" />
                 <MenuItem x:Name="ContextBarItem" Header="{loc:Loc mainWindow.contextTaskBar}" ToggleType="CheckBox" IsChecked="True" Click="OnToggleContextBar" />
             </MenuItem>
+            <MenuItem Header="{loc:Loc mainWindow.plugins}" x:Name="PluginsMenu" IsVisible="False">
+                <MenuItem x:Name="PluginsEmptyItem" Header="{loc:Loc mainWindow.noPluginsLoaded}" IsEnabled="False" />
+            </MenuItem>
             <MenuItem Header="{loc:Loc mainWindow.help}">
                 <MenuItem Header="{loc:Loc mainWindow.keyboardShortcuts}" Click="OnShortcuts" />
                 <Separator />

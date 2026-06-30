@@ -122,6 +122,7 @@ public partial class MainWindow : Window
             RestoreSession();
             OpenLaunchArgs();               // files passed on the command line (file associations)
             StartAutosave();
+            InitPluginsIfEnabled();         // load third-party plugins (opt-in; PLUGIN_SDK_PLAN)
             if (_settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(manual: false);   // silent launch check
             if (!_settings.OnboardingShown)
             {
@@ -432,6 +433,7 @@ public partial class MainWindow : Window
         _settings.OpenTabs = _tabs.Where(t => t.Path is not null).Select(t => t.Path!).ToList();
         Sable.Core.Settings.SettingsService.Save(_settings);
         RecoveryService.Clear();   // clean exit → discard autosaved recovery copies
+        try { _pluginManager?.ShutdownAll(); } catch { }   // let plugins release resources
         try { _comfy?.Dispose(); } catch { }     // stop the ComfyUI process
     }
 
@@ -640,6 +642,7 @@ public partial class MainWindow : Window
             RebuildKeyGestures();   // pick up any rebound hotkeys
             foreach (var tab in _tabs) tab.Vm.Undo.Capacity = _settings.UndoLimit;   // apply undo limit live
             StartAutosave();   // pick up an edited autosave interval / toggle without a restart
+            InitPluginsIfEnabled();   // if plugins were just enabled, build the host now
         }
         // AI enable + model installs (+ GPU runtime + ComfyUI sources) happen LIVE inside the ML panel. Drop
         // any built backend so the next AI op rebuilds it — picking up a newly installed model / source.
@@ -1281,6 +1284,96 @@ public partial class MainWindow : Window
     private void OnLoadSelection(object? sender, RoutedEventArgs e)
     {
         if (Canvas.Document is { } d && d.SavedSelection is { } m) d.SetMaskSelection((byte[])m.Clone());
+    }
+
+    // --- plugin host (PLUGIN_SDK_PLAN; opt-in, default off) ---
+    private Sable.Plugins.PluginManager? _pluginManager;
+    private Sable.Plugins.ExportRegistry? _exportRegistry;
+    private Sable.Plugins.PluginLogHub? _pluginLog;
+    private Sable.Plugins.Engine.LayerHandles? _layerHandles;
+    private readonly List<Sable.Plugin.Sdk.Commands.PluginCommand> _pluginCommands = new();
+
+    private static string PluginDataDir(string sub) =>
+        System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
+            "Sable", sub);
+
+    /// <summary>Build the plugin host and load installed plugins — only when the user has opted in.
+    /// Idempotent: a second call (e.g. after enabling in Preferences) is a no-op once built.</summary>
+    private void InitPluginsIfEnabled()
+    {
+        if (!_settings.PluginsEnabled || _pluginManager is not null) return;
+
+        _exportRegistry = new Sable.Plugins.ExportRegistry();
+        Sable.Plugins.Engine.BuiltInExporters.RegisterAll(_exportRegistry);
+        _pluginLog = new Sable.Plugins.PluginLogHub(
+            e => System.Diagnostics.Debug.WriteLine($"[plugin {e.PluginId}] {e.Level}: {e.Message}"));
+        _layerHandles = new Sable.Plugins.Engine.LayerHandles();
+
+        var state = new Sable.Plugins.Engine.EngineHostState
+        {
+            ActiveDocument = () => Canvas.Document,
+            ActiveUndo = () => _activeTab?.Vm.Undo,
+            SelectedLayer = () => _activeTab?.Vm.SelectedLayer?.Model,
+        };
+        var services = Sable.Plugins.Engine.SableHostServices.Build(
+            state, _layerHandles, _exportRegistry,
+            new AppCommandApi(RegisterPluginCommand), new AppMenuApi(AddPluginMenuItem));
+
+        string pluginsDir = PluginDataDir("plugins");
+        string settingsDir = PluginDataDir("plugin-settings");
+        _pluginManager = new Sable.Plugins.PluginManager(pluginsDir, _pluginLog.For("host"),
+            p => Sable.Plugins.HostContextFactory.Create(
+                p, services, _pluginLog!.For(p.Id),
+                new Sable.Plugins.PluginSettingsStore(settingsDir, p.Id)));
+
+        try
+        {
+            System.IO.Directory.CreateDirectory(pluginsDir);
+            int n = _pluginManager.LoadAll();
+            _pluginLog.For("host").Info($"loaded {n} plugin(s) from {pluginsDir}");
+        }
+        catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+
+        PluginsMenu.IsVisible = true;
+    }
+
+    private void RegisterPluginCommand(Sable.Plugin.Sdk.Commands.PluginCommand command)
+        => _pluginCommands.Add(command);
+
+    private void AddPluginMenuItem(Sable.Plugin.Sdk.Ui.MenuContribution item)
+    {
+        PluginsEmptyItem.IsVisible = false;
+        var parent = (ItemsControl)PluginsMenu;
+        // resolve / create the slash-separated sub-menu path under the Plugins menu
+        if (!string.IsNullOrWhiteSpace(item.MenuPath))
+            foreach (var part in item.MenuPath.Split('/', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries))
+                parent = FindOrAddSubMenu(parent, part);
+
+        var leaf = new MenuItem { Header = item.Title };
+        leaf.Click += (_, _) => RunGuarded(item.Title, item.Run);
+        parent.Items.Add(leaf);
+    }
+
+    private static MenuItem FindOrAddSubMenu(ItemsControl parent, string header)
+    {
+        foreach (var child in parent.Items)
+            if (child is MenuItem mi && mi.Header as string == header) return mi;
+        var added = new MenuItem { Header = header };
+        parent.Items.Add(added);
+        return added;
+    }
+
+    /// <summary>Run a plugin-supplied callback behind a try/catch so a misbehaving plugin can't take
+    /// down the host (the loader quarantines repeat offenders separately).</summary>
+    private void RunGuarded(string what, System.Action run)
+    {
+        try { run(); }
+        catch (System.Exception ex)
+        {
+            _pluginLog?.For("host").Error($"plugin command '{what}' threw", ex);
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
     }
 
     // --- autosave + crash recovery (PLAN §2.6) ---
@@ -3409,6 +3502,12 @@ public partial class MainWindow : Window
             (Loc.T("mainWindow.windowHistory"), () => OnToggleHistory(null, _e)),
         };
         foreach (var t in _toolKinds) { var k = t; actions.Add((Loc.T("tools.cyclePrefix", ToolDisplayName(k)), () => Canvas.ActiveTool = k)); }
+        foreach (var c in _pluginCommands)
+        {
+            var cmd = c;
+            string label = string.IsNullOrWhiteSpace(cmd.Category) ? cmd.Title : $"{cmd.Category}: {cmd.Title}";
+            actions.Add((label, () => RunGuarded(cmd.Title, cmd.Run)));
+        }
         var pal = new CommandPalette(actions);
         pal.Show(this);
     }
