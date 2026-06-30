@@ -170,7 +170,7 @@ public partial class MainWindow : Window, IPluginAdmin
 
         // contextual task bar follows the selection (position + show/hide)
         var tbTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        tbTimer.Tick += (_, _) => { UpdateTaskBar(); UpdateToasts(); };
+        tbTimer.Tick += (_, _) => { UpdateTaskBar(); UpdateToasts(); PollPluginDocEvents(); };
         tbTimer.Start();
 
         // click a ruler to drop a guide: top ruler → vertical guide (X), left ruler → horizontal guide (Y)
@@ -1301,6 +1301,8 @@ public partial class MainWindow : Window, IPluginAdmin
     private readonly Dictionary<string, List<string>> _pluginExportIdsById = new();
     private readonly Dictionary<string, List<string>> _pluginImportIdsById = new();
     private Sable.Plugins.ImportRegistry? _importRegistry;
+    private Sable.Plugins.DocumentEventHub? _docEventHub;
+    private int _lastDocVer = -1, _lastSelVer = -1;   // change-poll trackers for document.events
 
     // During a batch run these point at the headless batch document so the plugin's read/write APIs
     // target it instead of the on-screen tab. Null outside a run. Touched only by the batch handler's
@@ -1326,6 +1328,7 @@ public partial class MainWindow : Window, IPluginAdmin
         _pluginLog = new Sable.Plugins.PluginLogHub(
             e => System.Diagnostics.Debug.WriteLine($"[plugin {e.PluginId}] {e.Level}: {e.Message}"));
         _layerHandles = new Sable.Plugins.Engine.LayerHandles();
+        _docEventHub = new Sable.Plugins.DocumentEventHub();
         _pluginHostState = new Sable.Plugins.Engine.EngineHostState
         {
             ActiveDocument = () => _batchDoc ?? Canvas.Document,
@@ -1378,7 +1381,22 @@ public partial class MainWindow : Window, IPluginAdmin
             PixelWrites = new Sable.Plugins.Engine.EnginePixelWriteApi(_pluginHostState!, txn),
             Transactions = new Sable.Plugins.Engine.EngineTransactionApi(_pluginHostState!, txn),
             Automation = new AppBatchApi(op => AddPluginBatchOp(id, op)),
+            Events = new AppDocumentEvents(id, _docEventHub!, (pid, h) => RunGuarded("document.event", h, pid)),
         };
+    }
+
+    /// <summary>Poll the active document's content/selection versions and fire the plugin
+    /// document.events signals on change. Called from the 250 ms task-bar tick (cheap, no allocation
+    /// unless something changed). Tab switches fire ActiveDocumentChanged separately in ActivateTab.</summary>
+    private void PollPluginDocEvents()
+    {
+        if (_docEventHub is not { HasSubscribers: true }) return;
+        if (Canvas.Document is not { } doc) return;
+
+        int selVer = doc.SelectionVersion;
+        int docVer = _activeTab?.Vm.Undo.Cursor ?? 0;
+        if (selVer != _lastSelVer) { _lastSelVer = selVer; _docEventHub.RaiseSelectionChanged(); }
+        if (docVer != _lastDocVer) { _lastDocVer = docVer; _docEventHub.RaiseDocumentChanged(); }
     }
 
     private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string id)
@@ -1459,6 +1477,7 @@ public partial class MainWindow : Window, IPluginAdmin
         _pluginCommandsById.Remove(id);
         _pluginMenusById.Remove(id);
         _pluginBatchOpsById.Remove(id);
+        _docEventHub?.RemoveOwner(id);   // drop its change handlers (release the ALC-rooted delegates)
         if (_pluginExportIdsById.TryGetValue(id, out var exportIds))
         {
             foreach (var pid in exportIds) _exportRegistry?.Unregister(pid);
@@ -1489,10 +1508,12 @@ public partial class MainWindow : Window, IPluginAdmin
         _pluginBatchOpsById.Clear();
         _pluginExportIdsById.Clear();
         _pluginImportIdsById.Clear();
+        _docEventHub?.Clear();
         RebuildKeyGestures();   // drop all plugin shortcuts
         _pluginManager = null;
         _pluginLog = null;
         _pluginHostState = null;
+        _docEventHub = null;
         PluginsMenu.IsVisible = false;
         PluginsMenu.Items.Clear();
         PluginsMenu.Items.Add(new MenuItem { Header = Loc.T("mainWindow.noPluginsLoaded"), IsEnabled = false });
@@ -3629,6 +3650,12 @@ public partial class MainWindow : Window, IPluginAdmin
         UpdateEmptyState();
         UpdateDocInfo();
         UpdateZoomLabel();
+
+        // document.events: a different document is now active; reset the change-poll baselines so the
+        // switch itself doesn't spuriously fire DocumentChanged/SelectionChanged next tick.
+        _lastDocVer = tab.Vm.Undo.Cursor;
+        _lastSelVer = tab.Doc.SelectionVersion;
+        _docEventHub?.RaiseActiveDocumentChanged();
     }
 
     // wire the canvas callbacks to the active tab's view-model

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Sable.Plugin.Sdk.Automation;
 using Sable.Plugin.Sdk.Commands;
+using Sable.Plugin.Sdk.Document;
 using Sable.Plugin.Sdk.Export;
 using Sable.Plugin.Sdk.Import;
 using Sable.Plugin.Sdk.Ui;
@@ -71,6 +72,25 @@ internal sealed class AppBatchApi : IBatchRegistry
     private readonly Action<BatchOperation> _add;
     public AppBatchApi(Action<BatchOperation> add) => _add = add;
     public void Register(BatchOperation operation) => _add(operation);
+}
+
+/// <summary>UI-side <see cref="IDocumentEvents"/>: a plugin's change handlers are registered with the
+/// shared <see cref="DocumentEventHub"/> under the plugin id (so uninstall drops them), each wrapped
+/// in the host's per-plugin crash guard.</summary>
+internal sealed class AppDocumentEvents : IDocumentEvents
+{
+    private readonly string _id;
+    private readonly DocumentEventHub _hub;
+    private readonly Action<string, Action> _guard;   // (pluginId, handler) → run guarded
+    public AppDocumentEvents(string id, DocumentEventHub hub, Action<string, Action> guard)
+    {
+        _id = id;
+        _hub = hub;
+        _guard = guard;
+    }
+    public void OnDocumentChanged(Action h) => _hub.OnDocumentChanged(_id, () => _guard(_id, h));
+    public void OnSelectionChanged(Action h) => _hub.OnSelectionChanged(_id, () => _guard(_id, h));
+    public void OnActiveDocumentChanged(Action h) => _hub.OnActiveDocumentChanged(_id, () => _guard(_id, h));
 }
 
 /// <summary>The plugin-management surface the Settings ▸ Plugins page drives. Implemented by

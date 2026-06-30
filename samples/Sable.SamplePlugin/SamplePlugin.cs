@@ -72,6 +72,11 @@ public sealed class SamplePlugin : IPlugin
 
         host.Export?.Register(new PpmExportProvider());
         host.Import?.Register(new PpmImportProvider());
+
+        // document.events: react to changes (here we just log; a real plugin would refresh a panel).
+        host.Events?.OnDocumentChanged(() => host.Logger.Debug("document changed"));
+        host.Events?.OnSelectionChanged(() => host.Logger.Debug("selection changed"));
+        host.Events?.OnActiveDocumentChanged(() => host.Logger.Debug("active document changed"));
     }
 
     private void InvertActiveLayer()

@@ -26,7 +26,7 @@ public sealed class HostContext : IHostContext
         IDocumentApi? document, ILayerApi? layers, ILayerWriteApi? layerWrites,
         ICommandApi? commands, IMenuApi? menus, IExportApi? export, IImportApi? import,
         ISelectionApi? selection, IPixelApi? pixels, IPixelWriteApi? pixelWrites,
-        ITransactionApi? transactions, IBatchRegistry? automation)
+        ITransactionApi? transactions, IBatchRegistry? automation, IDocumentEvents? events)
     {
         Manifest = manifest;
         Logger = logger;
@@ -43,6 +43,7 @@ public sealed class HostContext : IHostContext
         PixelWrites = pixelWrites;
         Transactions = transactions;
         Automation = automation;
+        Events = events;
     }
 
     public PluginManifest Manifest { get; }
@@ -63,6 +64,7 @@ public sealed class HostContext : IHostContext
     public IPixelWriteApi? PixelWrites { get; }
     public ITransactionApi? Transactions { get; }
     public IBatchRegistry? Automation { get; }
+    public IDocumentEvents? Events { get; }
 }
 
 /// <summary>
@@ -85,6 +87,7 @@ public sealed class HostServices
     public IPixelWriteApi? PixelWrites { get; init; }
     public ITransactionApi? Transactions { get; init; }
     public IBatchRegistry? Automation { get; init; }
+    public IDocumentEvents? Events { get; init; }
 }
 
 /// <summary>
@@ -114,6 +117,7 @@ public static class HostContextFactory
             G(Capability.PixelRead) ? services.Pixels : null,
             G(Capability.PixelWriteLayerOutput) ? services.PixelWrites : null,
             G(Capability.UndoTransaction) ? services.Transactions : null,
-            G(Capability.AutomationBatch) ? services.Automation : null);
+            G(Capability.AutomationBatch) ? services.Automation : null,
+            G(Capability.DocumentEvents) ? services.Events : null);
     }
 }

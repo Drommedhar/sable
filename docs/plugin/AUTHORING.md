@@ -176,14 +176,14 @@ guard every optional API with `?.`.
 | `pixel.read` | Read active-layer + composite pixels (RGBA8) | `host.Pixels` → `IPixelApi` |
 | `pixel.write.layer_output` | Write the active pixel layer (whole buffer or a region), undoable | `host.PixelWrites` → `IPixelWriteApi` |
 | `undo.transaction` | Group several edits into one undo step | `host.Transactions` → `ITransactionApi` |
+| `document.events` | React to document / selection / active-doc changes | `host.Events` → `IDocumentEvents` |
 
 ### Declared but not yet surfaced on `IHostContext`
 
 These ids are **known to the validator** (so manifests using them load) but the current app host
 does not yet expose an API for them — declaring them grants nothing usable yet:
 
-`ui.panel`, `document.events`, `filter.node`, `generator.node`,
-`gpu.compute`, `external_tool.bridge`.
+`ui.panel`, `filter.node`, `generator.node`, `gpu.compute`, `external_tool.bridge`.
 
 Declare only what you use — it keeps the trust surface honest and future-proof.
 
@@ -445,6 +445,20 @@ host.Automation?.Register(new BatchOperation
 ```
 
 `SaveDocument` picks the encoder from the path extension (`.sable`, `.png`, `.jpg`, `.tif`, …).
+
+### 6.13 Document events — `host.Events` (`document.events`)
+
+Subscribe to coalesced change notifications and refresh your state in response:
+
+```csharp
+host.Events?.OnDocumentChanged(() => { /* an edit / undo / redo happened */ });
+host.Events?.OnSelectionChanged(() => { /* the selection changed */ });
+host.Events?.OnActiveDocumentChanged(() => { /* a different document is now active */ });
+```
+
+You get *"something changed"*, not a diff — read the current state via the document/layer/selection
+APIs. Handlers run on the UI thread and are dropped automatically when your plugin is
+disabled/uninstalled. (Today they're delivered by a short poll, so expect up to ~250 ms latency.)
 
 ---
 

@@ -393,6 +393,7 @@ public class PluginSdkTests
         public Sable.Plugin.Sdk.Pixels.IPixelWriteApi? PixelWrites => null;
         public ITransactionApi? Transactions => null;
         public Sable.Plugin.Sdk.Automation.IBatchRegistry? Automation => null;
+        public Sable.Plugin.Sdk.Document.IDocumentEvents? Events => null;
     }
 
     private sealed class FakeSettings : IPluginSettings

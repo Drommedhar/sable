@@ -45,4 +45,5 @@ public interface IHostContext
     IPixelWriteApi? PixelWrites { get; }// pixel.write.layer_output
     ITransactionApi? Transactions { get; } // undo.transaction
     IBatchRegistry? Automation { get; } // automation.batch
+    IDocumentEvents? Events { get; }    // document.events
 }

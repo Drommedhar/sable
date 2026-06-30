@@ -48,7 +48,7 @@ public static class Capability
     {
         DocumentRead, LayerRead, LayerWriteBasic, CommandRegister, AutomationBatch,
         ExportProvider, ImportProvider, UiMenuCommand,
-        SelectionRead, PixelRead, PixelWriteLayerOutput, UndoTransaction,
+        SelectionRead, PixelRead, PixelWriteLayerOutput, UndoTransaction, DocumentEvents,
     };
 
     public static bool IsKnown(string id) => Known.Contains(id);
