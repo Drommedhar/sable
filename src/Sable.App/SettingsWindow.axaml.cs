@@ -16,6 +16,7 @@ using Sable.Ai.Download;
 using Sable.Ai.Models;
 using Sable.Core.Ai;
 using Sable.Core.Settings;
+using Sable.Plugin.Sdk.Host;
 using Sable.Plugins;
 
 using Sable.App.Localization;
@@ -634,10 +635,42 @@ public partial class SettingsWindow : Window
 
         col.Children.Add(Faint($"{p.Id}  ·  {p.State}"));
         if (p.Manifest is { } m) col.Children.Add(Faint(Loc.T("settingsWindow.pluginCaps", string.Join(", ", m.Capabilities))));
+        if (p.CrashCount > 0) col.Children.Add(WarnRow(Loc.T("settingsWindow.pluginCrashes", p.CrashCount)));
         foreach (var err in p.Errors) col.Children.Add(WarnRow(err));
+
+        col.Children.Add(BuildLogTail(p.Id));
 
         card.Child = col;
         return card;
+    }
+
+    /// <summary>A collapsible "Recent log" expander tailing this plugin's <see cref="PluginLogEntry"/>s
+    /// (newest last, colour-coded by level). Empty until the plugin logs something.</summary>
+    private Control BuildLogTail(string id)
+    {
+        var body = new StackPanel { Spacing = 1 };
+        var entries = _plugins?.Logs(id, 50) ?? System.Array.Empty<PluginLogEntry>();
+        if (entries.Count == 0)
+            body.Children.Add(Faint(Loc.T("settingsWindow.pluginLogEmpty")));
+        else
+            foreach (var e in entries)
+            {
+                string line = $"{e.Level}: {e.Message}";
+                body.Children.Add(e.Level >= LogLevel.Warning ? WarnRow(line) : Faint(line));
+            }
+
+        var expander = new Expander
+        {
+            Header = Loc.T("settingsWindow.pluginLogTitle"),
+            Margin = new Avalonia.Thickness(0, 4, 0, 0),
+            Content = new ScrollViewer
+            {
+                MaxHeight = 140,
+                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                Content = body,
+            },
+        };
+        return expander;
     }
 
     private TextBlock Faint(string s)

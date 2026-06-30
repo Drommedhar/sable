@@ -15,7 +15,8 @@ public static class SableHostServices
     public static HostServices Build(
         EngineHostState state, LayerHandles handles, ExportRegistry export,
         ICommandApi? commands = null, IMenuApi? menus = null,
-        Sable.Plugin.Sdk.Import.IImportApi? import = null)
+        Sable.Plugin.Sdk.Import.IImportApi? import = null,
+        Sable.Plugin.Sdk.Automation.IBatchRegistry? automation = null)
     {
         var txn = new PluginTransaction();
         return new HostServices
@@ -29,7 +30,9 @@ public static class SableHostServices
             Menus = menus,
             Selection = new EngineSelectionApi(state),
             Pixels = new EnginePixelApi(state),
+            PixelWrites = new EnginePixelWriteApi(state, txn),
             Transactions = new EngineTransactionApi(state, txn),
+            Automation = automation,
         };
     }
 }

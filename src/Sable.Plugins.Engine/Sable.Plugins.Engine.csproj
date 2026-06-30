@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Sable.Plugins\Sable.Plugins.csproj" />
     <ProjectReference Include="..\Sable.Core\Sable.Core.csproj" />
     <ProjectReference Include="..\Sable.Engine\Sable.Engine.csproj" />
+    <ProjectReference Include="..\Sable.Tools\Sable.Tools.csproj" />
     <ProjectReference Include="..\Sable.Imaging\Sable.Imaging.csproj" />
   </ItemGroup>
 

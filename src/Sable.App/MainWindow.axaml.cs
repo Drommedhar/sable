@@ -1297,9 +1297,17 @@ public partial class MainWindow : Window, IPluginAdmin
     // plugin's collectible load context — dropping them lets the assembly unload + the DLL delete).
     private readonly Dictionary<string, List<Sable.Plugin.Sdk.Commands.PluginCommand>> _pluginCommandsById = new();
     private readonly Dictionary<string, List<Sable.Plugin.Sdk.Ui.MenuContribution>> _pluginMenusById = new();
+    private readonly Dictionary<string, List<Sable.Plugin.Sdk.Automation.BatchOperation>> _pluginBatchOpsById = new();
     private readonly Dictionary<string, List<string>> _pluginExportIdsById = new();
     private readonly Dictionary<string, List<string>> _pluginImportIdsById = new();
     private Sable.Plugins.ImportRegistry? _importRegistry;
+
+    // During a batch run these point at the headless batch document so the plugin's read/write APIs
+    // target it instead of the on-screen tab. Null outside a run. Touched only by the batch handler's
+    // thread (the canvas render loop never reads them).
+    private Sable.Engine.Document? _batchDoc;
+    private Sable.Core.Undo.UndoStack? _batchUndo;
+    private Sable.Engine.Layers.Layer? _batchSelected;
 
     private Sable.Plugins.ImportRegistry EnsureImportRegistry() => _importRegistry ??= new Sable.Plugins.ImportRegistry();
 
@@ -1320,11 +1328,12 @@ public partial class MainWindow : Window, IPluginAdmin
         _layerHandles = new Sable.Plugins.Engine.LayerHandles();
         _pluginHostState = new Sable.Plugins.Engine.EngineHostState
         {
-            ActiveDocument = () => Canvas.Document,
-            ActiveUndo = () => _activeTab?.Vm.Undo,
-            SelectedLayer = () => _activeTab?.Vm.SelectedLayer?.Model,
-            ReadComposite = () => Canvas.Document is { } d && Canvas.ReadComposite() is { } rgba
-                ? (rgba, d.Width, d.Height) : null,
+            ActiveDocument = () => _batchDoc ?? Canvas.Document,
+            ActiveUndo = () => _batchDoc is not null ? _batchUndo : _activeTab?.Vm.Undo,
+            SelectedLayer = () => _batchDoc is not null ? _batchSelected : _activeTab?.Vm.SelectedLayer?.Model,
+            ReadComposite = () => _batchDoc is { } bd
+                ? (BatchCompositeOnUi(bd) is { } brgba ? (brgba, bd.Width, bd.Height) : ((byte[], int, int)?)null)
+                : (Canvas.Document is { } d && Canvas.ReadComposite() is { } rgba ? (rgba, d.Width, d.Height) : null),
         };
 
         string pluginsDir = PluginDataDir("plugins");
@@ -1366,7 +1375,9 @@ public partial class MainWindow : Window, IPluginAdmin
             Import = new AppImportApi(EnsureImportRegistry(), pid => Bucket(_pluginImportIdsById, id).Add(pid)),
             Selection = new Sable.Plugins.Engine.EngineSelectionApi(_pluginHostState!),
             Pixels = new Sable.Plugins.Engine.EnginePixelApi(_pluginHostState!),
+            PixelWrites = new Sable.Plugins.Engine.EnginePixelWriteApi(_pluginHostState!, txn),
             Transactions = new Sable.Plugins.Engine.EngineTransactionApi(_pluginHostState!, txn),
+            Automation = new AppBatchApi(op => AddPluginBatchOp(id, op)),
         };
     }
 
@@ -1374,7 +1385,10 @@ public partial class MainWindow : Window, IPluginAdmin
         => map.TryGetValue(id, out var list) ? list : (map[id] = new List<T>());
 
     private void AddPluginCommand(string id, Sable.Plugin.Sdk.Commands.PluginCommand command)
-        => Bucket(_pluginCommandsById, id).Add(command);
+    {
+        Bucket(_pluginCommandsById, id).Add(command);
+        if (!string.IsNullOrWhiteSpace(command.DefaultGesture)) RebuildKeyGestures();   // register its shortcut
+    }
 
     private void AddPluginMenuItem(string id, Sable.Plugin.Sdk.Ui.MenuContribution item)
     {
@@ -1382,12 +1396,36 @@ public partial class MainWindow : Window, IPluginAdmin
         RebuildPluginsMenu();
     }
 
+    private void AddPluginBatchOp(string id, Sable.Plugin.Sdk.Automation.BatchOperation op)
+    {
+        Bucket(_pluginBatchOpsById, id).Add(op);
+        RebuildPluginsMenu();   // the "Batch Process…" item appears once there's ≥1 op
+    }
+
+    /// <summary>All batch operations across loaded plugins (for the Batch UI).</summary>
+    private List<Sable.Plugin.Sdk.Automation.BatchOperation> AllBatchOps()
+    {
+        var list = new List<Sable.Plugin.Sdk.Automation.BatchOperation>();
+        foreach (var ops in _pluginBatchOpsById.Values) list.AddRange(ops);
+        return list;
+    }
+
     /// <summary>Rebuild the Plugins menu from all current contributions (call after add/remove).</summary>
     private void RebuildPluginsMenu()
     {
         PluginsMenu.Items.Clear();
         bool any = false;
-        foreach (var list in _pluginMenusById.Values)
+
+        if (AllBatchOps().Count > 0)   // host-provided entry point for plugin batch operations
+        {
+            any = true;
+            var batch = new MenuItem { Header = Loc.T("mainWindow.batchProcess") };
+            batch.Click += OnRunBatch;
+            PluginsMenu.Items.Add(batch);
+            PluginsMenu.Items.Add(new Separator());
+        }
+
+        foreach (var (pid, list) in _pluginMenusById)
             foreach (var item in list)
             {
                 any = true;
@@ -1398,7 +1436,8 @@ public partial class MainWindow : Window, IPluginAdmin
                 var leaf = new MenuItem { Header = item.Title };
                 var run = item.Run;
                 var title = item.Title;
-                leaf.Click += (_, _) => RunGuarded(title, run);
+                var owner = pid;
+                leaf.Click += (_, _) => RunGuarded(title, run, owner);
                 parent.Items.Add(leaf);
             }
         if (!any)
@@ -1419,6 +1458,7 @@ public partial class MainWindow : Window, IPluginAdmin
     {
         _pluginCommandsById.Remove(id);
         _pluginMenusById.Remove(id);
+        _pluginBatchOpsById.Remove(id);
         if (_pluginExportIdsById.TryGetValue(id, out var exportIds))
         {
             foreach (var pid in exportIds) _exportRegistry?.Unregister(pid);
@@ -1430,6 +1470,7 @@ public partial class MainWindow : Window, IPluginAdmin
             _pluginImportIdsById.Remove(id);
         }
         RebuildPluginsMenu();
+        RebuildKeyGestures();   // drop the removed plugin's shortcuts
     }
 
     /// <summary>Tear the plugin host down entirely (global disable): shut down, drop all
@@ -1445,8 +1486,10 @@ public partial class MainWindow : Window, IPluginAdmin
                 foreach (var pid in im) _importRegistry?.Unregister(pid);
         _pluginCommandsById.Clear();
         _pluginMenusById.Clear();
+        _pluginBatchOpsById.Clear();
         _pluginExportIdsById.Clear();
         _pluginImportIdsById.Clear();
+        RebuildKeyGestures();   // drop all plugin shortcuts
         _pluginManager = null;
         _pluginLog = null;
         _pluginHostState = null;
@@ -1457,14 +1500,117 @@ public partial class MainWindow : Window, IPluginAdmin
 
     /// <summary>Run a plugin-supplied callback behind a try/catch so a misbehaving plugin can't take
     /// down the host (the loader quarantines repeat offenders separately).</summary>
-    private void RunGuarded(string what, System.Action run)
+    private void RunGuarded(string what, System.Action run, string? pluginId = null)
     {
         try { run(); }
         catch (System.Exception ex)
         {
-            _pluginLog?.For("host").Error($"plugin command '{what}' threw", ex);
+            // Tag the failure with the owning plugin so it shows in that plugin's log tail and
+            // counts toward quarantine (same boundary as load/activate crashes).
+            if (pluginId is not null && _pluginManager is not null && _pluginLog is not null)
+                _pluginManager.NoteContributionCrash(pluginId, _pluginLog.For(pluginId), $"command '{what}'", ex);
+            else
+                _pluginLog?.For("host").Error($"plugin command '{what}' threw", ex);
             System.Diagnostics.Debug.WriteLine(ex);
         }
+    }
+
+    // --- automation.batch: queue files → run a plugin handler headlessly over each ---
+
+    private void OnRunBatch(object? sender, RoutedEventArgs e)
+    {
+        var ops = AllBatchOps();
+        if (ops.Count == 0) return;
+        var win = new BatchRunWindow(ops, (op, files) => _ = RunBatchOperation(op, files));
+        win.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        win.ShowDialog(this);
+    }
+
+    /// <summary>Run one batch operation over the queued files: the plugin handler runs on a background
+    /// thread (UI stays live) with a modal progress + cancel; GPU compositing for image saves marshals
+    /// back to the UI thread. The batch document is the host's "active document" for the duration.</summary>
+    private async System.Threading.Tasks.Task RunBatchOperation(
+        Sable.Plugin.Sdk.Automation.BatchOperation op, IReadOnlyList<string> files)
+    {
+        if (files.Count == 0) return;
+        var ownerId = _pluginBatchOpsById.FirstOrDefault(kv => kv.Value.Contains(op)).Key;
+        var cts = new System.Threading.CancellationTokenSource();
+        var busy = BusyWindow.Begin(this, Loc.T("mainWindow.batchRunning", op.Title), cts);
+        var progress = new System.Progress<(double Fraction, string? Status)>(p =>
+        {
+            busy.Progress.Report(p.Fraction);
+            if (!string.IsNullOrEmpty(p.Status)) busy.SetMessage(p.Status!);
+        });
+        var ctx = new Sable.Plugins.Engine.BatchContext(
+            files, cts.Token, LoadDocumentHeadless, SaveDocumentHeadless, SetBatchActive, progress);
+        try
+        {
+            await System.Threading.Tasks.Task.Run(() => RunGuarded(op.Title, () => op.Run(ctx), ownerId));
+        }
+        finally
+        {
+            SetBatchActive(null);
+            busy.Done();
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>Point the host APIs at the batch document (its own undo + a sensible active layer), or
+    /// null to restore the on-screen tab. Called from the batch thread (only that thread reads these).</summary>
+    private void SetBatchActive(Sable.Engine.Document? doc)
+    {
+        _batchDoc = doc;
+        _batchUndo = doc is null ? null : new Sable.Core.Undo.UndoStack();
+        _batchSelected = doc is null ? null : TopPixelLayer(doc);
+    }
+
+    private static Sable.Engine.Layers.Layer? TopPixelLayer(Sable.Engine.Document doc)
+    {
+        for (int i = doc.Layers.Count - 1; i >= 0; i--)
+            if (doc.Layers[i] is Sable.Engine.Layers.PixelLayer) return doc.Layers[i];
+        return doc.Layers.Count > 0 ? doc.Layers[^1] : null;
+    }
+
+    private byte[]? BatchCompositeOnUi(Sable.Engine.Document doc)
+        => Avalonia.Threading.Dispatcher.UIThread.Invoke(() => Canvas.CompositeDocumentToPixels(doc));
+
+    /// <summary>Open a document file headlessly (plugin importer → .sable → .psd → raster image), no tab.</summary>
+    private Sable.Engine.Document? LoadDocumentHeadless(string path)
+    {
+        try
+        {
+            var ext = System.IO.Path.GetExtension(path);
+            if (_importRegistry?.ByExtension(ext) is { } prov)
+            {
+                var img = prov.Decode(System.IO.File.ReadAllBytes(path));
+                var d = new Sable.Engine.Document(img.Width, img.Height);
+                var l = new Sable.Engine.Layers.PixelLayer(img.Width, img.Height, System.IO.Path.GetFileNameWithoutExtension(path));
+                l.SetBufferFromBytes(img.Width, img.Height, img.Rgba);
+                d.Layers.Add(l);
+                return d;
+            }
+            if (ext.Equals(".sable", System.StringComparison.OrdinalIgnoreCase)) return SableFile.Load(path);
+            if (ext.Equals(".psd", System.StringComparison.OrdinalIgnoreCase)) return PsdReader.Load(path, out _, out _);
+            return DocumentIO.OpenImage(path);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Save a batch document headlessly: .sable serialises directly (CPU); image formats
+    /// composite on the GPU (UI thread) then encode. Returns false on any failure.</summary>
+    private bool SaveDocumentHeadless(Sable.Engine.Document doc, string path)
+    {
+        try
+        {
+            var ext = System.IO.Path.GetExtension(path);
+            if (ext.Equals(".sable", System.StringComparison.OrdinalIgnoreCase)) { SableFile.Save(doc, path); return true; }
+            var rgba = BatchCompositeOnUi(doc);
+            if (rgba is null) return false;
+            var fmt = ImageCodec.FormatFromExtension(path);
+            DocumentIO.Export(path, fmt, doc.Width, doc.Height, rgba, doc.Width, doc.Height, 90, doc.Dpi, doc.IccProfile, doc.IccProfileName);
+            return true;
+        }
+        catch { return false; }
     }
 
     // --- IPluginAdmin (drives the Settings ▸ Plugins page) ---
@@ -1485,6 +1631,17 @@ public partial class MainWindow : Window, IPluginAdmin
 
     IReadOnlyList<Sable.Plugins.LoadedPlugin> IPluginAdmin.List()
         => _pluginManager?.Registry.All ?? (IReadOnlyList<Sable.Plugins.LoadedPlugin>)System.Array.Empty<Sable.Plugins.LoadedPlugin>();
+
+    IReadOnlyList<Sable.Plugins.PluginLogEntry> IPluginAdmin.Logs(string id, int max)
+    {
+        if (_pluginLog is null) return System.Array.Empty<Sable.Plugins.PluginLogEntry>();
+        var hits = new List<Sable.Plugins.PluginLogEntry>();
+        var all = _pluginLog.Entries;
+        for (int i = all.Count - 1; i >= 0 && hits.Count < max; i--)   // newest first, capped
+            if (all[i].PluginId == id) hits.Add(all[i]);
+        hits.Reverse();   // chronological (newest last) for display
+        return hits;
+    }
 
     void IPluginAdmin.Enable(string id) => _pluginManager?.Enable(id);
     void IPluginAdmin.Disable(string id) => _pluginManager?.Disable(id);
@@ -3638,12 +3795,13 @@ public partial class MainWindow : Window, IPluginAdmin
             (Loc.T("mainWindow.windowHistory"), () => OnToggleHistory(null, _e)),
         };
         foreach (var t in _toolKinds) { var k = t; actions.Add((Loc.T("tools.cyclePrefix", ToolDisplayName(k)), () => Canvas.ActiveTool = k)); }
-        foreach (var list in _pluginCommandsById.Values)
+        foreach (var (pid, list) in _pluginCommandsById)
             foreach (var c in list)
             {
                 var cmd = c;
+                var owner = pid;
                 string label = string.IsNullOrWhiteSpace(cmd.Category) ? cmd.Title : $"{cmd.Category}: {cmd.Title}";
-                actions.Add((label, () => RunGuarded(cmd.Title, cmd.Run)));
+                actions.Add((label, () => RunGuarded(cmd.Title, cmd.Run, owner)));
             }
         var pal = new CommandPalette(actions);
         pal.Show(this);
@@ -3658,6 +3816,13 @@ public partial class MainWindow : Window, IPluginAdmin
     private Dictionary<string, Action>? _keyCommandRun;
     // current keymap as matchable gestures, rebuilt from settings on init + after a settings change.
     private readonly List<(Avalonia.Input.KeyGesture Gesture, string Id)> _keyGestures = new();
+
+    // Plugin-contributed shortcuts: synthetic key-command id → the owning plugin + command.
+    // Rebuilt by RebuildKeyGestures from the registered plugin commands' DefaultGesture.
+    private readonly Dictionary<string, (string PluginId, Sable.Plugin.Sdk.Commands.PluginCommand Cmd)> _pluginKeyCommands = new(StringComparer.Ordinal);
+
+    /// <summary>Stable keymap id for a plugin command, so a rebind/unbind can persist in settings.</summary>
+    private static string PluginKeyId(string pluginId, string cmdId) => $"plugin:{pluginId}:{cmdId}";
 
     private Dictionary<string, Action> KeyCommandRun => _keyCommandRun ??= new()
     {
@@ -3709,7 +3874,35 @@ public partial class MainWindow : Window, IPluginAdmin
             try { _keyGestures.Add((Avalonia.Input.KeyGesture.Parse(g), c.Id)); }
             catch { /* a malformed override just disables that binding */ }
         }
+        RebuildPluginKeyGestures();   // plugin shortcuts (after the catalog so built-ins win on conflict)
         RefreshMenuGestures();
+    }
+
+    /// <summary>Register each plugin command's keyboard shortcut: its declared <c>DefaultGesture</c>,
+    /// unless the user rebound it (a <see cref="SableSettings.KeyBindings"/> entry for the synthetic
+    /// id wins, including "" = unbound). A gesture that's malformed, modifier-less, or already taken
+    /// by a built-in / another plugin is skipped so tool letters and existing hotkeys stay intact.</summary>
+    private void RebuildPluginKeyGestures()
+    {
+        _pluginKeyCommands.Clear();
+        foreach (var (pid, list) in _pluginCommandsById)
+            foreach (var c in list)
+            {
+                if (string.IsNullOrWhiteSpace(c.DefaultGesture)) continue;
+                var synth = PluginKeyId(pid, c.Id);
+                var g = _settings.KeyBindings.TryGetValue(synth, out var ov) ? (ov ?? "") : c.DefaultGesture!;
+                if (string.IsNullOrWhiteSpace(g)) continue;
+
+                Avalonia.Input.KeyGesture parsed;
+                try { parsed = Avalonia.Input.KeyGesture.Parse(g); }
+                catch { continue; }
+
+                if (parsed.KeyModifiers == Avalonia.Input.KeyModifiers.None) continue;   // never shadow a bare tool letter
+                if (_keyGestures.Any(kg => kg.Gesture.Key == parsed.Key && kg.Gesture.KeyModifiers == parsed.KeyModifiers)) continue;
+
+                _keyGestures.Add((parsed, synth));
+                _pluginKeyCommands[synth] = (pid, c);
+            }
     }
 
     /// <summary>Update menu accelerator labels to the EFFECTIVE keymap (menu items carry the
@@ -3742,6 +3935,7 @@ public partial class MainWindow : Window, IPluginAdmin
     /// <summary>Run a command by id (keymap dispatch). Unknown ids are ignored.</summary>
     private void RunKeyCommand(string id)
     {
+        if (_pluginKeyCommands.TryGetValue(id, out var pc)) { RunGuarded(pc.Cmd.Title, pc.Cmd.Run, pc.PluginId); return; }
         if (KeyCommandRun.TryGetValue(id, out var run)) run();
     }
 

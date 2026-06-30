@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using Sable.Core.Undo;
 using Sable.Engine;
 using Sable.Engine.Layers;
 using Sable.Plugin.Sdk;
+using Sable.Plugin.Sdk.Pixels;
 using Sable.Plugins;
 using Sable.Plugins.Engine;
 
@@ -122,6 +125,41 @@ public sealed class EngineHostApiTests
         Assert.Throws<ArgumentException>(() => new EngineLayerWriteApi(state, handles).SetVisible("nope", false));
     }
 
+    private sealed class SyncProgress : IProgress<(double, string?)>
+    {
+        public readonly List<(double Fraction, string? Status)> Items = new();
+        public void Report((double, string?) value) => Items.Add(value);
+    }
+
+    [Fact]
+    public void BatchContext_routes_open_save_close_and_progress()
+    {
+        var docA = new Document(2, 2);
+        Document? active = null;
+        var saved = new List<(Document Doc, string Path)>();
+        var prog = new SyncProgress();
+
+        var ctx = new BatchContext(
+            new[] { "a.png" }, CancellationToken.None,
+            open: p => p == "a.png" ? docA : null,
+            save: (d, p) => { saved.Add((d, p)); return true; },
+            setActive: d => active = d,
+            progress: prog);
+
+        Assert.Equal(new[] { "a.png" }, ctx.InputFiles);
+        Assert.False(ctx.SaveDocument("x.png"));    // nothing open yet
+        Assert.True(ctx.OpenDocument("a.png"));
+        Assert.Same(docA, active);                  // opening makes it the host's active document
+        Assert.True(ctx.SaveDocument("out.png"));
+        Assert.Equal((docA, "out.png"), saved[0]);
+        ctx.CloseDocument();
+        Assert.Null(active);                        // close clears the active document
+        Assert.False(ctx.OpenDocument("missing"));  // loader returned null → false
+
+        ctx.Report(0.5, "half");
+        Assert.Contains((0.5, "half"), prog.Items);
+    }
+
     [Fact]
     public void BuiltInExporters_register_four_formats()
     {
@@ -160,6 +198,89 @@ public sealed class EngineHostApiTests
         var comp = new EnginePixelApi(withComposite).Composite()!;
         Assert.Equal(8, comp.Width);
         Assert.Null(new EnginePixelApi(state).Composite());   // none injected → null
+    }
+
+    [Fact]
+    public void PixelWriteApi_replaces_active_layer_and_is_undoable()
+    {
+        var (doc, undo, state, _) = World();
+        var l = new PixelLayer(4, 4, "x");
+        doc.Layers.Add(l);
+
+        var rgba = new byte[2 * 2 * 4];
+        for (int i = 0; i < rgba.Length; i++) rgba[i] = 200;
+        var ok = new EnginePixelWriteApi(state).SetActiveLayerPixels(
+            new PixelBuffer { Width = 2, Height = 2, Rgba = rgba });
+
+        Assert.True(ok);
+        Assert.Equal(2, l.Width);
+        Assert.Equal(2, l.Height);
+        Assert.Equal(200 / 255f, l.Pixels[0], 4);
+        Assert.Equal(1, undo.Cursor);
+
+        undo.Undo();
+        Assert.Equal(4, l.Width);              // restored to original size
+        Assert.Equal(0f, l.Pixels[0], 4);
+    }
+
+    [Fact]
+    public void PixelWriteApi_writes_clipped_region()
+    {
+        var (doc, _, state, _) = World();
+        var l = new PixelLayer(4, 4, "x");
+        doc.Layers.Add(l);
+
+        var red = new byte[2 * 2 * 4];
+        for (int p = 0; p < 4; p++) { red[p * 4] = 255; red[p * 4 + 3] = 255; }
+        // place at (3,3) so only the top-left source pixel lands inside the 4x4 layer
+        var ok = new EnginePixelWriteApi(state).WriteRegion(3, 3, new PixelBuffer { Width = 2, Height = 2, Rgba = red });
+
+        Assert.True(ok);
+        int idx = (3 * 4 + 3) * 4;             // layer pixel (3,3)
+        Assert.Equal(1f, l.Pixels[idx], 4);    // red
+        Assert.Equal(1f, l.Pixels[idx + 3], 4);// alpha
+        Assert.Equal(0f, l.Pixels[0], 4);      // untouched elsewhere
+    }
+
+    [Fact]
+    public void PixelWriteApi_no_active_pixel_layer_returns_false()
+    {
+        var (doc, _, state, _) = World();
+        doc.Layers.Add(new AdjustmentLayer());   // selected layer is not a pixel layer
+        var ok = new EnginePixelWriteApi(state).SetActiveLayerPixels(
+            new PixelBuffer { Width = 1, Height = 1, Rgba = new byte[4] });
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void PixelWriteApi_bad_buffer_length_throws()
+    {
+        var (doc, _, state, _) = World();
+        doc.Layers.Add(new PixelLayer(2, 2, "x"));
+        Assert.Throws<ArgumentException>(() => new EnginePixelWriteApi(state).SetActiveLayerPixels(
+            new PixelBuffer { Width = 2, Height = 2, Rgba = new byte[3] }));
+    }
+
+    [Fact]
+    public void PixelWriteApi_joins_open_transaction()
+    {
+        var (doc, undo, state, _) = World();
+        var l = new PixelLayer(2, 2, "x");
+        doc.Layers.Add(l);
+
+        var txn = new PluginTransaction();
+        var w = new EnginePixelWriteApi(state, txn);
+        var tx = new EngineTransactionApi(state, txn);
+
+        tx.Run("Plugin paint", () =>
+        {
+            w.WriteRegion(0, 0, new PixelBuffer { Width = 1, Height = 1, Rgba = new byte[] { 255, 0, 0, 255 } });
+            w.WriteRegion(1, 1, new PixelBuffer { Width = 1, Height = 1, Rgba = new byte[] { 0, 255, 0, 255 } });
+        });
+
+        Assert.Equal(1, undo.Cursor);          // two writes → ONE undo entry
+        Assert.Equal(1f, l.Pixels[0], 4);      // red at (0,0)
+        Assert.Equal(1f, l.Pixels[(1 * 2 + 1) * 4 + 1], 4); // green at (1,1)
     }
 
     [Fact]

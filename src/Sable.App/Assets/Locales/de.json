@@ -213,6 +213,16 @@
     "done": "{0} Datei(en) nach {1} exportiert.",
     "doneWithErrors": "{0} Datei(en) exportiert, {1} fehlgeschlagen."
   },
+  "batchWindow": {
+    "title": "Stapelverarbeitung",
+    "operation": "Vorgang",
+    "files": "Dateien",
+    "addFiles": "Dateien hinzufügen…",
+    "clear": "Leeren",
+    "fileCount": "{0} Datei(en)",
+    "run": "Ausführen",
+    "close": "Schließen"
+  },
   "historyWindow": {
     "history": "Verlauf",
     "addSnapshot": "Schnappschuss hinzufügen",
@@ -325,6 +335,8 @@
     "contextTaskBar": "Kontext-Aktionsleiste",
     "plugins": "_Plugins",
     "noPluginsLoaded": "Keine Plugins geladen",
+    "batchProcess": "Stapelverarbeitung...",
+    "batchRunning": "Stapel läuft: {0}",
     "help": "_Hilfe",
     "keyboardShortcuts": "Tastaturkürzel...",
     "checkForUpdates": "Nach Updates suchen...",
@@ -817,6 +829,9 @@
     "pluginAllow": "Erlauben",
     "pluginDeny": "Nicht erlauben",
     "pluginCaps": "Fähigkeiten: {0}",
+    "pluginCrashes": "Abstürze in dieser Sitzung: {0}",
+    "pluginLogTitle": "Letztes Protokoll",
+    "pluginLogEmpty": "Noch keine Protokolleinträge.",
     "pluginInstallFailed": "Installation fehlgeschlagen: {0}",
     "pluginRestartToRemove": "Entfernt; starte Sable neu, um die restlichen Dateien zu löschen.",
     "keyboard": "Tastatur",

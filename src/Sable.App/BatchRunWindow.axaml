@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Sable.App.Localization"
+        x:Class="Sable.App.BatchRunWindow"
+        Width="460" Height="420"
+        Background="{DynamicResource ChromePanel}"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Loc batchWindow.title}">
+    <Border Padding="16">
+        <DockPanel LastChildFill="True">
+            <TextBlock DockPanel.Dock="Top" Classes="panelHeader" Padding="0"
+                       Text="{loc:Loc batchWindow.title}" />
+
+            <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,12,0,8">
+                <TextBlock Text="{loc:Loc batchWindow.operation}" FontSize="12"
+                           Foreground="{DynamicResource ChromeTextFaint}" />
+                <ComboBox x:Name="OpCombo" HorizontalAlignment="Stretch" />
+            </StackPanel>
+
+            <DockPanel DockPanel.Dock="Top" Margin="0,4,0,4">
+                <TextBlock DockPanel.Dock="Left" Text="{loc:Loc batchWindow.files}" FontSize="12"
+                           Foreground="{DynamicResource ChromeTextFaint}" VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="AddBtn" Content="{loc:Loc batchWindow.addFiles}" Classes="opt" Padding="10,0" Click="OnAddFiles" />
+                    <Button x:Name="ClearBtn" Content="{loc:Loc batchWindow.clear}" Classes="opt" Padding="10,0" Click="OnClear" />
+                </StackPanel>
+                <TextBlock />
+            </DockPanel>
+
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                <TextBlock x:Name="CountText" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource ChromeTextFaint}" Margin="0,0,8,0" />
+                <Button x:Name="CloseBtn" Content="{loc:Loc batchWindow.close}" Classes="opt" Padding="14,0" Click="OnClose" />
+                <Button x:Name="RunBtn" Content="{loc:Loc batchWindow.run}" Classes="opt" Padding="14,0" Click="OnRun" />
+            </StackPanel>
+
+            <Border BorderThickness="1" CornerRadius="3" Margin="0,4,0,0"
+                    BorderBrush="{DynamicResource ChromeBorder}" Background="{DynamicResource ChromeCanvas}">
+                <ListBox x:Name="FilesList" Background="Transparent" />
+            </Border>
+        </DockPanel>
+    </Border>
+</Window>

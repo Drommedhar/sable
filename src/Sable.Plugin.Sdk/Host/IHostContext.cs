@@ -42,5 +42,7 @@ public interface IHostContext
     IImportApi? Import { get; }         // import.provider
     ISelectionApi? Selection { get; }   // selection.read
     IPixelApi? Pixels { get; }          // pixel.read
+    IPixelWriteApi? PixelWrites { get; }// pixel.write.layer_output
     ITransactionApi? Transactions { get; } // undo.transaction
+    IBatchRegistry? Automation { get; } // automation.batch
 }

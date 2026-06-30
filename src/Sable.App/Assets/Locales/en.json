@@ -213,6 +213,16 @@
     "done": "Exported {0} file(s) to {1}.",
     "doneWithErrors": "Exported {0} file(s), {1} failed."
   },
+  "batchWindow": {
+    "title": "Batch Process",
+    "operation": "Operation",
+    "files": "Files",
+    "addFiles": "Add Files…",
+    "clear": "Clear",
+    "fileCount": "{0} file(s)",
+    "run": "Run",
+    "close": "Close"
+  },
   "historyWindow": {
     "history": "History",
     "addSnapshot": "Add Snapshot",
@@ -325,6 +335,8 @@
     "contextTaskBar": "Contextual Task Bar",
     "plugins": "_Plugins",
     "noPluginsLoaded": "No plugins loaded",
+    "batchProcess": "Batch Process...",
+    "batchRunning": "Running batch: {0}",
     "help": "_Help",
     "keyboardShortcuts": "Keyboard Shortcuts...",
     "checkForUpdates": "Check for Updates...",
@@ -817,6 +829,9 @@
     "pluginAllow": "Allow",
     "pluginDeny": "Don't allow",
     "pluginCaps": "Capabilities: {0}",
+    "pluginCrashes": "Crashes this session: {0}",
+    "pluginLogTitle": "Recent log",
+    "pluginLogEmpty": "No log entries yet.",
     "pluginInstallFailed": "Install failed: {0}",
     "pluginRestartToRemove": "Removed; restart Sable to delete the remaining files.",
     "keyboard": "Keyboard",

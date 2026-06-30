@@ -139,6 +139,25 @@ public sealed class PluginManager
         return !System.IO.Directory.Exists(dir);
     }
 
+    /// <summary>Record a crash that happened while running a plugin's runtime contribution (a
+    /// command/menu handler) — outside the load/activate lifecycle that <see cref="PluginGuard"/>
+    /// already guards. Logs via the given (plugin-scoped) logger, counts toward quarantine, and
+    /// deactivates the plugin once the crash threshold is hit. No-op for an unknown id.</summary>
+    public void NoteContributionCrash(string id, IPluginLogger logger, string what, Exception ex)
+    {
+        var p = Registry.Get(id);
+        if (p is null) return;
+        p.CrashCount++;
+        p.AddError($"{what}: {ex.GetType().Name}: {ex.Message}");
+        logger.Error($"plugin '{id}' threw during {what}", ex);
+        if (p.CrashCount >= PluginRegistry.CrashThreshold && p.State == PluginState.Active)
+        {
+            _loader.Deactivate(p);   // runs Shutdown while still Active → leaves it Loaded
+            p.State = PluginState.Quarantined;
+            logger.Warn($"plugin '{id}' quarantined after {p.CrashCount} crashes");
+        }
+    }
+
     public void ShutdownAll()
     {
         foreach (var p in Registry.All)

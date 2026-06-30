@@ -301,6 +301,18 @@ public sealed unsafe partial class GpuSurfaceControl : NativeControlHost
         return _compositor.CompositeToFloats(_doc);
     }
 
+    /// <summary>Flatten an external, off-canvas document (any size) to RGBA8 on the GPU — for headless
+    /// batch processing. Must be called on the UI thread (single wgpu device). Resets the on-screen
+    /// composite view so the next frame recomposites the real canvas document.</summary>
+    public byte[]? CompositeDocumentToPixels(Sable.Engine.Document doc)
+    {
+        if (_compositor is null || doc.Width <= 0 || doc.Height <= 0) return null;
+        _compositor.Preview = null;
+        var bytes = _compositor.CompositeToBytes(doc);
+        _compositeView = null;   // the temp doc was presented to the on-screen texture — force a recomposite
+        return bytes;
+    }
+
     /// <summary>Composite an arbitrary set of layers (doc-sized) to RGBA8 — for merge/flatten/rasterise.</summary>
     public byte[]? RenderLayersToPixels(System.Collections.Generic.List<Sable.Engine.Layers.Layer> layers)
     {

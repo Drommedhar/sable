@@ -46,9 +46,9 @@ public static class Capability
     /// <summary>Capabilities backed by a real host API surfaced on <see cref="Host.IHostContext"/>.</summary>
     public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(StringComparer.Ordinal)
     {
-        DocumentRead, LayerRead, LayerWriteBasic, CommandRegister,
+        DocumentRead, LayerRead, LayerWriteBasic, CommandRegister, AutomationBatch,
         ExportProvider, ImportProvider, UiMenuCommand,
-        SelectionRead, PixelRead, UndoTransaction,
+        SelectionRead, PixelRead, PixelWriteLayerOutput, UndoTransaction,
     };
 
     public static bool IsKnown(string id) => Known.Contains(id);

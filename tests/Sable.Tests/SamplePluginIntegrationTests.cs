@@ -30,6 +30,11 @@ public sealed class SamplePluginIntegrationTests
         public readonly List<MenuContribution> Items = new();
         public void AddCommand(MenuContribution m) => Items.Add(m);
     }
+    private sealed class CollectingBatch : Sable.Plugin.Sdk.Automation.IBatchRegistry
+    {
+        public readonly List<Sable.Plugin.Sdk.Automation.BatchOperation> Ops = new();
+        public void Register(Sable.Plugin.Sdk.Automation.BatchOperation o) => Ops.Add(o);
+    }
 
     private static LoadedPlugin ValidatedManifest(string capsJson)
     {
@@ -78,9 +83,9 @@ public sealed class SamplePluginIntegrationTests
         var plugin = ValidatedManifest("""["document.read","command.register","ui.menu_command","export.provider"]""");
         Assert.True(mgr.AddBuiltIn(plugin, new SamplePlugin.SamplePlugin()));
 
-        Assert.Equal(2, cmds.Commands.Count);   // report + halve
+        Assert.Equal(3, cmds.Commands.Count);   // report + halve + invert
         Assert.Equal("report", cmds.Commands[0].Id);
-        Assert.Equal(2, menus.Items.Count);
+        Assert.Equal(3, menus.Items.Count);
         Assert.NotNull(export.ById("ppm"));   // exporter contributed
     }
 
@@ -98,6 +103,75 @@ public sealed class SamplePluginIntegrationTests
     }
 
     [Fact]
+    public void Sample_plugin_registers_batch_operation_when_granted()
+    {
+        var doc = new Document(16, 16);
+        var batch = new CollectingBatch();
+        var export = new ExportRegistry();
+        var log = new PluginLogHub();
+        var state = new EngineHostState { ActiveDocument = () => doc, ActiveUndo = () => new UndoStack() };
+        var services = SableHostServices.Build(state, new LayerHandles(), export,
+            new CollectingCommands(), new CollectingMenus(), import: null, automation: batch);
+        var mgr = new PluginManager(Path.GetTempPath(), log.For("host"),
+            p => HostContextFactory.Create(p, services, log.For(p.Id), new PluginSettingsStore(Path.GetTempPath(), p.Id)));
+
+        mgr.AddBuiltIn(ValidatedManifest("""["automation.batch"]"""), new SamplePlugin.SamplePlugin());
+
+        Assert.Single(batch.Ops);
+        Assert.Equal("invert-batch", batch.Ops[0].Id);
+    }
+
+    [Fact]
+    public void Sample_batch_inverts_each_file_through_the_host_apis()
+    {
+        // Two in-memory "files" → 1x1 documents with a known grey pixel.
+        Document Make(string name, byte v)
+        {
+            var d = new Document(1, 1);
+            var l = new PixelLayer(1, 1, name);
+            l.SetBufferFromBytes(1, 1, new byte[] { v, v, v, 255 });
+            d.Layers.Add(l);
+            return d;
+        }
+        var docs = new Dictionary<string, Document> { ["a"] = Make("a", 10), ["b"] = Make("b", 20) };
+
+        // The batch context swaps the host's active document; the host pixel APIs read it.
+        Document? active = null;
+        var undo = new UndoStack();
+        var state = new EngineHostState
+        {
+            ActiveDocument = () => active,
+            ActiveUndo = () => active is null ? null : undo,
+            SelectedLayer = () => active?.Layers[0],
+        };
+        var batch = new CollectingBatch();
+        var services = SableHostServices.Build(state, new LayerHandles(), new ExportRegistry(),
+            new CollectingCommands(), new CollectingMenus(), import: null, automation: batch);
+        var log = new PluginLogHub();
+        var mgr = new PluginManager(Path.GetTempPath(), log.For("host"),
+            p => HostContextFactory.Create(p, services, log.For(p.Id), new PluginSettingsStore(Path.GetTempPath(), p.Id)));
+
+        mgr.AddBuiltIn(
+            ValidatedManifest("""["pixel.read","pixel.write.layer_output","automation.batch"]"""),
+            new SamplePlugin.SamplePlugin());
+
+        var saved = new Dictionary<string, byte[]>();
+        var ctx = new BatchContext(
+            new[] { "a", "b" }, System.Threading.CancellationToken.None,
+            open: p => docs.TryGetValue(p, out var d) ? d : null,
+            save: (d, path) => { saved[path] = ((PixelLayer)d.Layers[0]).ToBytes(); return true; },
+            setActive: d => active = d,
+            progress: null);
+
+        batch.Ops[0].Run(ctx);   // the sample's RunInvertBatch over both files
+
+        // RGB inverted (255-v), alpha kept; saved next to each input as "<name>_inverted.png".
+        Assert.Equal(new byte[] { 245, 245, 245, 255 }, saved["a_inverted.png"]);
+        Assert.Equal(new byte[] { 235, 235, 235, 255 }, saved["b_inverted.png"]);
+        Assert.Null(active);     // each file was closed after saving
+    }
+
+    [Fact]
     public void Without_export_capability_the_exporter_is_not_registered()
     {
         var doc = new Document(16, 16);
@@ -106,7 +180,7 @@ public sealed class SamplePluginIntegrationTests
         // capability set excludes export.provider → host.Export is null → plugin's ?. skips it
         mgr.AddBuiltIn(ValidatedManifest("""["command.register"]"""), new SamplePlugin.SamplePlugin());
 
-        Assert.Equal(2, cmds.Commands.Count);   // commands still registered
+        Assert.Equal(3, cmds.Commands.Count);   // commands still registered
         Assert.Null(export.ById("ppm"));        // exporter gated off
     }
 
@@ -144,7 +218,7 @@ public sealed class SamplePluginIntegrationTests
         int activated = mgr.LoadAll();
         Assert.Equal(1, activated);
         Assert.NotNull(export.ById("ppm"));
-        Assert.Equal(2, cmds.Commands.Count);
+        Assert.Equal(3, cmds.Commands.Count);
     }
 
     [Fact]
@@ -178,7 +252,7 @@ public sealed class SamplePluginIntegrationTests
         var install = mgr.Install(src);
         Assert.True(install.Ok, install.Error);
         Assert.Single(mgr.Registry.All);             // installed + loaded
-        Assert.Equal(2, cmds.Commands.Count);        // its commands registered
+        Assert.Equal(3, cmds.Commands.Count);        // its commands registered
 
         // The host must release the plugin's contributions (their delegates pin the ALC) before
         // unload, else the DLL stays locked. MainWindow does this via RemovePluginContributions.

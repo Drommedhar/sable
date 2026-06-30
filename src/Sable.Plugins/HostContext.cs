@@ -1,3 +1,4 @@
+using Sable.Plugin.Sdk.Automation;
 using Sable.Plugin.Sdk.Capabilities;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Document;
@@ -24,7 +25,8 @@ public sealed class HostContext : IHostContext
         PluginManifest manifest, IPluginLogger logger, IPluginSettings settings,
         IDocumentApi? document, ILayerApi? layers, ILayerWriteApi? layerWrites,
         ICommandApi? commands, IMenuApi? menus, IExportApi? export, IImportApi? import,
-        ISelectionApi? selection, IPixelApi? pixels, ITransactionApi? transactions)
+        ISelectionApi? selection, IPixelApi? pixels, IPixelWriteApi? pixelWrites,
+        ITransactionApi? transactions, IBatchRegistry? automation)
     {
         Manifest = manifest;
         Logger = logger;
@@ -38,7 +40,9 @@ public sealed class HostContext : IHostContext
         Import = import;
         Selection = selection;
         Pixels = pixels;
+        PixelWrites = pixelWrites;
         Transactions = transactions;
+        Automation = automation;
     }
 
     public PluginManifest Manifest { get; }
@@ -56,7 +60,9 @@ public sealed class HostContext : IHostContext
     public IImportApi? Import { get; }
     public ISelectionApi? Selection { get; }
     public IPixelApi? Pixels { get; }
+    public IPixelWriteApi? PixelWrites { get; }
     public ITransactionApi? Transactions { get; }
+    public IBatchRegistry? Automation { get; }
 }
 
 /// <summary>
@@ -76,7 +82,9 @@ public sealed class HostServices
     public IImportApi? Import { get; init; }
     public ISelectionApi? Selection { get; init; }
     public IPixelApi? Pixels { get; init; }
+    public IPixelWriteApi? PixelWrites { get; init; }
     public ITransactionApi? Transactions { get; init; }
+    public IBatchRegistry? Automation { get; init; }
 }
 
 /// <summary>
@@ -104,6 +112,8 @@ public static class HostContextFactory
             G(Capability.ImportProvider) ? services.Import : null,
             G(Capability.SelectionRead) ? services.Selection : null,
             G(Capability.PixelRead) ? services.Pixels : null,
-            G(Capability.UndoTransaction) ? services.Transactions : null);
+            G(Capability.PixelWriteLayerOutput) ? services.PixelWrites : null,
+            G(Capability.UndoTransaction) ? services.Transactions : null,
+            G(Capability.AutomationBatch) ? services.Automation : null);
     }
 }

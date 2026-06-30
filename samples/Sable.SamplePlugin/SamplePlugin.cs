@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Collections.Generic;
 using Sable.Plugin.Sdk;
+using Sable.Plugin.Sdk.Automation;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Export;
 using Sable.Plugin.Sdk.Host;
@@ -50,8 +51,63 @@ public sealed class SamplePlugin : IPlugin
             Id = "halve", Title = "Halve All Layer Opacities", MenuPath = "Sample", Run = HalveOpacities,
         });
 
+        // Demonstrates pixel.read + pixel.write.layer_output: read the active layer's pixels, invert
+        // RGB, write them back as one undoable step.
+        host.Commands?.Register(new PluginCommand
+        {
+            Id = "invert", Title = "Invert Active Layer", Category = "Sample",
+            DefaultGesture = "Ctrl+Shift+I",   // host binds it unless the user rebound/unbound it or it's taken
+            Run = InvertActiveLayer,
+        });
+        host.Menus?.AddCommand(new MenuContribution
+        {
+            Id = "invert", Title = "Invert Active Layer", MenuPath = "Sample", Run = InvertActiveLayer,
+        });
+
+        // Demonstrates automation.batch: invert every queued file and save a PNG next to it.
+        host.Automation?.Register(new BatchOperation
+        {
+            Id = "invert-batch", Title = "Invert → PNG (batch)", Category = "Sample", Run = RunInvertBatch,
+        });
+
         host.Export?.Register(new PpmExportProvider());
         host.Import?.Register(new PpmImportProvider());
+    }
+
+    private void InvertActiveLayer()
+    {
+        if (_host?.Pixels is not { } pixels || _host.PixelWrites is not { } writes) return;
+        if (pixels.ActiveLayer() is not { } buf) { _host.Logger.Info("No active pixel layer to invert."); return; }
+
+        var rgba = buf.Rgba;
+        for (int i = 0; i < rgba.Length; i += 4)   // invert RGB, keep alpha
+        {
+            rgba[i] = (byte)(255 - rgba[i]);
+            rgba[i + 1] = (byte)(255 - rgba[i + 1]);
+            rgba[i + 2] = (byte)(255 - rgba[i + 2]);
+        }
+        writes.SetActiveLayerPixels(buf);   // one undoable step
+    }
+
+    private void RunInvertBatch(IBatchApi batch)
+    {
+        int n = batch.InputFiles.Count;
+        for (int i = 0; i < n; i++)
+        {
+            if (batch.Cancellation.IsCancellationRequested) return;
+            var path = batch.InputFiles[i];
+            batch.Report((double)i / n, Path.GetFileName(path));
+            if (!batch.OpenDocument(path)) continue;
+
+            InvertActiveLayer();   // pixel.read + pixel.write target the now-active batch document
+
+            var outPath = Path.Combine(
+                Path.GetDirectoryName(path) ?? ".",
+                Path.GetFileNameWithoutExtension(path) + "_inverted.png");
+            batch.SaveDocument(outPath);
+            batch.CloseDocument();
+        }
+        batch.Report(1.0, null);
     }
 
     public void Shutdown() => _host?.Logger.Info("Sample plugin shutting down.");

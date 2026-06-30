@@ -17,3 +17,6 @@ Thumbs.db
 .DS_Store
 plans
 CHANGELOG.md
+
+# Plugin sample build artifact (convenience installable; rebuilt on demand)
+samples/Sable.SamplePlugin/SamplePlugin.zip

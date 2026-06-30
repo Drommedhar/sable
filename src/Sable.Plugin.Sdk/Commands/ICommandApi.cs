@@ -15,6 +15,11 @@ public sealed record PluginCommand
     /// <summary>Palette grouping label, e.g. "Export" or the plugin name. Optional.</summary>
     public string? Category { get; init; }
 
+    /// <summary>Optional default keyboard shortcut in Avalonia <c>KeyGesture.Parse</c> grammar
+    /// (e.g. <c>"Ctrl+Shift+P"</c>, <c>"Ctrl+OemPlus"</c>). The host binds it unless the user has
+    /// rebound (or unbound) this command, or the gesture is already taken. Null = no shortcut.</summary>
+    public string? DefaultGesture { get; init; }
+
     public required Action Run { get; init; }
 }
 

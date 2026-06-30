@@ -168,11 +168,13 @@ guard every optional API with `?.`.
 | `layer.read` | Read the layer tree (flattened, with ids) | `host.Layers` → `ILayerApi` |
 | `layer.write.basic` | Name/opacity/fill/blend/visibility + add/remove/move layers, each undoable | `host.LayerWrites` → `ILayerWriteApi` |
 | `command.register` | Add commands to the Ctrl+K command palette | `host.Commands` → `ICommandApi` |
+| `automation.batch` | Contribute a batch operation (queue files → run headlessly) | `host.Automation` → `IBatchRegistry` |
 | `ui.menu_command` | Add items under the **Plugins** menu | `host.Menus` → `IMenuApi` |
 | `export.provider` | Contribute a file-export format | `host.Export` → `IExportApi` |
 | `import.provider` | Contribute a file-open format | `host.Import` → `IImportApi` |
 | `selection.read` | Read the active selection (bounds + mask) | `host.Selection` → `ISelectionApi` |
 | `pixel.read` | Read active-layer + composite pixels (RGBA8) | `host.Pixels` → `IPixelApi` |
+| `pixel.write.layer_output` | Write the active pixel layer (whole buffer or a region), undoable | `host.PixelWrites` → `IPixelWriteApi` |
 | `undo.transaction` | Group several edits into one undo step | `host.Transactions` → `ITransactionApi` |
 
 ### Declared but not yet surfaced on `IHostContext`
@@ -180,8 +182,7 @@ guard every optional API with `?.`.
 These ids are **known to the validator** (so manifests using them load) but the current app host
 does not yet expose an API for them — declaring them grants nothing usable yet:
 
-`automation.batch` (an `IBatchApi` contract exists in the SDK but isn't wired into the host),
-`pixel.write.layer_output`, `ui.panel`, `document.events`, `filter.node`, `generator.node`,
+`ui.panel`, `document.events`, `filter.node`, `generator.node`,
 `gpu.compute`, `external_tool.bridge`.
 
 Declare only what you use — it keeps the trust surface honest and future-proof.
@@ -293,11 +294,15 @@ host.Commands?.Register(new PluginCommand
     Id = "do-thing",                 // unique within your plugin
     Title = "Do The Thing",
     Category = "My Plugin",          // optional palette grouping
+    DefaultGesture = "Ctrl+Shift+T", // optional shortcut (KeyGesture.Parse grammar); omit for none
     Run = () => { /* on the UI thread */ },
 });
 ```
 
-Registered commands appear in the **Ctrl+K command palette**.
+Registered commands appear in the **Ctrl+K command palette**. A `DefaultGesture` is bound as a
+keyboard shortcut **unless** the user has rebound or unbound it, it has no modifier, or the gesture
+is already taken by a built-in or another plugin (built-ins always win). The binding persists by a
+synthetic id (`plugin:<plugin-id>:<command-id>`), so a user override survives reloads.
 
 ### 6.7 Menus — `host.Menus` (`ui.menu_command`)
 
@@ -379,6 +384,24 @@ var comp  = host.Pixels?.Composite();        // flattened doc composite, or null
 // buffer.Width / buffer.Height / buffer.Rgba (RGBA8, straight alpha). Copies — safe to read.
 ```
 
+### 6.10b Pixel write — `host.PixelWrites` (`pixel.write.layer_output`)
+
+Write pixels back to the **active pixel layer**. Each call is one undoable step (or part of an open
+transaction); both return `false` when the active layer isn't a pixel layer.
+
+```csharp
+var buf = host.Pixels?.ActiveLayer();           // read (needs pixel.read)
+if (buf is not null)
+{
+    for (int i = 0; i < buf.Rgba.Length; i += 4)   // invert RGB
+    { buf.Rgba[i] = (byte)(255 - buf.Rgba[i]); /* … */ }
+    host.PixelWrites?.SetActiveLayerPixels(buf);   // replace the whole layer buffer
+}
+
+// or overwrite just a region at layer-local (x,y):
+host.PixelWrites?.WriteRegion(8, 8, new PixelBuffer { Width = 4, Height = 4, Rgba = tile });
+```
+
 ### 6.11 Transactions — `host.Transactions` (`undo.transaction`)
 
 Group several layer-write calls so the user undoes them as **one** step:
@@ -392,6 +415,36 @@ host.Transactions?.Run("Recolour layers", () =>
 ```
 
 Without the capability, fall back to making the writes directly (each becomes its own undo step).
+
+### 6.12 Batch operations — `host.Automation` (`automation.batch`)
+
+Contribute an operation the user runs over many files at once. Register a `BatchOperation`; the host
+shows it under **Plugins ▸ Batch Process…** (queue files → Run). Your handler runs **off the UI
+thread** with an `IBatchApi` scoped to the queued files — open, edit (via the other host APIs, which
+target the batch document for the duration), save, report progress, and honour cancellation.
+
+```csharp
+host.Automation?.Register(new BatchOperation
+{
+    Id = "invert-batch", Title = "Invert → PNG (batch)", Category = "My Plugin",
+    Run = batch =>
+    {
+        for (int i = 0; i < batch.InputFiles.Count; i++)
+        {
+            if (batch.Cancellation.IsCancellationRequested) return;
+            var path = batch.InputFiles[i];
+            batch.Report((double)i / batch.InputFiles.Count, System.IO.Path.GetFileName(path));
+            if (!batch.OpenDocument(path)) continue;     // host loads it as the active document
+            /* edit via host.Pixels / host.PixelWrites / host.LayerWrites … */
+            batch.SaveDocument(path + ".png");           // .sable saves direct; image formats composite on the GPU
+            batch.CloseDocument();
+        }
+        batch.Report(1.0);
+    },
+});
+```
+
+`SaveDocument` picks the encoder from the path extension (`.sable`, `.png`, `.jpg`, `.tif`, …).
 
 ---
 

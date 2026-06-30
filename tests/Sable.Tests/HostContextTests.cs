@@ -23,6 +23,8 @@ public sealed class HostContextTests
         public LayerInfo? ById(string id) => null;
     }
     private sealed class FakeExport : IExportApi { public void Register(IExportProvider p) { } }
+    private sealed class FakeBatch : Sable.Plugin.Sdk.Automation.IBatchRegistry
+    { public void Register(Sable.Plugin.Sdk.Automation.BatchOperation o) { } }
 
     private static HostServices AllServices() => new()
     {
@@ -32,6 +34,7 @@ public sealed class HostContextTests
         Commands = null,
         Menus = null,
         Export = new FakeExport(),
+        Automation = new FakeBatch(),
     };
 
     private static LoadedPlugin Validated(string capabilitiesJson)
@@ -70,6 +73,17 @@ public sealed class HostContextTests
         Assert.Null(ctx.Menus);
         Assert.True(ctx.Has("document.read"));
         Assert.False(ctx.Has("layer.read"));
+        Assert.Null(ctx.Automation);       // automation.batch not granted → gated off
+    }
+
+    [Fact]
+    public void Factory_exposes_automation_when_granted()
+    {
+        var p = Validated("""["automation.batch"]""");
+        var ctx = HostContextFactory.Create(p, AllServices(), new PluginLogHub().For(p.Id),
+            new PluginSettingsStore(Path.GetTempPath(), p.Id));
+        Assert.NotNull(ctx.Automation);
+        Assert.Null(ctx.Document);   // supplied but not granted
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Sable.Plugin.Sdk.Automation;
 using Sable.Plugin.Sdk.Commands;
 using Sable.Plugin.Sdk.Export;
 using Sable.Plugin.Sdk.Import;
@@ -63,6 +64,15 @@ internal sealed class AppImportApi : IImportApi
     }
 }
 
+/// <summary>UI-side <see cref="IBatchRegistry"/>: forwards a plugin's batch-operation registration to
+/// the host (MainWindow buckets it per plugin for the Batch UI + clean uninstall).</summary>
+internal sealed class AppBatchApi : IBatchRegistry
+{
+    private readonly Action<BatchOperation> _add;
+    public AppBatchApi(Action<BatchOperation> add) => _add = add;
+    public void Register(BatchOperation operation) => _add(operation);
+}
+
 /// <summary>The plugin-management surface the Settings ▸ Plugins page drives. Implemented by
 /// MainWindow (it owns the live <see cref="PluginManager"/> + host services + UI contributions).</summary>
 internal interface IPluginAdmin
@@ -74,6 +84,10 @@ internal interface IPluginAdmin
 
     /// <summary>Installed plugins (empty when disabled / none loaded).</summary>
     IReadOnlyList<LoadedPlugin> List();
+
+    /// <summary>The most recent log entries this plugin emitted (newest last), capped to
+    /// <paramref name="max"/>. Empty when the host isn't running / no logs yet.</summary>
+    IReadOnlyList<PluginLogEntry> Logs(string id, int max);
 
     void Enable(string id);
     void Disable(string id);
