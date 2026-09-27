@@ -9,6 +9,11 @@
 > Sable is provided as is and is under active development. There is no guarantee  
 > of ongoing maintenance. You are free to open pull requests or fork it.
 
+> ###############
+> **IMPORTANT!**
+> Until further notice, development of Sable is paused. Novalist takes all my available time right now and I want to focus on that!
+> ###############
+
 ---
 
 ## What is Sable?
